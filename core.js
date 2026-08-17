@@ -313,6 +313,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         } catch (e) {}
         throw new Error(msg);
       }
+      const listaConError = detectProviderListError(m3uContent);
+      if (listaConError) {
+        throw new Error("El proveedor responde: " + listaConError);
+      }
 
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
       localStorage.setItem("xtream_user", JSON.stringify(currentUser));
@@ -807,6 +811,22 @@ function formatTime(date) {
 }
 
 /********** CARGAR Y PARSEAR M3U **********/
+/**
+ * Varios paneles no contestan con un error HTTP cuando la cuenta no vale:
+ * devuelven una lista perfectamente formada con un único canal falso cuyo
+ * nombre es el mensaje de error y cuya URL es inservible. Sin detectarlo, el
+ * player pinta ese canal como si fuera real y desde fuera parece que la lista
+ * no ha cargado, sin explicar el motivo.
+ */
+function detectProviderListError(content) {
+  const m = content.match(/#EXTINF[^,\n]*,\s*(?:Error\s*:\s*)?([^\n\r]*(?:invalid|inactiv|expir|caducad|bloquea|suspend|no\s*activ)[^\n\r]*)/i);
+  if (m) return m[1].trim();
+  if (/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i.test(content)) {
+    return content.match(/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i)[1].trim();
+  }
+  return "";
+}
+
 async function loadM3UFromXtream() {
   const response = await fetchXtream("get.php", {
     username: currentUser.username,
@@ -814,10 +834,17 @@ async function loadM3UFromXtream() {
     type: "m3u_plus",
     output: "ts",
   });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("El proveedor rechaza la cuenta: usuario, contraseña o suscripción no válidos");
+  }
   const m3uContent = await response.text();
   const trimmed = (m3uContent || "").trim();
   if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
     throw new Error("No se pudo descargar la lista M3U");
+  }
+  const providerError = detectProviderListError(trimmed);
+  if (providerError) {
+    throw new Error("El proveedor responde: " + providerError);
   }
   parseM3U(m3uContent);
   if (!channelsData.length) {
@@ -904,9 +931,15 @@ let channelStartedAt = 0;
 // Las URL de Xtream llevan el usuario y la contraseña dentro. El informe de
 // debug está pensado para copiarse y mandarse, así que se ocultan.
 function maskCredentials(value) {
-  return String(value || "")
-    .replace(/([?&](?:username|password|user|pass)=)[^&]*/gi, "$1***")
-    .replace(/\/(live|movie|series)\/[^/]+\/[^/]+\//gi, "/$1/***/***/");
+  return (
+    String(value || "")
+      .replace(/([?&](?:username|password|user|pass)=)[^&]*/gi, "$1***")
+      .replace(/\/(live|movie|series|play|stream|timeshift)\/[^/]+\/[^/]+\//gi, "/$1/***/***/")
+      // Red de seguridad para paneles con rutas propias: el patrón
+      // .../usuario/clave/12345.ts es común y la contraseña iba en claro en los
+      // informes de depuración que el usuario copia y comparte.
+      .replace(/\/([^/?#]+)\/([^/?#]+)\/(\d+\.(?:ts|m3u8|mp4|mkv))(?=$|[?#])/gi, "/***/***/$3")
+  );
 }
 
 function maskUrl(url) {
