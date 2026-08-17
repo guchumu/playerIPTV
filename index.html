@@ -44,12 +44,6 @@
                 <button type="submit" id="loginSubmitBtn">Cargar Contenido</button>
                 <div id="loginError" class="error"></div>
             </form>
-
-            <div class="app-download-row">
-                <a class="app-dl android" href="downloads/streambox.apk" download="StreamBox.apk">Android APK</a>
-                <button type="button" class="app-dl ios" id="iosDownloadBtn">iOS</button>
-            </div>
-            <p class="app-download-hint">Fire Stick / Android: instala el APK. iPhone: Añadir a pantalla de inicio.</p>
         </div>
     </div>
 
@@ -103,23 +97,6 @@
     </div>
 
     <div id="appToast" class="app-toast" hidden></div>
-
-    <div id="iosInstallOverlay" class="debug-overlay" hidden>
-        <div class="debug-panel ios-install-panel">
-            <div class="debug-header">
-                <strong>Instalar en iOS</strong>
-                <button type="button" id="iosInstallClose">Cerrar</button>
-            </div>
-            <ol class="ios-install-steps">
-                <li>Abre esta página en <strong>Safari</strong>.</li>
-                <li>Pulsa el botón <strong>Compartir</strong> (cuadrado con flecha).</li>
-                <li>Elige <strong>Añadir a pantalla de inicio</strong>.</li>
-                <li>Confirma el nombre <strong>StreamBox</strong>.</li>
-            </ol>
-            <p class="app-download-hint">No hay IPA de App Store todavía. Cuando lo tengas, colócalo en <code>downloads/streambox.ipa</code> y este botón lo descargará.</p>
-            <a id="iosIpaLink" class="app-dl ios" href="downloads/streambox.ipa" download="StreamBox.ipa" hidden>Descargar IPA</a>
-        </div>
-    </div>
 
     <div id="debugOverlay" class="debug-overlay" hidden>
         <div class="debug-panel">

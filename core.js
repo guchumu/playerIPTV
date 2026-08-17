@@ -167,7 +167,7 @@ function startRemotePolling() {
 
   pollingInterval = setInterval(async () => {
     try {
-      const res = await fetchWithTimeout("api_dispositivos.php?id=" + encodeURIComponent(deviceId), 8000);
+      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
       const data = await res.json();
       if (data && data.status !== "esperando" && (data.serverUrl || data.m3uUrl)) {
         clearInterval(pollingInterval);
@@ -175,15 +175,6 @@ function startRemotePolling() {
       }
     } catch (e) {}
   }, 5000);
-}
-
-function fetchWithTimeout(url, ms) {
-  const timeoutMs = ms || 45000;
-  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = setTimeout(() => {
-    if (controller) controller.abort();
-  }, timeoutMs);
-  return fetch(url, controller ? { signal: controller.signal } : {}).finally(() => clearTimeout(timer));
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -232,8 +223,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       try {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
-      const response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 45000);
-      if (loginError) loginError.textContent = "Procesando lista...";
+      const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
       const m3uContent = await response.text();
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         throw new Error("No se pudo cargar la URL.");
@@ -294,33 +284,28 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
     throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
   } catch (error) {
     showSpinner(false);
-    const aborted = error && (error.name === "AbortError" || /aborted/i.test(String(error.message || "")));
-    if (loginError) {
-      loginError.textContent = aborted
-        ? "Tiempo de espera agotado al descargar la lista"
-        : error.message || "Error al iniciar sesión.";
-    }
+    if (loginError) loginError.textContent = error.message || "Error al iniciar sesión.";
     startRemotePolling();
     return false;
   }
 }
 
 /********** AUTO-LOGIN **********/
-window.addEventListener("DOMContentLoaded", async () => {
+window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   showDeviceId();
   startRemotePolling();
-  const savedUser = localStorage.getItem("xtream_user");
-  if (!savedUser) return;
   try {
-    currentUser = JSON.parse(savedUser);
-  } catch (e) {
-    localStorage.removeItem("xtream_user");
-    return;
-  }
-  if ((currentUser.username && currentUser.password) || currentUser.m3uUrl) {
-    performLoginAction(currentUser.server, currentUser.username, currentUser.password, currentUser.m3uUrl);
-  }
+    const saved = localStorage.getItem("xtream_user");
+    if (!saved) return;
+    const u = JSON.parse(saved);
+    if (u.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = u.server;
+    if (u.username && u.username !== "Invitado M3U" && document.getElementById("username")) {
+      document.getElementById("username").value = u.username;
+    }
+    if (u.password && document.getElementById("password")) document.getElementById("password").value = u.password;
+    if (u.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = u.m3uUrl;
+  } catch (e) {}
 });
 
 window.addEventListener("resize", detectDevice);
@@ -343,9 +328,8 @@ async function fetchXtream(endpoint, params, serverOverride) {
   const targetServer = serverOverride || currentServer;
   const queryString = new URLSearchParams(params || {}).toString();
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
-  return await fetchWithTimeout(
-    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : ""),
-    45000
+  return await fetch(
+    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "")
   );
 }
 
@@ -1167,26 +1151,5 @@ if (headerTitle) {
       setDebugOpen(true);
       showToast("Modo debug");
     }
-  });
-}
-
-const iosDownloadBtn = document.getElementById("iosDownloadBtn");
-const iosInstallOverlay = document.getElementById("iosInstallOverlay");
-const iosInstallClose = document.getElementById("iosInstallClose");
-const iosIpaLink = document.getElementById("iosIpaLink");
-if (iosDownloadBtn && iosInstallOverlay) {
-  iosDownloadBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (iosIpaLink) iosIpaLink.hidden = true;
-    iosInstallOverlay.classList.add("is-open");
-    iosInstallOverlay.hidden = false;
-  });
-}
-if (iosInstallClose && iosInstallOverlay) {
-  iosInstallClose.addEventListener("click", (e) => {
-    e.preventDefault();
-    iosInstallOverlay.classList.remove("is-open");
-    iosInstallOverlay.hidden = true;
   });
 }
