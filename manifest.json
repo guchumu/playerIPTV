@@ -1,22 +1,36 @@
 {
+  "id": "streambox-iptv",
   "name": "StreamBox IPTV",
   "short_name": "StreamBox",
-  "description": "Reproductor IPTV",
+  "description": "Reproductor IPTV para listas Xtream y M3U",
+  "lang": "es",
+  "dir": "ltr",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#020617",
-  "theme_color": "#4f46e5",
+  "theme_color": "#111827",
+  "categories": ["entertainment", "video"],
   "icons": [
     {
-      "src": "logo.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "logo.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

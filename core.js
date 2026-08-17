@@ -428,8 +428,60 @@ function cancelLogin() {
   startRemotePolling();
 }
 
+/**
+ * Registra el service worker, que es lo que permite instalar la web como
+ * aplicación en Android. Se hace tras la carga para no competir por la red con
+ * la lista de canales, y cualquier fallo se ignora: es una mejora, no un
+ * requisito para que el reproductor funcione.
+ */
+/**
+ * Botón de instalación propio. Chrome dispara `beforeinstallprompt` cuando la
+ * web cumple los requisitos, pero su aviso automático es discreto y se pierde;
+ * con un botón visible en la pantalla de inicio se instala a la primera.
+ */
+function prepararInstalacion() {
+  const boton = document.getElementById("installBtn");
+  if (!boton) return;
+  let peticion = null;
+
+  window.addEventListener("beforeinstallprompt", (ev) => {
+    // Sin esto Chrome muestra su propio aviso y competiría con el botón.
+    ev.preventDefault();
+    peticion = ev;
+    boton.hidden = false;
+  });
+
+  boton.addEventListener("click", async () => {
+    if (!peticion) return;
+    boton.disabled = true;
+    try {
+      peticion.prompt();
+      await peticion.userChoice;
+    } catch (e) {}
+    // La petición solo sirve una vez.
+    peticion = null;
+    boton.hidden = true;
+    boton.disabled = false;
+  });
+
+  window.addEventListener("appinstalled", () => {
+    peticion = null;
+    boton.hidden = true;
+  });
+}
+
+function registrarServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
+  registrarServiceWorker();
+  prepararInstalacion();
   showDeviceId();
   startRemotePolling();
 
