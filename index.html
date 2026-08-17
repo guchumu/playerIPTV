@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="icon" href="logo.png">
-    <link rel="stylesheet" href="style.css?v=20260817v" />
+    <link rel="stylesheet" href="style.css?v=20260817w" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -19,12 +19,16 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260817v</p>
+            <p class="build-tag">v20260817w</p>
 
             <div class="remote-upload-box">
-                <p>Carga tu lista desde el móvil en:</p>
+                <p>Escanea con el móvil para cargar tu lista:</p>
+                <div class="qr-wrap">
+                    <canvas id="uploadQr" class="upload-qr" width="180" height="180" aria-label="Código QR para cargar la lista"></canvas>
+                </div>
+                <p class="qr-hint">O entra a mano en:</p>
                 <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
-                <p>Tu código de dispositivo (Device ID):</p>
+                <p class="qr-hint">Tu código de dispositivo (Device ID):</p>
                 <div id="deviceIdDisplay" class="device-id">Cargando...</div>
             </div>
 
@@ -175,6 +179,8 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="core.js?v=20260817v"></script>
+    <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
+    <script src="qrcode.js?v=20260817w"></script>
+    <script src="core.js?v=20260817w"></script>
 </body>
 </html>

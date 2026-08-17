@@ -2,6 +2,13 @@
 // upload.php - Portal de carga remota
 $mensaje = '';
 
+// El QR de la pantalla de inicio trae el Device ID en la URL para no tener que
+// copiarlo a mano desde la tele, que es la parte más incómoda del proceso.
+$idPrevio = isset($_GET['id']) ? strtoupper(trim($_GET['id'])) : '';
+if (!preg_match('/^[A-Z0-9-]{4,16}$/', $idPrevio)) {
+    $idPrevio = '';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $deviceId = strtoupper(trim(isset($_POST['device_id']) ? $_POST['device_id'] : ''));
     $data = array(
@@ -38,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         button { width: 100%; padding: 12px; margin-top: 20px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
         .msg { margin-bottom: 15px; padding: 10px; border-radius: 6px; background: rgba(34, 197, 94, 0.2); color: #4ade80; text-align: center; font-size: 0.9rem; }
         .divider { text-align: center; margin: 20px 0; color: #475569; font-size: 0.8rem; }
+        .ok-id { margin: 6px 0 0; font-size: 0.75rem; color: #4ade80; }
     </style>
 </head>
 <body>
@@ -46,7 +54,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php if ($mensaje): ?><div class="msg"><?php echo $mensaje; ?></div><?php endif; ?>
         <form method="POST">
             <label>Device ID (Aparece en la pantalla de la TV)</label>
-            <input type="text" name="device_id" placeholder="Ej: A1-B2-C3" required autocomplete="off">
+            <input type="text" name="device_id" placeholder="Ej: A1-B2-C3" required autocomplete="off"
+                   value="<?php echo htmlspecialchars($idPrevio, ENT_QUOTES, 'UTF-8'); ?>"><?php if ($idPrevio !== ''): ?>
+            <p class="ok-id">Dispositivo detectado por QR</p><?php endif; ?>
 
             <label>Servidor Xtream Codes</label>
             <input type="text" name="serverUrl" placeholder="http://servidor.com:8080">

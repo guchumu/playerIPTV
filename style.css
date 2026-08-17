@@ -53,7 +53,23 @@ html, body {
   text-align: center;
 }
 .remote-upload-box p { font-size: 0.85rem; margin: 5px 0; color: #cbd5e1; }
-.upload-url { font-size: 1.1rem; font-weight: bold; color: #4ade80; margin-bottom: 15px; word-break: break-all; }
+.qr-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+}
+/* Fondo blanco y borde claro: sobre el fondo oscuro del login, muchos lectores
+   fallan si el código no tiene su propio marco. */
+.upload-qr {
+  background: #fff;
+  padding: 8px;
+  border-radius: 8px;
+  width: 180px;
+  height: 180px;
+  image-rendering: pixelated;
+}
+.qr-hint { opacity: 0.75; }
+.upload-url { font-size: 0.95rem; font-weight: bold; color: #4ade80; margin-bottom: 10px; word-break: break-all; }
 .device-id {
   font-size: 2rem;
   font-weight: 900;

@@ -224,15 +224,55 @@ function getDeviceId() {
   return id;
 }
 
+/**
+ * Dibuja el QR de carga remota. Lleva el Device ID dentro de la URL, así que
+ * escanearlo abre el formulario con el dispositivo ya elegido y en el móvil
+ * solo queda pegar la lista: teclear ese código en una tele es lo más incómodo
+ * de todo el proceso.
+ */
+function renderUploadQr(url) {
+  const canvas = document.getElementById("uploadQr");
+  if (!canvas || typeof qrcode === "undefined") return;
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(url);
+    qr.make();
+
+    const modulos = qr.getModuleCount();
+    const ctx = canvas.getContext("2d");
+    // Margen obligatorio del formato: sin zona de silencio muchos lectores no
+    // llegan a reconocer el código.
+    const quiet = 2;
+    const escala = Math.max(1, Math.floor(canvas.width / (modulos + quiet * 2)));
+    const lado = escala * (modulos + quiet * 2);
+    canvas.width = lado;
+    canvas.height = lado;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, lado, lado);
+    ctx.fillStyle = "#000000";
+    for (let f = 0; f < modulos; f++) {
+      for (let c = 0; c < modulos; c++) {
+        if (qr.isDark(f, c)) {
+          ctx.fillRect((c + quiet) * escala, (f + quiet) * escala, escala, escala);
+        }
+      }
+    }
+    canvas.hidden = false;
+  } catch (e) {
+    canvas.hidden = true;
+  }
+}
+
 function showDeviceId() {
   const deviceId = getDeviceId();
   const displayEl = document.getElementById("deviceIdDisplay");
   if (displayEl) displayEl.textContent = deviceId;
+  const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
+  const uploadUrl = base + "upload.php";
   const uploadUrlEl = document.getElementById("uploadUrlDisplay");
-  if (uploadUrlEl) {
-    const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
-    uploadUrlEl.textContent = base + "upload.php";
-  }
+  if (uploadUrlEl) uploadUrlEl.textContent = uploadUrl;
+  renderUploadQr(uploadUrl + "?id=" + encodeURIComponent(deviceId));
   return deviceId;
 }
 
