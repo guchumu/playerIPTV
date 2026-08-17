@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="icon" href="logo.png">
-    <link rel="stylesheet" href="style.css?v=20260817n" />
+    <link rel="stylesheet" href="style.css?v=20260817o" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -19,7 +19,7 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260817n</p>
+            <p class="build-tag">v20260817o</p>
 
             <div class="remote-upload-box">
                 <p>Carga tu lista desde el móvil en:</p>
@@ -59,14 +59,15 @@
             <div class="header-right">
                 <span id="accountExpiryLabel"></span>
                 <span id="headerUser"></span>
-                <label class="buffer-control" title="Segundos de buffer del directo">
+                <label class="buffer-control" title="Segundos que se acumulan antes de empezar. Es también el colchón contra cortes y el retraso respecto al directo.">
                     Buffer
                     <select id="bufferSelect">
+                        <option value="5">5s</option>
                         <option value="8">8s</option>
-                        <option value="15" selected>15s</option>
+                        <option value="10" selected>10s</option>
+                        <option value="15">15s</option>
+                        <option value="20">20s</option>
                         <option value="30">30s</option>
-                        <option value="60">60s</option>
-                        <option value="90">90s</option>
                     </select>
                 </label>
                 <label class="track-control" id="audioTrackWrap" hidden>
@@ -111,7 +112,10 @@
             <section class="player-column">
                 <div class="video-wrapper">
                     <video id="videoPlayer" playsinline webkit-playsinline controls style="width: 100%; height: 100%; touch-action: manipulation;"></video>
-                    <div id="spinner" class="spinner-overlay"><div class="spinner"></div></div>
+                    <div id="spinner" class="spinner-overlay">
+                        <div class="spinner"></div>
+                        <p id="spinnerText" class="spinner-text"></p>
+                    </div>
                     <div id="gestureHint" class="gesture-hint" hidden>
                         <span id="gestureIcon" class="gesture-icon">☀</span>
                         <div class="gesture-bar"><i id="gestureFill"></i></div>
@@ -170,6 +174,6 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="core.js?v=20260817n"></script>
+    <script src="core.js?v=20260817o"></script>
 </body>
 </html>

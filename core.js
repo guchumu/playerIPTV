@@ -16,7 +16,10 @@ let currentServer = "";
 let hls = null;
 let mpegtsPlayer = null;
 const BUFFER_KEY = "streambox_buffer";
-const DEFAULT_BUFFER_SECONDS = 15;
+const DEFAULT_BUFFER_SECONDS = 10;
+// Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
+// que un ajuste alto sigue valiendo como techo pero no como espera.
+const PREBUFFER_MAX_SECONDS = 20;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -71,10 +74,12 @@ function showSpinner(show, message) {
 // entera como hace el spinner global del login.
 let bufferingSpinnerTimer = null;
 
-function showVideoSpinner(show) {
+function showVideoSpinner(show, message) {
   clearTimeout(bufferingSpinnerTimer);
   bufferingSpinnerTimer = null;
   if (spinner) spinner.style.display = show ? "flex" : "none";
+  const text = document.getElementById("spinnerText");
+  if (text) text.textContent = show ? message || "" : "";
 }
 
 function setLoginStatus(message) {
@@ -114,6 +119,7 @@ function stopPlayback() {
   // Vaciar el <video> dispara un evento de error propio; sin esta marca el
   // reconector lo confundiría con una caída del stream.
   teardownInProgress = true;
+  clearPrebuffer();
   clearTimeout(teardownTimer);
   teardownTimer = setTimeout(() => {
     teardownInProgress = false;
@@ -1283,6 +1289,73 @@ function clearPlaybackRetry() {
  * En IPTV los cortes son constantes, así que un fallo no debe dejar la pantalla
  * en negro: se reintenta el mismo canal antes de darse por vencido.
  */
+/********** PREBÚFER: acumular antes de mostrar imagen **********/
+let prebufferTimer = null;
+
+function getPrebufferTarget() {
+  return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
+}
+
+// Cuánto medio hay acumulado. Antes de arrancar, currentTime aún no está
+// dentro del rango, así que se mide el tramo entero.
+function getBufferedSpan() {
+  if (!video || !video.buffered || !video.buffered.length) return 0;
+  try {
+    const last = video.buffered.length - 1;
+    const from = Math.max(video.buffered.start(last), video.currentTime || 0);
+    return Math.max(0, video.buffered.end(last) - from);
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Con MSE el tiempo del stream no empieza en cero, así que reproducir sin
+// colocarse dentro del tramo cargado deja la imagen congelada.
+function ensureInsideBuffer() {
+  if (!video || !video.buffered || !video.buffered.length) return;
+  try {
+    const first = video.buffered.start(0);
+    const last = video.buffered.end(video.buffered.length - 1);
+    if (video.currentTime < first || video.currentTime > last) video.currentTime = first;
+  } catch (e) {}
+}
+
+function clearPrebuffer() {
+  clearTimeout(prebufferTimer);
+  prebufferTimer = null;
+}
+
+/**
+ * Espera a tener unos segundos cargados antes de empezar. En directo los datos
+ * llegan a velocidad real, así que esta espera es literalmente el colchón que
+ * después evita los cortes, y el retraso con el que se ve el canal.
+ */
+function waitForPrebuffer(channel, onReady) {
+  clearPrebuffer();
+  const target = getPrebufferTarget();
+  // Si el servidor manda justo a tiempo real, llenar N segundos cuesta N
+  // segundos de reloj; el margen extra cubre el arranque de la conexión.
+  const deadline = Date.now() + target * 1500 + 6000;
+
+  const tick = () => {
+    if (!currentChannelRef || currentChannelRef.id !== channel.id) return;
+
+    const have = getBufferedSpan();
+    const expired = Date.now() > deadline;
+    if (have >= target || expired) {
+      clearPrebuffer();
+      logPlayback("prebuffer", have.toFixed(1) + "s de " + target + "s" + (expired && have < target ? " (tiempo agotado, se arranca igual)" : ""));
+      onReady();
+      return;
+    }
+
+    showVideoSpinner(true, "Búfer " + have.toFixed(1) + " / " + target + " s");
+    prebufferTimer = setTimeout(tick, 250);
+  };
+
+  tick();
+}
+
 function playbackLooksAlive() {
   // readyState >= 3 significa que hay fotogramas listos para seguir pintando.
   return !!video && !video.paused && !video.ended && video.readyState >= 3;
@@ -1352,6 +1425,7 @@ function startPlayback(channel) {
   const bufferSec = getBufferSeconds();
 
   const tryAutoPlay = () => {
+    ensureInsideBuffer();
     const playPromise = video.play();
     if (playPromise !== undefined) {
       playPromise
@@ -1390,12 +1464,7 @@ function startPlayback(channel) {
     );
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
-    const p = mpegtsPlayer.play();
-    if (p !== undefined) {
-      p.then(() => showVideoSpinner(false)).catch(() => showVideoSpinner(false));
-    } else {
-      showVideoSpinner(false);
-    }
+    waitForPrebuffer(channel, tryAutoPlay);
     mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
       const info = errorInfo && (errorInfo.msg || errorInfo.code) ? " · " + (errorInfo.code || "") + " " + (errorInfo.msg || "") : "";
       logPlayback("error mpegts", errorType + " / " + errorDetail + info);
@@ -1406,16 +1475,21 @@ function startPlayback(channel) {
     const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
+    // Aquí manda el reproductor del sistema: no expone control sobre cuánto
+    // acumula, así que esperar solo retrasaría la imagen sin ganar colchón.
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
-    logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · " + maskUrl(iosUrl));
+    logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · sin prebúfer · " + maskUrl(iosUrl));
   } else if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: bufferSec,
-        maxMaxBufferLength: bufferSec * 2,
+        // Un poco de margen sobre el objetivo: si el techo fuese exactamente el
+        // objetivo, hls.js dejaría de cargar justo antes de alcanzarlo y el
+        // prebúfer esperaría hasta agotar el tiempo.
+        maxBufferLength: bufferSec + 5,
+        maxMaxBufferLength: bufferSec * 2 + 10,
         liveSyncDurationCount: 3,
         backBufferLength: 0,
       });
@@ -1423,9 +1497,9 @@ function startPlayback(channel) {
       hls.attachMedia(video);
       logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(originalUrl));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        tryAutoPlay();
         refreshTrackSelectors();
         logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
+        waitForPrebuffer(channel, tryAutoPlay);
       });
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTrackSelectors);
