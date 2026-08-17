@@ -144,6 +144,15 @@ if ($isProbe) {
 
 /********** Modo relé **********/
 $cabeceraEnviada = false;
+// Salida agrupada. Mandar un flush() por cada trozo de curl troceaba el directo
+// en cientos de fragmentos diminutos por segundo, y mpegts.js se desbordaba con
+// "Maximum call stack size exceeded" al procesarlos. Se acumula hasta un tamaño
+// razonable o hasta que pasa poco tiempo, lo que ocurra antes: así el navegador
+// recibe bloques como los de antes sin añadir retraso perceptible.
+const RELE_BLOQUE = 65536;
+const RELE_MS = 200;
+$pendiente = '';
+$ultimoEnvio = microtime(true);
 
 $ch = curl_init();
 curl_setopt_array($ch, $comun + [
@@ -152,10 +161,13 @@ curl_setopt_array($ch, $comun + [
     // hace falta es matar la fuente que deja de emitir: sin esto un origen
     // colgado retiene para siempre un proceso PHP y una conexión del proveedor.
     CURLOPT_TIMEOUT => 0,
-    CURLOPT_LOW_SPEED_LIMIT => 512,
-    CURLOPT_LOW_SPEED_TIME => 20,
-    CURLOPT_BUFFERSIZE => 32768,
-    CURLOPT_WRITEFUNCTION => function ($ch, $trozo) use (&$cabeceraEnviada, &$estado, &$tipo) {
+    // Umbral deliberadamente flojo: curl no distingue "el origen no envía" de
+    // "el navegador no lee". Con 512 B/s en 20s se mataban emisiones sanas en
+    // cuanto el cliente frenaba un momento, por ejemplo al pausar.
+    CURLOPT_LOW_SPEED_LIMIT => 1,
+    CURLOPT_LOW_SPEED_TIME => 45,
+    CURLOPT_BUFFERSIZE => 65536,
+    CURLOPT_WRITEFUNCTION => function ($ch, $trozo) use (&$cabeceraEnviada, &$estado, &$tipo, &$pendiente, &$ultimoEnvio) {
         if (!$cabeceraEnviada) {
             $cabeceraEnviada = true;
             if ($estado >= 400) {
@@ -170,10 +182,19 @@ curl_setopt_array($ch, $comun + [
             // lo que provoca que llegue a ráfagas en lugar de continuo.
             header('X-Accel-Buffering: no');
         }
-        echo $trozo;
-        flush();
-        if (connection_aborted()) {
-            return 0;
+
+        $pendiente .= $trozo;
+        $ahora = microtime(true);
+        if (strlen($pendiente) >= RELE_BLOQUE || ($ahora - $ultimoEnvio) * 1000 >= RELE_MS) {
+            echo $pendiente;
+            $pendiente = '';
+            $ultimoEnvio = $ahora;
+            flush();
+            // Si el navegador ya cerró (cambio de canal), cortar con el
+            // proveedor en el acto: cada relé zombi ocupa una conexión.
+            if (connection_aborted()) {
+                return 0;
+            }
         }
         return strlen($trozo);
     },
@@ -181,6 +202,11 @@ curl_setopt_array($ch, $comun + [
 curl_exec($ch);
 $errno = curl_errno($ch);
 curl_close($ch);
+
+if ($pendiente !== '' && $cabeceraEnviada) {
+    echo $pendiente;
+    flush();
+}
 
 if (!$cabeceraEnviada) {
     // No llegó ni un byte: el fallo es del origen y hay que decirlo con un

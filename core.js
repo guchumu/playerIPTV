@@ -1015,6 +1015,13 @@ async function probeStream() {
     logPlayback("diagnostico", "no hay canal que comprobar");
     return;
   }
+  // Consultar mientras se ve bien el canal es contraproducente: abre una
+  // segunda conexión y, con cuentas de pocas conexiones, el proveedor tira la
+  // emisión en curso para dejar sitio a la nueva.
+  if (playbackLooksAlive()) {
+    showToast("El canal va bien. Diagnosticar abriría otra conexión y puede cortarlo.", 5000);
+    return;
+  }
   // Cada consulta abre una conexión con el proveedor y el usuario tiene un
   // número limitado. Ni en paralelo ni en ráfaga.
   if (probeRunning) return;
@@ -1460,10 +1467,22 @@ function clearPrebuffer() {
 function jumpOverBufferGap() {
   if (!video || !video.buffered || video.buffered.length < 2) return;
   try {
-    const start = video.buffered.start(video.buffered.length - 1);
-    if (video.currentTime >= start) return;
-    logPlayback("hueco", "salto de " + (start - video.currentTime).toFixed(1) + "s al tramo continuo");
-    video.currentTime = start + 0.05;
+    const t = video.currentTime;
+    for (let i = 0; i < video.buffered.length; i++) {
+      const ini = video.buffered.start(i);
+      const fin = video.buffered.end(i);
+      if (t < ini - 0.1 || t > fin) continue;
+      // El hueco solo estorba cuando el cursor ya está pegado al final de su
+      // tramo. Saltar antes de tiempo tiraba por la ventana el colchón recién
+      // acumulado, porque el tramo nuevo contiene mucho menos que el total.
+      if (fin - t > 0.5) return;
+      if (i + 1 < video.buffered.length) {
+        const siguiente = video.buffered.start(i + 1);
+        logPlayback("hueco", "salto de " + (siguiente - t).toFixed(1) + "s al tramo siguiente");
+        video.currentTime = siguiente + 0.05;
+      }
+      return;
+    }
   } catch (e) {}
 }
 
@@ -1773,6 +1792,9 @@ if (video) {
   video.addEventListener("waiting", () => {
     if (teardownInProgress) return;
     stallCount++;
+    // Este es el momento en que un hueco entre tramos sí molesta: la
+    // reproducción se ha quedado clavada al borde y no puede cruzarlo sola.
+    jumpOverBufferGap();
     if (bufferingSpinnerTimer) return;
     bufferingSpinnerTimer = setTimeout(() => {
       showVideoSpinner(true);
