@@ -302,6 +302,7 @@ const loginForm = document.getElementById("loginForm");
 if (loginForm) {
   loginForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (pollingInterval) clearInterval(pollingInterval);
     const serverUrl = document.getElementById("serverUrl") ? document.getElementById("serverUrl").value.trim() : "";
     const username = document.getElementById("username") ? document.getElementById("username").value.trim() : "";
@@ -751,8 +752,10 @@ function setDebugOpen(open) {
   if (!overlay || !output) return;
   if (open) {
     output.textContent = getDebugReport();
+    overlay.classList.add("is-open");
     overlay.hidden = false;
   } else {
+    overlay.classList.remove("is-open");
     overlay.hidden = true;
   }
 }
@@ -1144,18 +1147,18 @@ const iosInstallOverlay = document.getElementById("iosInstallOverlay");
 const iosInstallClose = document.getElementById("iosInstallClose");
 const iosIpaLink = document.getElementById("iosIpaLink");
 if (iosDownloadBtn && iosInstallOverlay) {
-  iosDownloadBtn.addEventListener("click", async () => {
-    let hasIpa = false;
-    try {
-      const res = await fetch("downloads/streambox.ipa", { method: "HEAD" });
-      hasIpa = res.ok;
-    } catch (e) {}
-    if (iosIpaLink) iosIpaLink.hidden = !hasIpa;
+  iosDownloadBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (iosIpaLink) iosIpaLink.hidden = true;
+    iosInstallOverlay.classList.add("is-open");
     iosInstallOverlay.hidden = false;
   });
 }
 if (iosInstallClose && iosInstallOverlay) {
-  iosInstallClose.addEventListener("click", () => {
+  iosInstallClose.addEventListener("click", (e) => {
+    e.preventDefault();
+    iosInstallOverlay.classList.remove("is-open");
     iosInstallOverlay.hidden = true;
   });
 }
