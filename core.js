@@ -177,6 +177,44 @@ async function fetchXtream(endpoint, params) {
   return fetch(url, { credentials: "same-origin" });
 }
 
+function isXtreamAuthorized(data) {
+  if (!data || !data.user_info) return false;
+  return Number(data.user_info.auth) === 1;
+}
+
+function isXtreamProxyFailure(response, data, rawText) {
+  const status = response ? response.status : 0;
+  const err = data && (data.error || data.message);
+  const errStr = err ? String(err) : "";
+  if (status >= 500 || status === 400) return true;
+  if (data && data.error === "proxy_error") return true;
+  if (/proxy_error|Error de conexión|no se pudo conectar|Endpoint no permitido/i.test(errStr)) {
+    return true;
+  }
+  if (rawText && /<!DOCTYPE|<html/i.test(rawText)) return true;
+  return false;
+}
+
+async function readXtreamJson(response) {
+  const text = await response.text();
+  if (!text) return { data: null, text: "" };
+  try {
+    return { data: JSON.parse(text), text };
+  } catch (e) {
+    return { data: null, text };
+  }
+}
+
+function xtreamLoginFailureMessage(response, data, rawText) {
+  if (isXtreamProxyFailure(response, data, rawText) || (!data && !response.ok && response.status !== 401 && response.status !== 403)) {
+    const detail = data && (data.message || data.error);
+    return detail && String(detail) !== "proxy_error"
+      ? String(detail)
+      : "No se pudo conectar con el servidor (error de red o proxy)";
+  }
+  return "Usuario o contraseña incorrectos";
+}
+
 /********** MONITOR DATOS **********/
 function startDataMonitoring() {
   if (dataInterval) clearInterval(dataInterval);
@@ -397,9 +435,9 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   loginError.textContent = "Conectando...";
   try {
     const response = await fetchXtream("player_api.php", { username, password });
-    if (!response.ok) throw new Error("Error al conectar con el servidor");
-    const data = await response.json();
-    if (data.user_info && data.user_info.auth === 1) {
+    const parsed = await readXtreamJson(response);
+    const data = parsed.data;
+    if (isXtreamAuthorized(data)) {
       currentUser = {
         username,
         password,
@@ -410,7 +448,7 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
       loginError.textContent = "";
       await enterApp();
     } else {
-      throw new Error("Usuario o contraseña incorrectos");
+      throw new Error(xtreamLoginFailureMessage(response, data, parsed.text));
     }
   } catch (error) {
     loginError.textContent = error.message || "Error al iniciar sesión";
@@ -1285,15 +1323,17 @@ window.addEventListener("load", async () => {
       username: currentUser.username,
       password: currentUser.password,
     });
-    const data = await response.json();
-    if (data.user_info && data.user_info.auth === 1) {
+    const parsed = await readXtreamJson(response);
+    const data = parsed.data;
+    if (isXtreamAuthorized(data)) {
       currentUser.info = data.user_info;
       await enterApp();
+    } else if (isXtreamProxyFailure(response, data, parsed.text)) {
+      console.error("Error auto-login (proxy/red):", data && (data.message || data.error));
     } else {
       localStorage.removeItem("xtream_user");
     }
   } catch (e) {
     console.error("Error auto-login:", e);
-    localStorage.removeItem("xtream_user");
   }
 });
