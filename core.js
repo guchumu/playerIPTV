@@ -34,7 +34,12 @@ const categoriesContainer = document.getElementById("categoriesContainer");
 const channelColumnTitle = document.getElementById("channelColumnTitle");
 const epgNowEl = document.getElementById("epgNow");
 const epgNextEl = document.getElementById("epgNext");
-const externalPlayerBtn = document.getElementById("externalPlayerBtn");
+
+let lastParseDebug = null;
+let debugZeroCount = 0;
+let debugZeroTimer = null;
+let debugTitleTaps = 0;
+let debugTitleTimer = null;
 
 function detectDevice() {
   const ua = navigator.userAgent || "";
@@ -531,42 +536,121 @@ async function loadM3UFromXtream() {
   }
 }
 
+function isStreamUrl(line) {
+  return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line);
+}
+
 function parseM3U(content) {
-  const lines = String(content || "").split(/\r\n|\n|\r/);
+  const started = Date.now();
+  const raw = String(content || "");
+  const lines = raw.split(/\r\n|\n|\r/);
   const channels = [];
   const categories = {};
   let currentChannel = null;
+  let extinf = 0;
+  let skippedNoUrl = 0;
+  const skippedBadUrl = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.startsWith("#EXTINF:")) {
-      const groupMatch = line.match(/group-title="([^"]+)"/);
-      const nameMatch = line.match(/,(.+)$/);
-      const tvgIdMatch = line.match(/tvg-id="([^"]+)"/);
+    const line = lines[i].trim().replace(/^["']|["']$/g, "");
+    if (!line) continue;
 
+    if (line.startsWith("#EXTINF:")) {
+      if (currentChannel) skippedNoUrl++;
+      extinf++;
+      const groupMatch = line.match(/group-title="([^"]+)"/i);
+      const nameMatch = line.match(/,(.+)$/);
+      const tvgIdMatch = line.match(/tvg-id="([^"]+)"/i);
       const safeName = nameMatch ? nameMatch[1].trim() : "Canal";
       const category = groupMatch ? groupMatch[1] : "Sin categoría";
       const tvgId = tvgIdMatch ? tvgIdMatch[1] : "";
-      const idBase = (tvgId || "") + "|" + category + "|" + safeName;
+      const idBase = (tvgId || "") + "|" + category + "|" + safeName + "|" + extinf;
       const stableId = "ch_" + idBase.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      currentChannel = { name: safeName, category: category, tvgId: tvgId, id: stableId };
+      continue;
+    }
 
-      currentChannel = {
-        name: safeName,
-        category: category,
-        tvgId: tvgId,
-        id: stableId,
-      };
-    } else if ((line.startsWith("http") || line.startsWith("rtmp")) && currentChannel) {
+    if (line.charAt(0) === "#") continue;
+
+    if (currentChannel && isStreamUrl(line)) {
       currentChannel.url = line;
       channels.push(currentChannel);
       if (!categories[currentChannel.category]) categories[currentChannel.category] = [];
       categories[currentChannel.category].push(currentChannel);
       currentChannel = null;
+    } else if (currentChannel) {
+      if (skippedBadUrl.length < 12) skippedBadUrl.push(line.slice(0, 180));
+      skippedNoUrl++;
+      currentChannel = null;
     }
   }
+  if (currentChannel) skippedNoUrl++;
+
   channelsData = channels;
   categoriesData = categories;
+  lastParseDebug = {
+    bytes: raw.length,
+    lines: lines.length,
+    extinf: extinf,
+    parsed: channels.length,
+    categories: Object.keys(categories).length,
+    skipped: skippedNoUrl,
+    skippedSamples: skippedBadUrl,
+    ms: Date.now() - started,
+    user: currentUser ? currentUser.username : "",
+    mode: currentUser && currentUser.isM3U ? "m3u" : "xtream",
+  };
   renderCategories();
+}
+
+function getDebugReport() {
+  const d = lastParseDebug || {};
+  const catLines = Object.keys(categoriesData)
+    .sort()
+    .map((name) => "  - " + name + ": " + (categoriesData[name] || []).length)
+    .join("\n");
+  return [
+    "StreamBox debug",
+    "ua: " + (navigator.userAgent || ""),
+    "size: " + window.innerWidth + "x" + window.innerHeight,
+    "user: " + (d.user || "-") + " (" + (d.mode || "-") + ")",
+    "m3u bytes: " + (d.bytes || 0),
+    "lineas: " + (d.lines || 0),
+    "#EXTINF: " + (d.extinf || 0),
+    "canales pintados: " + (d.parsed || 0),
+    "categorias: " + (d.categories || 0),
+    "extinf sin url: " + (d.skipped || 0),
+    "parse ms: " + (d.ms || 0),
+    "muestras url raras:",
+    d.skippedSamples && d.skippedSamples.length ? d.skippedSamples.join("\n") : "  (ninguna)",
+    "canales por categoria:",
+    catLines || "  (vacio)",
+  ].join("\n");
+}
+
+function setDebugOpen(open) {
+  const overlay = document.getElementById("debugOverlay");
+  const output = document.getElementById("debugOutput");
+  if (!overlay || !output) return;
+  if (open) {
+    output.textContent = getDebugReport();
+    overlay.hidden = false;
+  } else {
+    overlay.hidden = true;
+  }
+}
+
+function noteDebugZero() {
+  debugZeroCount++;
+  clearTimeout(debugZeroTimer);
+  debugZeroTimer = setTimeout(() => {
+    debugZeroCount = 0;
+  }, 1600);
+  if (debugZeroCount >= 5) {
+    debugZeroCount = 0;
+    setDebugOpen(true);
+    showToast("Modo debug");
+  }
 }
 
 /********** RENDERIZAR INTERFAZ **********/
@@ -639,12 +723,6 @@ function playChannel(channel) {
   if (!video) return;
   showSpinner(true);
   updateActivity(channel);
-
-  if (externalPlayerBtn) {
-    const cleanUrl = channel.url.replace(/^https?:\/\//i, "");
-    externalPlayerBtn.href = "vlc://" + cleanUrl;
-    externalPlayerBtn.style.display = "block";
-  }
 
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
   const originalUrl = channel.url;
@@ -720,7 +798,6 @@ function doLogout() {
   if (hls) hls.destroy();
   if (mpegtsPlayer) mpegtsPlayer.destroy();
   if (video) video.src = "";
-  if (externalPlayerBtn) externalPlayerBtn.style.display = "none";
   currentUser = null;
   sessionToken = null;
   activeConnection = null;
@@ -764,6 +841,15 @@ let loginFocusIndex = -1;
 const loginElements = ["serverUrl", "username", "password", "m3uUrl", "loginSubmitBtn"];
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    noteDebugZero();
+    return;
+  }
+  if (e.key === "Escape") {
+    setDebugOpen(false);
+  }
+
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"];
   if (!validKeys.includes(e.key)) return;
 
@@ -877,4 +963,35 @@ function updateCursorVisuals() {
       selectCategory(target.dataset.category);
     }
   }
+}
+
+const debugCopyBtn = document.getElementById("debugCopyBtn");
+if (debugCopyBtn) {
+  debugCopyBtn.addEventListener("click", async () => {
+    const text = getDebugReport();
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Debug copiado");
+    } catch (e) {
+      showToast("No se pudo copiar");
+    }
+  });
+}
+const debugCloseBtn = document.getElementById("debugCloseBtn");
+if (debugCloseBtn) debugCloseBtn.addEventListener("click", () => setDebugOpen(false));
+
+const headerTitle = document.querySelector(".header-left h1");
+if (headerTitle) {
+  headerTitle.addEventListener("click", () => {
+    debugTitleTaps++;
+    clearTimeout(debugTitleTimer);
+    debugTitleTimer = setTimeout(() => {
+      debugTitleTaps = 0;
+    }, 1600);
+    if (debugTitleTaps >= 5) {
+      debugTitleTaps = 0;
+      setDebugOpen(true);
+      showToast("Modo debug");
+    }
+  });
 }

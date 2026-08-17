@@ -75,10 +75,6 @@
                     <div id="spinner" class="spinner-overlay"><div class="spinner"></div></div>
                 </div>
 
-                <a id="externalPlayerBtn" class="external-player-btn" href="#" style="display: none;">
-                    ⚠️ ¿Mudo o en negro? Abrir en VLC
-                </a>
-
                 <div class="epg-container">
                     <div class="epg-header"><span>AHORA</span><span>DESPUÉS</span></div>
                     <div class="epg-info">
@@ -91,6 +87,19 @@
     </div>
 
     <div id="appToast" class="app-toast" hidden></div>
+
+    <div id="debugOverlay" class="debug-overlay" hidden>
+        <div class="debug-panel">
+            <div class="debug-header">
+                <strong>Modo debug</strong>
+                <div>
+                    <button type="button" id="debugCopyBtn">Copiar</button>
+                    <button type="button" id="debugCloseBtn">Cerrar</button>
+                </div>
+            </div>
+            <pre id="debugOutput"></pre>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>

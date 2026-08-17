@@ -219,19 +219,50 @@ html, body {
 }
 
 .external-player-btn {
-  display: block;
-  text-align: center;
-  background: #f59e0b;
-  color: #000;
-  font-weight: bold;
-  padding: 10px;
-  border-radius: 8px;
-  text-decoration: none;
-  font-size: 0.9rem;
-  flex-shrink: 0;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  display: none !important;
 }
-.external-player-btn:active { background: #d97706; }
+
+.debug-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.debug-overlay[hidden] { display: none !important; }
+.debug-panel {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  overflow: auto;
+}
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.debug-header button {
+  background: #334155;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+#debugOutput {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
 
 .epg-container {
   padding: 0.3rem 0.4rem;
@@ -308,37 +339,52 @@ body.is-tv .channel-item.cursor { outline: 4px solid #fbbf24; outline-offset: 2p
 body.is-tv .epg-container { font-size: 1.05rem; padding: 0.7rem 0.9rem; }
 body.is-tv .device-id { font-size: 2.4rem; }
 
-/********** MÓVILES (Vertical) **********/
-@media (max-width: 768px) and (orientation: portrait) {
+/********** MÓVILES: vídeo arriba, categorías y canales debajo **********/
+@media (max-width: 768px) {
   body { overflow: auto; }
   #loginScreen {
     padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
   }
   .login-container { width: 100%; padding: 1.6rem 1.2rem; }
-  .main-container { display: flex; flex-direction: column; height: calc(100dvh - 40px); overflow-y: auto; }
-  .player-column { padding: 0; display: block; height: auto; overflow: visible; flex-shrink: 0; }
-  .video-wrapper { border-radius: 0; width: 100vw; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
+  .main-container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 40px);
+    overflow-y: auto;
+  }
+  .player-column {
+    order: 1;
+    padding: 0;
+    display: block;
+    height: auto;
+    overflow: visible;
+    flex-shrink: 0;
+  }
+  .categories-column {
+    order: 2;
+    display: flex;
+    height: auto;
+    border-right: none;
+    padding: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .channels-column {
+    order: 3;
+    display: flex;
+    flex: 1;
+    min-height: 220px;
+    border-right: none;
+    padding: 10px;
+    overflow: hidden;
+  }
+  .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
   .epg-container { margin: 10px; }
-  .categories-column { height: auto; border-right: none; padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
   .categories-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 5px; gap: 8px; }
   .category-btn { width: auto; margin-bottom: 0; flex-shrink: 0; min-height: 44px; }
-  .channels-column { flex: 1; border-right: none; padding: 10px; overflow: hidden; }
   .channels-column h2 { display: none; }
   .channels-list { height: 100%; overflow-y: auto; }
   .channel-item { min-height: 48px; }
   .header-right span { display: none; }
-}
-
-/********** MÓVILES (Horizontal) **********/
-@media (max-width: 768px) and (orientation: landscape) {
-  .main-container { display: flex; flex-direction: row; height: calc(100dvh - 40px); overflow: hidden; }
-  .categories-column, .channels-column { display: flex; }
-  .categories-column { width: 22%; min-width: 120px; }
-  .channels-column { width: 28%; min-width: 160px; }
-  .player-column { flex: 1; padding: 0.3rem; overflow: hidden; }
-  .video-wrapper { border-radius: 8px; height: auto; width: 100%; aspect-ratio: 16 / 9; margin: 0; }
-  .epg-container, .external-player-btn { width: 100%; margin: 6px 0; }
-  .login-container { padding: 1rem; margin-top: 20px; }
 }
 
 /********** iOS Safari **********/
