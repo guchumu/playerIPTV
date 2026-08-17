@@ -221,13 +221,28 @@ html, body {
   transition: transform 0.1s;
 }
 .channel-item.playing { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5); }
+.channel-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
 .channel-name {
   font-weight: 600;
   font-size: 0.9rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 320px;
+}
+.channel-epg {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+  line-height: 1.2;
 }
 
 /********** COLUMNA PLAYER **********/

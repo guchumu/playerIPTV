@@ -23,6 +23,8 @@ let categoriesData = {};
 let currentCategory = null;
 let currentlyPlayingId = null;
 let globalEPGData = [];
+let epgIndex = {};
+let epgAliases = {};
 let pollingInterval = null;
 let sessionToken = null;
 let activityInterval = null;
@@ -353,7 +355,7 @@ function finishLogin(user) {
   startActivityMonitoring();
   setTimeout(() => {
     loadXML_EPG();
-  }, 3000);
+  }, 800);
 }
 
 function showAccountExpiry(info) {
@@ -480,85 +482,154 @@ function updateActivity(channel) {
 }
 
 /********** DESCARGA Y LECTURA DE EPG ASÍNCRONA **********/
+function normalizeEpgKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(.*?\)/g, " ")
+    .replace(/\b(hd|fhd|uhd|4k|hevc|sd|tv)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function parseXMLDate(str) {
+  const m = String(str || "").match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/);
+  if (!m) return new Date(NaN);
+  const iso = m[1] + "-" + m[2] + "-" + m[3] + "T" + m[4] + ":" + m[5] + ":" + m[6];
+  if (m[7]) {
+    const tz = m[7];
+    return new Date(iso + tz.slice(0, 3) + ":" + tz.slice(3));
+  }
+  return new Date(iso);
+}
+
 async function loadXML_EPG() {
   try {
     const response = await fetch(EPG_URL);
     const text = await response.text();
-    setTimeout(() => {
-      try {
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, "text/xml");
-        const programmes = xml.querySelectorAll("programme");
-        globalEPGData = Array.from(programmes).map((prog) => ({
-          channelId: prog.getAttribute("channel"),
-          start: prog.getAttribute("start"),
-          stop: prog.getAttribute("stop"),
-          title: prog.querySelector("title") ? prog.querySelector("title").textContent : "Sin título",
-        }));
-      } catch (e) {}
-    }, 100);
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, "text/xml");
+    epgIndex = {};
+    epgAliases = {};
+
+    xml.querySelectorAll("channel").forEach((ch) => {
+      const id = ch.getAttribute("id") || "";
+      const names = Array.from(ch.querySelectorAll("display-name")).map((n) => n.textContent);
+      [id].concat(names).forEach((alias) => {
+        const key = normalizeEpgKey(alias);
+        if (key) epgAliases[key] = id;
+      });
+    });
+
+    const programmes = xml.querySelectorAll("programme");
+    globalEPGData = [];
+    programmes.forEach((prog) => {
+      const channelId = prog.getAttribute("channel") || "";
+      const item = {
+        channelId: channelId,
+        start: prog.getAttribute("start"),
+        stop: prog.getAttribute("stop"),
+        title: prog.querySelector("title") ? prog.querySelector("title").textContent : "Sin título",
+        startTs: parseXMLDate(prog.getAttribute("start")).getTime(),
+        stopTs: parseXMLDate(prog.getAttribute("stop")).getTime(),
+      };
+      if (!epgIndex[channelId]) epgIndex[channelId] = [];
+      epgIndex[channelId].push(item);
+      const key = normalizeEpgKey(channelId);
+      if (key && !epgAliases[key]) epgAliases[key] = channelId;
+      globalEPGData.push(item);
+    });
+
+    Object.keys(epgIndex).forEach((id) => {
+      epgIndex[id].sort((a, b) => a.startTs - b.startTs);
+    });
+
+    refreshVisibleChannelEPG();
+    if (currentlyPlayingId) {
+      const playing = channelsData.find((ch) => ch.id === currentlyPlayingId);
+      if (playing) fetchEPG(playing);
+    }
+    clearInterval(loadXML_EPG._timer);
+    loadXML_EPG._timer = setInterval(refreshVisibleChannelEPG, 60 * 1000);
   } catch (e) {}
+}
+
+function resolveEpgChannelId(channel) {
+  const candidates = [channel.tvgId, channel.name, (channel.name || "").replace(/\s+/g, "")];
+  for (let i = 0; i < candidates.length; i++) {
+    const key = normalizeEpgKey(candidates[i]);
+    if (key && epgAliases[key]) return epgAliases[key];
+    if (candidates[i] && epgIndex[candidates[i]]) return candidates[i];
+  }
+  const nameKey = normalizeEpgKey(channel.name);
+  if (nameKey && nameKey.length >= 5) {
+    const ids = Object.keys(epgAliases);
+    for (let i = 0; i < ids.length; i++) {
+      if (ids[i].indexOf(nameKey) !== -1 || nameKey.indexOf(ids[i]) !== -1) {
+        return epgAliases[ids[i]];
+      }
+    }
+  }
+  return "";
+}
+
+function getNowNext(channel) {
+  const empty = { now: null, next: null };
+  const id = resolveEpgChannelId(channel);
+  const list = (id && epgIndex[id]) || [];
+  if (!list.length) return empty;
+  const now = Date.now();
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    if (p.startTs <= now && now < p.stopTs) {
+      return { now: p, next: list[i + 1] || null };
+    }
+    if (p.startTs > now) {
+      return { now: null, next: p };
+    }
+  }
+  return empty;
+}
+
+function formatEpgLine(prog) {
+  if (!prog) return "";
+  return formatTime(new Date(prog.startTs)) + " " + prog.title;
 }
 
 function fetchEPG(channel) {
   if (!epgNowEl) return;
-  epgNowEl.textContent = "Buscando EPG...";
-  if (epgNextEl) epgNextEl.textContent = "--:--";
-
   if (!globalEPGData.length) {
-    epgNowEl.textContent = "Sin información en la guía";
+    epgNowEl.textContent = "Cargando guía...";
+    if (epgNextEl) epgNextEl.textContent = "--:--";
     return;
   }
-
-  let channelProgs = globalEPGData.filter((p) => p.channelId === channel.tvgId);
-  if (channelProgs.length === 0) {
-    const safeChannelName = (channel.name || "").toLowerCase().trim();
-    channelProgs = globalEPGData.filter((p) => p.channelId && p.channelId.toLowerCase().includes(safeChannelName));
-  }
-
-  if (channelProgs.length === 0) {
-    epgNowEl.textContent = "Sin información en la guía";
-    return;
-  }
-
-  const now = new Date();
-  let currentProg = null,
-    nextProg = null;
-
-  for (let i = 0; i < channelProgs.length; i++) {
-    const p = channelProgs[i];
-    const start = parseXMLDate(p.start);
-    const stop = parseXMLDate(p.stop);
-
-    if (now >= start && now <= stop) {
-      currentProg = p;
-      nextProg = channelProgs[i + 1] || null;
-      break;
-    }
-  }
-
-  if (currentProg) {
-    epgNowEl.textContent = "▶ AHORA: " + currentProg.title + " (" + formatTime(parseXMLDate(currentProg.start)) + ")";
-    if (epgNextEl && nextProg) {
-      epgNextEl.textContent = "⏭ DESPUÉS: " + nextProg.title + " (" + formatTime(parseXMLDate(nextProg.start)) + ")";
-    }
+  const info = getNowNext(channel);
+  if (info.now) {
+    epgNowEl.textContent = "AHORA: " + formatEpgLine(info.now);
+    if (epgNextEl) epgNextEl.textContent = info.next ? "DESPUÉS: " + formatEpgLine(info.next) : "--:--";
+  } else if (info.next) {
+    epgNowEl.textContent = "PRÓXIMO: " + formatEpgLine(info.next);
+    if (epgNextEl) epgNextEl.textContent = "--:--";
   } else {
-    epgNowEl.textContent = "Sin programación en este momento";
+    epgNowEl.textContent = "Sin información en la guía";
+    if (epgNextEl) epgNextEl.textContent = "--:--";
   }
 }
 
-function parseXMLDate(str) {
-  if (!str) return new Date();
-  const y = str.substring(0, 4),
-    m = str.substring(4, 6) - 1,
-    d = str.substring(6, 8),
-    h = str.substring(8, 10),
-    min = str.substring(10, 12),
-    s = str.substring(12, 14);
-  return new Date(y, m, d, h, min, s);
+function refreshVisibleChannelEPG() {
+  if (!channelsContainer) return;
+  channelsContainer.querySelectorAll(".channel-item").forEach((item) => {
+    const channel = channelsData.find((ch) => ch.id === item.dataset.id);
+    const epgEl = item.querySelector(".channel-epg");
+    if (!channel || !epgEl) return;
+    const info = getNowNext(channel);
+    epgEl.textContent = info.now ? formatEpgLine(info.now) : info.next ? formatEpgLine(info.next) : "";
+  });
 }
 
 function formatTime(date) {
+  if (!date || isNaN(date.getTime())) return "--:--";
   return date.getHours().toString().padStart(2, "0") + ":" + date.getMinutes().toString().padStart(2, "0");
 }
 
@@ -739,11 +810,18 @@ function renderChannels(channels) {
     channelDiv.className = "channel-item";
     channelDiv.dataset.id = channel.id;
 
+    const info = document.createElement("div");
+    info.className = "channel-info";
     const nameEl = document.createElement("div");
-    nameEl.className = "channel-info channel-name";
+    nameEl.className = "channel-name";
     nameEl.textContent = channel.name;
-
-    channelDiv.appendChild(nameEl);
+    const epgEl = document.createElement("div");
+    epgEl.className = "channel-epg";
+    const epg = getNowNext(channel);
+    epgEl.textContent = epg.now ? formatEpgLine(epg.now) : epg.next ? formatEpgLine(epg.next) : "";
+    info.appendChild(nameEl);
+    info.appendChild(epgEl);
+    channelDiv.appendChild(info);
 
     channelDiv.addEventListener("click", () => {
       if (currentlyPlayingId === channel.id) {
