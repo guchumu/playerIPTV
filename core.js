@@ -1051,6 +1051,142 @@ function playChannel(channel) {
   }
 }
 
+/********** GESTOS TÁCTILES: brillo a la izquierda, volumen a la derecha **********/
+const BRIGHTNESS_KEY = "streambox_brightness";
+const BRIGHTNESS_MIN = 0.25;
+const BRIGHTNESS_MAX = 1.6;
+const GESTURE_THRESHOLD = 10;
+
+const videoWrapper = document.querySelector(".video-wrapper");
+const gestureHint = document.getElementById("gestureHint");
+const gestureIcon = document.getElementById("gestureIcon");
+const gestureFill = document.getElementById("gestureFill");
+const gestureValue = document.getElementById("gestureValue");
+
+let gesture = null;
+let gestureHideTimer = null;
+let volumeLockWarned = false;
+
+function getBrightness() {
+  const stored = parseFloat(localStorage.getItem(BRIGHTNESS_KEY));
+  if (isNaN(stored)) return 1;
+  return Math.min(BRIGHTNESS_MAX, Math.max(BRIGHTNESS_MIN, stored));
+}
+
+function applyBrightness(value) {
+  const v = Math.min(BRIGHTNESS_MAX, Math.max(BRIGHTNESS_MIN, value));
+  // El navegador no puede tocar el brillo real de la pantalla, así que se
+  // simula con un filtro sobre el vídeo.
+  if (video) video.style.filter = v === 1 ? "" : "brightness(" + v.toFixed(2) + ")";
+  localStorage.setItem(BRIGHTNESS_KEY, String(v));
+  return v;
+}
+
+function showGestureHint(icon, ratio) {
+  if (!gestureHint) return;
+  const pct = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+  if (gestureIcon) gestureIcon.textContent = icon;
+  if (gestureFill) gestureFill.style.width = pct + "%";
+  if (gestureValue) gestureValue.textContent = pct + "%";
+  gestureHint.hidden = false;
+  gestureHint.classList.add("is-visible");
+  clearTimeout(gestureHideTimer);
+}
+
+function hideGestureHint(delay) {
+  clearTimeout(gestureHideTimer);
+  gestureHideTimer = setTimeout(() => {
+    if (!gestureHint) return;
+    gestureHint.classList.remove("is-visible");
+    gestureHint.hidden = true;
+  }, delay || 700);
+}
+
+function initPlayerGestures() {
+  if (!videoWrapper || !video) return;
+
+  videoWrapper.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 1) {
+        gesture = null;
+        return;
+      }
+      const touch = e.touches[0];
+      const rect = videoWrapper.getBoundingClientRect();
+      if (!rect.height) return;
+
+      gesture = {
+        x: touch.clientX,
+        y: touch.clientY,
+        height: rect.height,
+        side: touch.clientX - rect.left < rect.width / 2 ? "brightness" : "volume",
+        startBrightness: getBrightness(),
+        startVolume: video.volume,
+        active: false,
+      };
+    },
+    { passive: true }
+  );
+
+  videoWrapper.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!gesture || e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - gesture.x;
+      const dy = gesture.y - touch.clientY;
+
+      // Solo se captura el gesto si es claramente vertical; así los toques y la
+      // barra de controles nativa siguen funcionando.
+      if (!gesture.active) {
+        if (Math.abs(dy) < GESTURE_THRESHOLD || Math.abs(dy) <= Math.abs(dx)) return;
+        gesture.active = true;
+      }
+
+      e.preventDefault();
+      const ratio = dy / gesture.height;
+
+      if (gesture.side === "brightness") {
+        const range = BRIGHTNESS_MAX - BRIGHTNESS_MIN;
+        const next = applyBrightness(gesture.startBrightness + ratio * range);
+        showGestureHint("☀", (next - BRIGHTNESS_MIN) / range);
+        return;
+      }
+
+      const target = Math.min(1, Math.max(0, gesture.startVolume + ratio));
+      try {
+        video.volume = target;
+        if (target > 0) video.muted = false;
+      } catch (err) {}
+
+      // iOS no permite cambiar el volumen por código: se avisa en vez de mentir
+      // con un indicador que no corresponde a nada.
+      if (Math.abs(video.volume - target) > 0.05) {
+        if (!volumeLockWarned) {
+          volumeLockWarned = true;
+          showToast("En iPhone y iPad el volumen se cambia con los botones del dispositivo");
+        }
+        hideGestureHint(0);
+        return;
+      }
+
+      showGestureHint(video.volume === 0 ? "🔇" : "🔊", video.volume);
+    },
+    { passive: false }
+  );
+
+  const endGesture = () => {
+    if (gesture && gesture.active) hideGestureHint(700);
+    gesture = null;
+  };
+  videoWrapper.addEventListener("touchend", endGesture, { passive: true });
+  videoWrapper.addEventListener("touchcancel", endGesture, { passive: true });
+}
+
+applyBrightness(getBrightness());
+initPlayerGestures();
+
 /********** SISTEMA DE BOTONES **********/
 function doLogout() {
   sendActivity("stop");

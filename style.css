@@ -323,6 +323,55 @@ html, body {
   display: none !important;
 }
 
+/********** INDICADOR DE GESTOS (brillo / volumen) **********/
+.gesture-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.82);
+  color: #f8fafc;
+  font-size: 0.95rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.gesture-hint.is-visible {
+  opacity: 1;
+}
+.gesture-hint[hidden] {
+  display: none;
+}
+.gesture-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.gesture-bar {
+  width: 110px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.35);
+  overflow: hidden;
+}
+.gesture-bar i {
+  display: block;
+  height: 100%;
+  width: 50%;
+  background: #6366f1;
+  border-radius: 3px;
+}
+.gesture-value {
+  min-width: 3.2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .debug-overlay {
   position: fixed;
   inset: 0;
