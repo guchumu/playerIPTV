@@ -1001,15 +1001,15 @@ async function probeStream() {
 // Segundos ya descargados por delante del punto que se está viendo: es el
 // colchón real que queda antes de que la imagen se pare.
 function getBufferAhead() {
-  if (!video) return 0;
+  if (!video || !video.buffered || !video.buffered.length) return 0;
   try {
-    for (let i = 0; i < video.buffered.length; i++) {
-      if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
-        return Math.max(0, video.buffered.end(i) - video.currentTime);
-      }
-    }
-  } catch (e) {}
-  return 0;
+    // Se mide contra el final del último tramo en vez de buscar el que
+    // contiene al cursor: al pausar justo en el borde del directo, el cursor
+    // puede quedar unas milésimas fuera y eso daba cero con buffer de sobra.
+    return Math.max(0, video.buffered.end(video.buffered.length - 1) - video.currentTime);
+  } catch (e) {
+    return 0;
+  }
 }
 
 function getPlaybackStats() {
@@ -1362,7 +1362,11 @@ function beginPrebufferFill(channel) {
     video.pause();
   } catch (e) {}
 
-  const deadline = Date.now() + target * 1000 + 15000;
+  const startedAt = Date.now();
+  const initial = getBufferAhead();
+  let best = initial;
+  const deadline = startedAt + target * 1000 + 5000;
+  const growthCheck = startedAt + 3000;
 
   const finish = (reason) => {
     prebufferActive = false;
@@ -1382,7 +1386,11 @@ function beginPrebufferFill(channel) {
     }
 
     const ahead = getBufferAhead();
+    if (ahead > best) best = ahead;
     if (ahead >= target) return finish("completo");
+    // Hay fuentes que emiten en tiempo estricto y no dejan acumular nada.
+    // Detectarlo en tres segundos evita esperas larguísimas para nada.
+    if (Date.now() > growthCheck && best - initial < 0.5) return finish("la fuente no acumula, se sigue sin esperar");
     if (Date.now() > deadline) return finish("tiempo agotado");
 
     if (!video.paused) {
@@ -1503,7 +1511,9 @@ function startPlayback(channel) {
         // Este colchón es lo que absorbe los altibajos de la conexión. Bajarlo
         // acelera el arranque pero deja la reproducción pegada al borde del
         // directo y cortándose, así que manda la estabilidad.
-        stashInitialSize: Math.max(384 * 1024, bufferSec * 48 * 1024),
+        // Es un buffer de entrada en bytes, no de reproducción: agrandarlo solo
+        // retrasa el primer fotograma. Se deja en el valor por defecto.
+        stashInitialSize: 384 * 1024,
         // El perseguidor de latencia de mpegts.js salta al borde del directo en
         // cuanto hay unos segundos acumulados, que es justo el colchón que
         // evita los cortes. Se desactiva y el límite lo pone enforceLiveDelay,
@@ -1625,6 +1635,11 @@ if (video) {
     clearTimeout(bufferingSpinnerTimer);
     bufferingSpinnerTimer = null;
   });
+
+  // Desglose del arranque: separa lo que tarda la conexión de lo que tarda el
+  // decodificador en encontrar un fotograma clave.
+  video.addEventListener("loadedmetadata", () => logPlayback("metadatos", "cabecera del stream leída"));
+  video.addEventListener("loadeddata", () => logPlayback("primer dato", "listo para decodificar"));
   // mpegts.js sigue descargando por su cuenta con el vídeo en pausa, pero
   // hls.js se detiene al llegar a maxBufferLength. Durante la pausa interesa
   // dejarlo crecer: es lo que da colchón al reanudar.
