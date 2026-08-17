@@ -864,6 +864,117 @@ function parseM3U(content) {
   };
 }
 
+/********** REGISTRO DE EVENTOS DEL CANAL **********/
+const MAX_LOG_ENTRIES = 30;
+let playbackLog = [];
+let channelStartedAt = 0;
+
+// Las URL de Xtream llevan el usuario y la contraseña dentro. El informe de
+// debug está pensado para copiarse y mandarse, así que se ocultan.
+function maskCredentials(value) {
+  return String(value || "")
+    .replace(/([?&](?:username|password|user|pass)=)[^&]*/gi, "$1***")
+    .replace(/\/(live|movie|series)\/[^/]+\/[^/]+\//gi, "/$1/***/***/");
+}
+
+function maskUrl(url) {
+  let s = String(url || "");
+  // stream.php?url=... lleva la URL real codificada dentro.
+  s = s.replace(/([?&]url=)([^&]+)/i, (all, prefix, value) => {
+    let inner = value;
+    try {
+      inner = decodeURIComponent(value);
+    } catch (e) {}
+    return prefix + maskCredentials(inner);
+  });
+  return maskCredentials(s);
+}
+
+function logPlayback(kind, detail) {
+  playbackLog.push({
+    at: channelStartedAt ? (Date.now() - channelStartedAt) / 1000 : 0,
+    kind: kind,
+    detail: detail == null ? "" : String(detail),
+  });
+  if (playbackLog.length > MAX_LOG_ENTRIES) playbackLog.shift();
+  refreshDebugPanel();
+}
+
+function resetPlaybackLog() {
+  playbackLog = [];
+  channelStartedAt = Date.now();
+  refreshDebugPanel();
+}
+
+function formatPlaybackLog() {
+  if (!playbackLog.length) return "  (sin eventos todavía)";
+  // Lo último arriba: al diagnosticar un fallo interesa lo que acaba de pasar.
+  return playbackLog
+    .slice()
+    .reverse()
+    .map((e) => "  +" + e.at.toFixed(1) + "s  " + e.kind + (e.detail ? ": " + e.detail : ""))
+    .join("\n");
+}
+
+function describeMediaError() {
+  if (!video || !video.error) return "";
+  const names = {
+    1: "MEDIA_ERR_ABORTED (cancelado)",
+    2: "MEDIA_ERR_NETWORK (fallo de red)",
+    3: "MEDIA_ERR_DECODE (no se pudo decodificar)",
+    4: "MEDIA_ERR_SRC_NOT_SUPPORTED (formato o URL no soportados)",
+  };
+  const code = video.error.code;
+  return (names[code] || "código " + code) + (video.error.message ? " · " + video.error.message : "");
+}
+
+/**
+ * Pide los primeros bytes del stream para ver qué contesta el servidor. Es lo
+ * que distingue un 403, un 404 o el típico límite de conexiones de un fallo
+ * del reproductor. Abre una conexión, así que solo se lanza cuando el canal
+ * ya ha fallado del todo o cuando se pide a mano.
+ */
+async function probeStream() {
+  const url = currentChannelRef ? currentChannelRef.url : "";
+  if (!url) {
+    logPlayback("diagnostico", "no hay canal que comprobar");
+    return;
+  }
+
+  const base = window.location.origin + window.location.pathname.replace("index.html", "");
+  const target = base + "stream.php?url=" + encodeURIComponent(url);
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const cut = setTimeout(() => controller && controller.abort(), 8000);
+
+  logPlayback("diagnostico", "consultando el servidor...");
+  try {
+    const res = await fetch(target, {
+      cache: "no-store",
+      signal: controller ? controller.signal : undefined,
+    });
+    const type = res.headers.get("content-type") || "sin tipo";
+    logPlayback("diagnostico", "HTTP " + res.status + " " + (res.statusText || "") + " · " + type);
+
+    // Un stream sano devuelve binario; si contesta texto, casi siempre es el
+    // mensaje de error del proveedor y merece la pena leerlo.
+    if (!res.ok || /text|json|html|xml/i.test(type)) {
+      const body = await res.text();
+      logPlayback("diagnostico", "respuesta: " + body.slice(0, 300).replace(/\s+/g, " ").trim());
+    } else {
+      logPlayback("diagnostico", "el servidor envía datos, el fallo es del reproductor o del formato");
+    }
+  } catch (e) {
+    logPlayback("diagnostico", "sin respuesta: " + (e && e.name === "AbortError" ? "tiempo agotado" : e && e.message));
+  } finally {
+    clearTimeout(cut);
+    if (controller) {
+      try {
+        controller.abort();
+      } catch (e) {}
+    }
+  }
+}
+
 // Segundos ya descargados por delante del punto que se está viendo: es el
 // colchón real que queda antes de que la imagen se pare.
 function getBufferAhead() {
@@ -884,7 +995,16 @@ function getPlaybackStats() {
   const lines = [];
   const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
   lines.push("  canal: " + (channel ? channel.name : "-"));
+  if (channel) {
+    lines.push("  categoria: " + (channel.category || "-"));
+    lines.push("  tvg-id: " + (channel.tvgId || "-"));
+    lines.push("  url origen: " + maskUrl(channel.url));
+    lines.push("  url activa: " + maskUrl(video.getAttribute("data-active-url")));
+  }
   lines.push("  motor: " + (hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
+  lines.push("  readyState: " + video.readyState + " · networkState: " + video.networkState);
+  const mediaError = describeMediaError();
+  if (mediaError) lines.push("  error del <video>: " + mediaError);
   lines.push("  resolucion: " + (video.videoWidth || 0) + "x" + (video.videoHeight || 0));
 
   lines.push("  buffer por delante: " + getBufferAhead().toFixed(1) + "s");
@@ -937,6 +1057,8 @@ function getDebugReport() {
     "epg alias: " + Object.keys(epgAliases).length,
     "epg cargada: " + (epgLoadedAt ? new Date(epgLoadedAt).toLocaleTimeString() : "no"),
     "epg intentos: " + epgRetryIndex,
+    "-- eventos del canal (lo mas reciente arriba) --",
+    formatPlaybackLog(),
     "-- reproduccion --",
     getPlaybackStats(),
     "muestras url raras:",
@@ -1012,6 +1134,13 @@ function initDebugDrag() {
 }
 
 initDebugDrag();
+
+function refreshDebugPanel() {
+  const output = document.getElementById("debugOutput");
+  const overlay = document.getElementById("debugOverlay");
+  if (!output || !overlay || !overlay.classList.contains("is-open")) return;
+  output.textContent = getDebugReport();
+}
 
 function setDebugOpen(open) {
   const overlay = document.getElementById("debugOverlay");
@@ -1143,6 +1272,7 @@ let playbackRetries = 0;
 let playbackRetryTimer = null;
 let hlsRecoveries = 0;
 let stallCount = 0;
+let startLogged = false;
 
 function clearPlaybackRetry() {
   clearTimeout(playbackRetryTimer);
@@ -1171,12 +1301,17 @@ function handlePlaybackFailure() {
 
   if (playbackRetries >= PLAYBACK_RETRY_DELAYS.length) {
     showToast("No se pudo reproducir el canal");
+    logPlayback("abandonado", "agotados los " + PLAYBACK_RETRY_DELAYS.length + " reintentos");
+    // Ya no hay stream abierto, así que preguntar al servidor no le quita
+    // ninguna conexión al usuario y explica el motivo real del fallo.
+    probeStream();
     return;
   }
 
   const delay = PLAYBACK_RETRY_DELAYS[playbackRetries];
   playbackRetries++;
   showToast("Reconectando (" + playbackRetries + "/" + PLAYBACK_RETRY_DELAYS.length + ")...");
+  logPlayback("reintento", playbackRetries + "/" + PLAYBACK_RETRY_DELAYS.length + " en " + delay / 1000 + "s");
 
   const channel = currentChannelRef;
   clearPlaybackRetry();
@@ -1191,6 +1326,11 @@ function playChannel(channel) {
   currentChannelRef = channel;
   playbackRetries = 0;
   stallCount = 0;
+  // Cada canal empieza con el registro limpio: mezclarlo con el anterior solo
+  // estorba al buscar por qué ha fallado este.
+  resetPlaybackLog();
+  startLogged = false;
+  logPlayback("canal", channel.name + " · " + (channel.category || "sin categoría"));
   clearPlaybackRetry();
   rememberLastChannel(channel);
   startPlayback(channel);
@@ -1256,12 +1396,18 @@ function startPlayback(channel) {
     } else {
       showVideoSpinner(false);
     }
-    mpegtsPlayer.on(mpegts.Events.ERROR, handlePlaybackFailure);
+    mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+      const info = errorInfo && (errorInfo.msg || errorInfo.code) ? " · " + (errorInfo.code || "") + " " + (errorInfo.msg || "") : "";
+      logPlayback("error mpegts", errorType + " / " + errorDetail + info);
+      handlePlaybackFailure();
+    });
+    logPlayback("motor", "mpegts.js · buffer " + bufferSec + "s · " + maskUrl(proxiedTsUrl));
   } else if (isTs && !mseSupported) {
     const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
+    logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · " + maskUrl(iosUrl));
   } else if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
     if (window.Hls && Hls.isSupported()) {
@@ -1275,14 +1421,22 @@ function startPlayback(channel) {
       });
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
+      logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(originalUrl));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         tryAutoPlay();
         refreshTrackSelectors();
+        logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
       });
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.ERROR, (e, data) => {
-        if (!data || !data.fatal) return;
+        if (!data) return;
+        const parts = [data.type, data.details];
+        if (data.response && data.response.code) parts.push("HTTP " + data.response.code);
+        if (data.reason) parts.push(data.reason);
+        if (data.url) parts.push(maskUrl(data.url));
+        logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
+        if (!data.fatal) return;
         // Los fallos de red y de medio tienen recuperación propia en hls.js.
         // Se limita el número de intentos para no quedarse en bucle si el
         // origen está caído; a partir de ahí se reinicia el canal entero.
@@ -1305,11 +1459,13 @@ function startPlayback(channel) {
     } else {
       video.src = originalUrl;
       tryAutoPlay();
+      logPlayback("motor", "nativo (hls.js no soportado) · " + maskUrl(originalUrl));
     }
   } else {
     video.setAttribute("data-active-url", originalUrl);
     video.src = originalUrl;
     tryAutoPlay();
+    logPlayback("motor", "nativo (formato no reconocido) · " + maskUrl(originalUrl));
   }
 }
 
@@ -1318,6 +1474,9 @@ if (video) {
   video.preload = "auto";
 
   video.addEventListener("playing", () => {
+    if (playbackRetries > 0) logPlayback("recuperado", "tras " + playbackRetries + " reintento(s)");
+    else if (!startLogged) logPlayback("reproduciendo", video.videoWidth + "×" + video.videoHeight);
+    startLogged = true;
     playbackRetries = 0;
     hlsRecoveries = 0;
     clearPlaybackRetry();
@@ -1330,7 +1489,12 @@ if (video) {
     if (teardownInProgress) return;
     stallCount++;
     if (bufferingSpinnerTimer) return;
-    bufferingSpinnerTimer = setTimeout(() => showVideoSpinner(true), 900);
+    bufferingSpinnerTimer = setTimeout(() => {
+      showVideoSpinner(true);
+      // Solo se registran los cortes reales; los de medio segundo son
+      // constantes en directo y taparían el resto del registro.
+      logPlayback("corte", "nº " + stallCount + " · buffer " + getBufferAhead().toFixed(1) + "s");
+    }, 900);
   });
   video.addEventListener("canplay", () => {
     clearTimeout(bufferingSpinnerTimer);
@@ -1352,8 +1516,14 @@ if (video) {
     } catch (e) {}
   });
 
-  video.addEventListener("error", handlePlaybackFailure);
-  video.addEventListener("ended", handlePlaybackFailure);
+  video.addEventListener("error", () => {
+    if (!teardownInProgress) logPlayback("error del <video>", describeMediaError() || "sin detalle");
+    handlePlaybackFailure();
+  });
+  video.addEventListener("ended", () => {
+    if (!teardownInProgress) logPlayback("fin del stream", "el servidor cerró la emisión");
+    handlePlaybackFailure();
+  });
 }
 
 /********** ESTADO DE REPRODUCCIÓN SIEMPRE VISIBLE **********/
@@ -1407,6 +1577,7 @@ function stopChannel() {
   if (epgNextEl) epgNextEl.textContent = "--:--";
   renderEpgTimeline();
   updatePlaybackStatus();
+  logPlayback("parado", "detenido por el usuario, conexión liberada");
   showToast("Canal detenido");
 }
 
@@ -2228,6 +2399,9 @@ function updateCursorVisuals() {
     }
   }
 }
+
+const debugProbeBtn = document.getElementById("debugProbeBtn");
+if (debugProbeBtn) debugProbeBtn.addEventListener("click", probeStream);
 
 const debugCopyBtn = document.getElementById("debugCopyBtn");
 if (debugCopyBtn) {
