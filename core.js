@@ -32,6 +32,8 @@ let epgRetryTimer = null;
 let epgRetryIndex = 0;
 let epgLastStatus = "sin intentar";
 let loginCancelled = false;
+let teardownInProgress = false;
+let teardownTimer = null;
 const EPG_RETRY_DELAYS = [8000, 20000, 45000, 90000, 180000, 300000];
 let channelById = new Map();
 let pollingInterval = null;
@@ -63,6 +65,11 @@ function showSpinner(show, message) {
     globalSpinner.hidden = !show;
     if (globalSpinnerText && message) globalSpinnerText.textContent = message;
   }
+}
+
+// Carga o rebuffering de un canal: solo tapa el vídeo, nunca la aplicación
+// entera como hace el spinner global del login.
+function showVideoSpinner(show) {
   if (spinner) spinner.style.display = show ? "flex" : "none";
 }
 
@@ -100,6 +107,14 @@ function setBufferSeconds(value) {
 }
 
 function stopPlayback() {
+  // Vaciar el <video> dispara un evento de error propio; sin esta marca el
+  // reconector lo confundiría con una caída del stream.
+  teardownInProgress = true;
+  clearTimeout(teardownTimer);
+  teardownTimer = setTimeout(() => {
+    teardownInProgress = false;
+  }, 400);
+
   try {
     if (hls) {
       hls.stopLoad();
@@ -123,7 +138,6 @@ function stopPlayback() {
   try {
     video.pause();
   } catch (e) {}
-  video.onerror = null;
   video.removeAttribute("src");
   video.removeAttribute("data-active-url");
   try {
@@ -272,6 +286,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       if (!channelsData.length) throw new Error("La lista no contiene canales");
       finishLogin(currentUser);
       renderCategories();
+      restoreLastChannel();
       checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -310,6 +325,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       showSpinner(true, "Descargando canales...");
       await loadM3UFromXtream();
       renderCategories();
+      restoreLastChannel();
       if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -606,6 +622,7 @@ async function loadEPG() {
 
     refreshVisibleChannelEPG();
     refreshPlayerEPG();
+    renderEpgTimeline();
     scheduleEpgTimers();
     return true;
   } catch (e) {
@@ -634,6 +651,7 @@ function scheduleEpgTimers() {
   epgRefreshTimer = setInterval(() => {
     refreshVisibleChannelEPG();
     refreshPlayerEPG();
+    renderEpgTimeline();
   }, 60 * 1000);
 
   clearInterval(epgReloadTimer);
@@ -840,6 +858,47 @@ function parseM3U(content) {
   };
 }
 
+function getPlaybackStats() {
+  if (!video) return "  (sin reproductor)";
+
+  const lines = [];
+  const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
+  lines.push("  canal: " + (channel ? channel.name : "-"));
+  lines.push("  motor: " + (hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
+  lines.push("  resolucion: " + (video.videoWidth || 0) + "x" + (video.videoHeight || 0));
+
+  let buffered = 0;
+  try {
+    for (let i = 0; i < video.buffered.length; i++) {
+      if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+        buffered = video.buffered.end(i) - video.currentTime;
+      }
+    }
+  } catch (e) {}
+  lines.push("  buffer por delante: " + buffered.toFixed(1) + "s");
+
+  try {
+    if (video.getVideoPlaybackQuality) {
+      const q = video.getVideoPlaybackQuality();
+      lines.push("  fotogramas: " + q.totalVideoFrames + " (perdidos " + q.droppedVideoFrames + ")");
+    }
+  } catch (e) {}
+
+  if (hls) {
+    try {
+      const level = hls.levels && hls.levels[hls.currentLevel];
+      if (level) lines.push("  bitrate: " + Math.round(level.bitrate / 1000) + " kbps");
+      lines.push("  pistas audio: " + ((hls.audioTracks && hls.audioTracks.length) || 0));
+      lines.push("  pistas subs: " + ((hls.subtitleTracks && hls.subtitleTracks.length) || 0));
+    } catch (e) {}
+  }
+
+  lines.push("  reintentos: " + playbackRetries);
+  lines.push("  ajuste imagen: " + FIT_MODES[getFitIndex()].value);
+  lines.push("  chromecast: " + (castReady ? "listo" : "no disponible"));
+  return lines.join("\n");
+}
+
 function getDebugReport() {
   const d = lastParseDebug || {};
   const catLines = Object.keys(categoriesData)
@@ -864,6 +923,8 @@ function getDebugReport() {
     "epg alias: " + Object.keys(epgAliases).length,
     "epg cargada: " + (epgLoadedAt ? new Date(epgLoadedAt).toLocaleTimeString() : "no"),
     "epg intentos: " + epgRetryIndex,
+    "-- reproduccion --",
+    getPlaybackStats(),
     "muestras url raras:",
     d.skippedSamples && d.skippedSamples.length ? d.skippedSamples.join("\n") : "  (ninguna)",
     "canales por categoria:",
@@ -871,14 +932,22 @@ function getDebugReport() {
   ].join("\n");
 }
 
+let debugRefreshTimer = null;
+
 function setDebugOpen(open) {
   const overlay = document.getElementById("debugOverlay");
   const output = document.getElementById("debugOutput");
   if (!overlay || !output) return;
+  clearInterval(debugRefreshTimer);
+  debugRefreshTimer = null;
+
   if (open) {
     output.textContent = getDebugReport();
     overlay.classList.add("is-open");
     overlay.hidden = false;
+    debugRefreshTimer = setInterval(() => {
+      output.textContent = getDebugReport();
+    }, 1000);
   } else {
     overlay.classList.remove("is-open");
     overlay.hidden = true;
@@ -943,26 +1012,12 @@ function renderChannels(channels) {
     const nameEl = document.createElement("div");
     nameEl.className = "channel-name";
     nameEl.textContent = channel.name;
-    const epgEl = document.createElement("div");
-    epgEl.className = "channel-epg";
-    epgEl.textContent = channelEpgLabel(channel);
     info.appendChild(nameEl);
-    info.appendChild(epgEl);
     channelDiv.appendChild(info);
 
     channelDiv.addEventListener("click", () => {
-      if (currentlyPlayingId === channel.id) {
-        if (video.requestFullscreen) video.requestFullscreen();
-      } else {
-        currentlyPlayingId = channel.id;
-        document.querySelectorAll(".channel-item").forEach((i) => i.classList.remove("playing"));
-        document.querySelectorAll(".channel-item").forEach((i) => {
-          if (i.dataset.id === channel.id) i.classList.add("playing");
-        });
-
-        playChannel(channel);
-        refreshPlayerEPG();
-      }
+      if (currentlyPlayingId === channel.id) toggleFullscreen();
+      else selectChannel(channel);
     });
 
     if (channelsContainer) channelsContainer.appendChild(channelDiv);
@@ -970,11 +1025,56 @@ function renderChannels(channels) {
 }
 
 /********** MOTOR DE REPRODUCCIÓN **********/
+const PLAYBACK_RETRY_DELAYS = [2000, 5000, 10000];
+let currentChannelRef = null;
+let playbackRetries = 0;
+let playbackRetryTimer = null;
+let hlsRecoveries = 0;
+
+function clearPlaybackRetry() {
+  clearTimeout(playbackRetryTimer);
+  playbackRetryTimer = null;
+}
+
+/**
+ * En IPTV los cortes son constantes, así que un fallo no debe dejar la pantalla
+ * en negro: se reintenta el mismo canal antes de darse por vencido.
+ */
+function handlePlaybackFailure() {
+  if (teardownInProgress || !currentChannelRef) return;
+  showVideoSpinner(false);
+
+  if (playbackRetries >= PLAYBACK_RETRY_DELAYS.length) {
+    showToast("No se pudo reproducir el canal");
+    return;
+  }
+
+  const delay = PLAYBACK_RETRY_DELAYS[playbackRetries];
+  playbackRetries++;
+  showToast("Reconectando (" + playbackRetries + "/" + PLAYBACK_RETRY_DELAYS.length + ")...");
+
+  const channel = currentChannelRef;
+  clearPlaybackRetry();
+  playbackRetryTimer = setTimeout(() => {
+    if (currentChannelRef && currentChannelRef.id === channel.id) startPlayback(channel);
+  }, delay);
+}
+
 function playChannel(channel) {
+  currentChannelRef = channel;
+  playbackRetries = 0;
+  clearPlaybackRetry();
+  rememberLastChannel(channel);
+  startPlayback(channel);
+}
+
+function startPlayback(channel) {
   if (!video) return;
-  showSpinner(true);
+  showVideoSpinner(true);
   stopPlayback();
   updateActivity(channel);
+  resetTrackSelectors();
+  hlsRecoveries = 0;
 
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
   const originalUrl = channel.url;
@@ -985,9 +1085,16 @@ function playChannel(channel) {
   const tryAutoPlay = () => {
     const playPromise = video.play();
     if (playPromise !== undefined) {
-      playPromise.then(() => showSpinner(false)).catch(() => showSpinner(false));
+      playPromise
+        .then(() => showVideoSpinner(false))
+        .catch((err) => {
+          showVideoSpinner(false);
+          // Al reanudar el último canal no hay gesto previo del usuario y el
+          // navegador bloquea el arranque automático.
+          if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
+        });
     } else {
-      showSpinner(false);
+      showVideoSpinner(false);
     }
   };
 
@@ -1001,7 +1108,9 @@ function playChannel(channel) {
       {
         enableWorker: true,
         enableStashBuffer: true,
-        stashInitialSize: Math.max(384 * 1024, bufferSec * 48 * 1024),
+        // Arranque con poco relleno: el buffer elegido sigue aplicándose después,
+        // pero esperar a llenarlo antes del primer fotograma hacía el zapeo lento.
+        stashInitialSize: 256 * 1024,
         liveBufferLatencyChasing: true,
         liveBufferLatencyMaxLatency: Math.max(3, Math.min(bufferSec, 20)),
         liveBufferLatencyMinRemain: 1,
@@ -1011,17 +1120,16 @@ function playChannel(channel) {
     mpegtsPlayer.load();
     const p = mpegtsPlayer.play();
     if (p !== undefined) {
-      p.then(() => showSpinner(false)).catch(() => showSpinner(false));
+      p.then(() => showVideoSpinner(false)).catch(() => showVideoSpinner(false));
     } else {
-      showSpinner(false);
+      showVideoSpinner(false);
     }
-    mpegtsPlayer.on(mpegts.Events.ERROR, () => showSpinner(false));
+    mpegtsPlayer.on(mpegts.Events.ERROR, handlePlaybackFailure);
   } else if (isTs && !mseSupported) {
     const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
-    video.onerror = () => showSpinner(false);
   } else if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
     if (window.Hls && Hls.isSupported()) {
@@ -1036,9 +1144,32 @@ function playChannel(channel) {
       });
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, tryAutoPlay);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        tryAutoPlay();
+        refreshTrackSelectors();
+      });
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.ERROR, (e, data) => {
-        if (data.fatal) showSpinner(false);
+        if (!data || !data.fatal) return;
+        // Los fallos de red y de medio tienen recuperación propia en hls.js.
+        // Se limita el número de intentos para no quedarse en bucle si el
+        // origen está caído; a partir de ahí se reinicia el canal entero.
+        if (hlsRecoveries < 3) {
+          hlsRecoveries++;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            try {
+              hls.startLoad();
+              return;
+            } catch (err) {}
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            try {
+              hls.recoverMediaError();
+              return;
+            } catch (err) {}
+          }
+        }
+        handlePlaybackFailure();
       });
     } else {
       video.src = originalUrl;
@@ -1049,6 +1180,373 @@ function playChannel(channel) {
     video.src = originalUrl;
     tryAutoPlay();
   }
+}
+
+/********** ESTADO DEL <video> **********/
+if (video) {
+  video.preload = "auto";
+
+  video.addEventListener("playing", () => {
+    playbackRetries = 0;
+    hlsRecoveries = 0;
+    clearPlaybackRetry();
+    showVideoSpinner(false);
+  });
+  video.addEventListener("waiting", () => {
+    if (!teardownInProgress) showVideoSpinner(true);
+  });
+  video.addEventListener("error", handlePlaybackFailure);
+  video.addEventListener("ended", handlePlaybackFailure);
+}
+
+/********** ÚLTIMO CANAL **********/
+const LAST_CHANNEL_KEY = "streambox_last_channel";
+
+function rememberLastChannel(channel) {
+  try {
+    localStorage.setItem(LAST_CHANNEL_KEY, JSON.stringify({ id: channel.id, cat: channel.category }));
+  } catch (e) {}
+}
+
+function selectChannel(channel) {
+  if (!channel) return;
+  currentlyPlayingId = channel.id;
+  document.querySelectorAll(".channel-item").forEach((item) => {
+    item.classList.toggle("playing", item.dataset.id === channel.id);
+  });
+  playChannel(channel);
+  refreshPlayerEPG();
+  renderEpgTimeline();
+}
+
+function restoreLastChannel() {
+  try {
+    const raw = localStorage.getItem(LAST_CHANNEL_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    const channel = saved && saved.id ? channelById.get(saved.id) : null;
+    if (!channel) return false;
+
+    const category = saved.cat && categoriesData[saved.cat] ? saved.cat : channel.category;
+    if (category && categoriesData[category]) selectCategory(category);
+    selectChannel(channel);
+
+    const el = channelsContainer ? channelsContainer.querySelector(".channel-item.playing") : null;
+    if (el) el.scrollIntoView({ block: "nearest" });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/********** PANTALLA COMPLETA **********/
+function isFullscreen() {
+  return !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    (video && video.webkitDisplayingFullscreen)
+  );
+}
+
+function enterFullscreen() {
+  if (!video) return;
+  const target = video.parentElement || video;
+  try {
+    if (target.requestFullscreen) target.requestFullscreen();
+    else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  } catch (e) {}
+}
+
+function exitFullscreen() {
+  try {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    else if (video && video.webkitExitFullscreen) video.webkitExitFullscreen();
+  } catch (e) {}
+}
+
+function toggleFullscreen() {
+  if (isFullscreen()) exitFullscreen();
+  else enterFullscreen();
+}
+
+// Girar el móvil a horizontal entra a pantalla completa. Algunos navegadores
+// exigen un gesto del usuario y lo rechazan; por eso va en try/catch silencioso.
+function handleOrientationChange() {
+  if (!document.body.classList.contains("is-mobile")) return;
+  const landscape = window.matchMedia("(orientation: landscape)").matches;
+  if (landscape && currentlyPlayingId && !isFullscreen()) enterFullscreen();
+  else if (!landscape && isFullscreen()) exitFullscreen();
+}
+
+window.addEventListener("orientationchange", () => setTimeout(handleOrientationChange, 250));
+
+/********** SALTO EN EL TIEMPO **********/
+function seekBy(seconds) {
+  if (!video) return false;
+  try {
+    if (!video.seekable || !video.seekable.length) return false;
+    const start = video.seekable.start(0);
+    const end = video.seekable.end(video.seekable.length - 1);
+    if (end - start < 5) return false;
+    video.currentTime = Math.min(end, Math.max(start, video.currentTime + seconds));
+    showToast((seconds > 0 ? "+" : "") + seconds + "s");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/********** AJUSTE DE IMAGEN **********/
+const FIT_KEY = "streambox_fit";
+const FIT_MODES = [
+  { value: "contain", label: "Ajustar (sin recortar)" },
+  { value: "cover", label: "Rellenar (recorta)" },
+  { value: "fill", label: "Estirar" },
+];
+
+function getFitIndex() {
+  const stored = localStorage.getItem(FIT_KEY);
+  const i = FIT_MODES.findIndex((m) => m.value === stored);
+  return i < 0 ? 0 : i;
+}
+
+function applyFit(index) {
+  const mode = FIT_MODES[index % FIT_MODES.length];
+  if (video) video.style.objectFit = mode.value;
+  localStorage.setItem(FIT_KEY, mode.value);
+  return mode;
+}
+
+const aspectBtn = document.getElementById("aspectBtn");
+if (aspectBtn) {
+  aspectBtn.addEventListener("click", () => {
+    const next = (getFitIndex() + 1) % FIT_MODES.length;
+    showToast(applyFit(next).label);
+  });
+}
+applyFit(getFitIndex());
+
+/********** PISTAS DE AUDIO Y SUBTÍTULOS **********/
+const audioTrackWrap = document.getElementById("audioTrackWrap");
+const audioTrackSelect = document.getElementById("audioTrackSelect");
+const subtitleTrackWrap = document.getElementById("subtitleTrackWrap");
+const subtitleTrackSelect = document.getElementById("subtitleTrackSelect");
+
+function resetTrackSelectors() {
+  if (audioTrackWrap) audioTrackWrap.hidden = true;
+  if (subtitleTrackWrap) subtitleTrackWrap.hidden = true;
+  if (audioTrackSelect) audioTrackSelect.innerHTML = "";
+  if (subtitleTrackSelect) subtitleTrackSelect.innerHTML = "";
+}
+
+function trackLabel(track, index) {
+  return track.name || track.label || track.lang || track.language || "Pista " + (index + 1);
+}
+
+function fillSelect(select, options, selectedValue) {
+  if (!select) return;
+  select.innerHTML = "";
+  options.forEach((opt) => {
+    const el = document.createElement("option");
+    el.value = String(opt.value);
+    el.textContent = opt.label;
+    if (String(opt.value) === String(selectedValue)) el.selected = true;
+    select.appendChild(el);
+  });
+}
+
+function refreshTrackSelectors() {
+  if (hls && hls.audioTracks && hls.audioTracks.length > 1) {
+    fillSelect(
+      audioTrackSelect,
+      hls.audioTracks.map((t, i) => ({ value: i, label: trackLabel(t, i) })),
+      hls.audioTrack
+    );
+    if (audioTrackWrap) audioTrackWrap.hidden = false;
+  } else if (audioTrackWrap) {
+    audioTrackWrap.hidden = true;
+  }
+
+  const subs = (hls && hls.subtitleTracks) || [];
+  if (subs.length) {
+    const options = [{ value: -1, label: "Desactivados" }].concat(
+      subs.map((t, i) => ({ value: i, label: trackLabel(t, i) }))
+    );
+    fillSelect(subtitleTrackSelect, options, hls.subtitleTrack);
+    if (subtitleTrackWrap) subtitleTrackWrap.hidden = false;
+  } else if (subtitleTrackWrap) {
+    subtitleTrackWrap.hidden = true;
+  }
+}
+
+if (audioTrackSelect) {
+  audioTrackSelect.addEventListener("change", () => {
+    if (hls) hls.audioTrack = parseInt(audioTrackSelect.value, 10);
+  });
+}
+if (subtitleTrackSelect) {
+  subtitleTrackSelect.addEventListener("change", () => {
+    if (hls) hls.subtitleTrack = parseInt(subtitleTrackSelect.value, 10);
+  });
+}
+
+/********** PICTURE-IN-PICTURE Y AIRPLAY **********/
+const pipBtn = document.getElementById("pipBtn");
+if (pipBtn && document.pictureInPictureEnabled) {
+  pipBtn.hidden = false;
+  pipBtn.addEventListener("click", async () => {
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await video.requestPictureInPicture();
+    } catch (e) {
+      showToast("Picture-in-Picture no disponible");
+    }
+  });
+}
+
+const airplayBtn = document.getElementById("airplayBtn");
+if (airplayBtn && video && window.WebKitPlaybackTargetAvailabilityEvent) {
+  video.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
+    airplayBtn.hidden = e.availability !== "available";
+  });
+  airplayBtn.addEventListener("click", () => {
+    try {
+      video.webkitShowPlaybackTargetPicker();
+    } catch (err) {}
+  });
+}
+
+/********** CHROMECAST **********/
+const castButton = document.getElementById("castButton");
+let castReady = false;
+
+function setupCast() {
+  if (castReady) return true;
+  if (!window.cast || !window.cast.framework || !window.chrome || !chrome.cast) return false;
+  try {
+    cast.framework.CastContext.getInstance().setOptions({
+      receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+    });
+    castReady = true;
+    if (castButton) castButton.hidden = false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+window.__onGCastApiAvailable = function (isAvailable) {
+  if (isAvailable) setupCast();
+};
+
+// El script de Google puede haberse cargado antes que este archivo, en cuyo
+// caso el callback de arriba ya no se llama: se comprueba unas cuantas veces.
+let castChecks = 0;
+const castPoll = setInterval(() => {
+  castChecks++;
+  if (setupCast() || castChecks > 20) clearInterval(castPoll);
+}, 500);
+
+function castCurrentChannel() {
+  if (!setupCast()) {
+    showToast("Chromecast no disponible en este navegador");
+    return;
+  }
+  const url = video ? video.getAttribute("data-active-url") : "";
+  if (!url) {
+    showToast("Elige un canal antes de enviarlo");
+    return;
+  }
+
+  const context = cast.framework.CastContext.getInstance();
+  context
+    .requestSession()
+    .then(() => {
+      const session = context.getCurrentSession();
+      if (!session) throw new Error("sin sesión");
+
+      const isHls = url.indexOf(".m3u8") !== -1;
+      const mediaInfo = new chrome.cast.media.MediaInfo(url, isHls ? "application/x-mpegURL" : "video/mp2t");
+      mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
+      const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
+      const metadata = new chrome.cast.media.GenericMediaMetadata();
+      metadata.title = channel ? channel.name : "StreamBox IPTV";
+      mediaInfo.metadata = metadata;
+
+      return session.loadMedia(new chrome.cast.media.LoadRequest(mediaInfo));
+    })
+    .then(() => showToast("Enviado a Chromecast"))
+    .catch(() => showToast("No se pudo enviar a Chromecast"));
+}
+
+if (castButton) castButton.addEventListener("click", castCurrentChannel);
+
+/********** PARRILLA EPG BAJO EL VÍDEO **********/
+function renderEpgTimeline() {
+  const box = document.getElementById("epgTimeline");
+  const title = document.getElementById("epgTimelineTitle");
+  if (!box) return;
+
+  const setEmpty = (message) => {
+    box.innerHTML = "";
+    const p = document.createElement("div");
+    p.className = "epg-timeline-empty";
+    p.textContent = message;
+    box.appendChild(p);
+  };
+
+  const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
+  if (title) title.textContent = channel ? "Guía · " + channel.name : "Guía del canal";
+
+  if (!channel) return setEmpty("Elige un canal para ver su guía.");
+  if (!hasEPG()) return setEmpty("Cargando guía...");
+
+  const id = resolveEpgChannelId(channel);
+  const list = (id && epgIndex[id]) || [];
+  if (!list.length) return setEmpty("Sin guía para este canal.");
+
+  box.innerHTML = "";
+  const now = Date.now();
+  let nowSlot = null;
+
+  list.forEach((p) => {
+    const slot = document.createElement("div");
+    slot.className = "epg-slot";
+
+    const minutes = Math.max(10, Math.round((p.stopTs - p.startTs) / 60000));
+    slot.style.width = Math.min(280, Math.max(90, minutes * 3)) + "px";
+    if (p.stopTs <= now) slot.classList.add("is-past");
+
+    const time = document.createElement("div");
+    time.className = "epg-slot-time";
+    time.textContent = formatTime(new Date(p.startTs)) + " - " + formatTime(new Date(p.stopTs));
+
+    const name = document.createElement("div");
+    name.className = "epg-slot-title";
+    name.textContent = p.title;
+    name.title = p.title;
+
+    slot.appendChild(time);
+    slot.appendChild(name);
+
+    if (p.startTs <= now && now < p.stopTs) {
+      slot.classList.add("is-now");
+      const progress = document.createElement("div");
+      progress.className = "epg-slot-progress";
+      progress.style.width = Math.round(((now - p.startTs) / (p.stopTs - p.startTs)) * 100) + "%";
+      slot.appendChild(progress);
+      nowSlot = slot;
+    }
+
+    box.appendChild(slot);
+  });
+
+  // scrollIntoView movería también la página, así que se ajusta el scroll
+  // horizontal de la propia parrilla.
+  if (nowSlot) box.scrollLeft = Math.max(0, nowSlot.offsetLeft - box.offsetLeft - 8);
 }
 
 /********** GESTOS TÁCTILES: brillo a la izquierda, volumen a la derecha **********/
@@ -1066,6 +1564,24 @@ const gestureValue = document.getElementById("gestureValue");
 let gesture = null;
 let gestureHideTimer = null;
 let volumeLockWarned = false;
+let lastTapAt = 0;
+let lastTapX = 0;
+
+// Doble toque: laterales para saltar, centro para pantalla completa.
+function handleDoubleTap(clientX) {
+  if (!videoWrapper) return;
+  const rect = videoWrapper.getBoundingClientRect();
+  if (!rect.width) return;
+  const rel = (clientX - rect.left) / rect.width;
+
+  if (rel < 0.33) {
+    if (!seekBy(-15)) showToast("El directo no permite retroceder");
+  } else if (rel > 0.67) {
+    if (!seekBy(15)) showToast("El directo no permite avanzar");
+  } else {
+    toggleFullscreen();
+  }
+}
 
 function getBrightness() {
   const stored = parseFloat(localStorage.getItem(BRIGHTNESS_KEY));
@@ -1176,12 +1692,35 @@ function initPlayerGestures() {
     { passive: false }
   );
 
-  const endGesture = () => {
+  const onTouchEnd = (e) => {
+    const start = gesture;
+    const wasSwipe = !!(start && start.active);
+    gesture = null;
+
+    if (wasSwipe) {
+      hideGestureHint(700);
+      return;
+    }
+    if (!start || !e.changedTouches || !e.changedTouches.length) return;
+
+    const touch = e.changedTouches[0];
+    if (Math.abs(touch.clientX - start.x) > 20 || Math.abs(touch.clientY - start.y) > 20) return;
+
+    const now = Date.now();
+    if (now - lastTapAt < 320 && Math.abs(touch.clientX - lastTapX) < 60) {
+      lastTapAt = 0;
+      handleDoubleTap(touch.clientX);
+      return;
+    }
+    lastTapAt = now;
+    lastTapX = touch.clientX;
+  };
+
+  videoWrapper.addEventListener("touchend", onTouchEnd, { passive: true });
+  videoWrapper.addEventListener("touchcancel", () => {
     if (gesture && gesture.active) hideGestureHint(700);
     gesture = null;
-  };
-  videoWrapper.addEventListener("touchend", endGesture, { passive: true });
-  videoWrapper.addEventListener("touchcancel", endGesture, { passive: true });
+  }, { passive: true });
 }
 
 applyBrightness(getBrightness());
@@ -1194,8 +1733,12 @@ function doLogout() {
   clearInterval(epgRefreshTimer);
   clearInterval(epgReloadTimer);
   clearTimeout(epgRetryTimer);
+  clearPlaybackRetry();
+  currentChannelRef = null;
+  currentlyPlayingId = null;
   localStorage.removeItem("xtream_user");
   stopPlayback();
+  showVideoSpinner(false);
   currentUser = null;
   sessionToken = null;
   activeConnection = null;

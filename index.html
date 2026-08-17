@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="icon" href="logo.png">
-    <link rel="stylesheet" href="style.css?v=20260817h" />
+    <link rel="stylesheet" href="style.css?v=20260817i" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -19,7 +19,7 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260817h</p>
+            <p class="build-tag">v20260817i</p>
 
             <div class="remote-upload-box">
                 <p>Carga tu lista desde el móvil en:</p>
@@ -69,8 +69,19 @@
                         <option value="90">90s</option>
                     </select>
                 </label>
+                <label class="track-control" id="audioTrackWrap" hidden>
+                    Audio
+                    <select id="audioTrackSelect"></select>
+                </label>
+                <label class="track-control" id="subtitleTrackWrap" hidden>
+                    Subs
+                    <select id="subtitleTrackSelect"></select>
+                </label>
+                <button id="aspectBtn" class="action-btn" type="button" title="Ajuste de imagen">🖼</button>
+                <button id="pipBtn" class="action-btn" type="button" title="Picture-in-Picture" hidden>▢</button>
+                <button id="airplayBtn" class="action-btn" type="button" title="AirPlay" hidden>📡</button>
                 <button id="refreshBtn" class="action-btn" type="button" title="Refrescar lista">🔄</button>
-                <button id="castButton" class="action-btn" type="button" title="Chromecast" style="display:none;">📺</button>
+                <button id="castButton" class="action-btn" type="button" title="Chromecast" hidden>📺</button>
                 <button id="logoutBtn" class="action-btn" type="button" title="Salir">⏻</button>
             </div>
         </header>
@@ -103,6 +114,11 @@
                         <div id="epgNext" class="epg-next">--:--</div>
                     </div>
                 </div>
+
+                <div class="epg-timeline-box">
+                    <div class="epg-timeline-title" id="epgTimelineTitle">Guía del canal</div>
+                    <div class="epg-timeline" id="epgTimeline"></div>
+                </div>
             </section>
         </div>
     </div>
@@ -125,6 +141,6 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="core.js?v=20260817h"></script>
+    <script src="core.js?v=20260817i"></script>
 </body>
 </html>

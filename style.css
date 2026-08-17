@@ -323,6 +323,95 @@ html, body {
   display: none !important;
 }
 
+/********** PARRILLA EPG BAJO EL VÍDEO **********/
+.epg-timeline-box {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 10px;
+  padding: 0.4rem 0.5rem;
+  flex-shrink: 0;
+  min-height: 0;
+}
+.epg-timeline-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+}
+.epg-timeline {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.epg-slot {
+  flex: 0 0 auto;
+  min-width: 90px;
+  max-width: 280px;
+  background: rgba(2, 6, 23, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 6px 8px;
+  position: relative;
+  overflow: hidden;
+}
+.epg-slot.is-now {
+  border-color: #6366f1;
+  background: rgba(79, 70, 229, 0.22);
+}
+.epg-slot.is-past {
+  opacity: 0.45;
+}
+.epg-slot-time {
+  font-size: 0.7rem;
+  color: #a5b4fc;
+  font-variant-numeric: tabular-nums;
+}
+.epg-slot-title {
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.epg-slot-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  background: #6366f1;
+}
+.epg-timeline-empty {
+  font-size: 0.78rem;
+  color: #64748b;
+  padding: 4px 2px;
+}
+
+.track-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: #cbd5e1;
+}
+.track-control[hidden] {
+  display: none;
+}
+.track-control select {
+  background: #0b1220;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 0.72rem;
+  max-width: 120px;
+}
+.action-btn[hidden] {
+  display: none;
+}
+
 /********** INDICADOR DE GESTOS (brillo / volumen) **********/
 .gesture-hint {
   position: absolute;
@@ -536,6 +625,9 @@ body.is-tv .device-id { font-size: 2.4rem; }
   }
   .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
   .epg-container { margin: 10px; }
+  .epg-timeline-box { margin: 0 10px 10px; }
+  .track-control { font-size: 0.65rem; }
+  .track-control select { max-width: 84px; }
   .categories-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 5px; gap: 8px; }
   .category-btn { width: auto; margin-bottom: 0; flex-shrink: 0; min-height: 44px; }
   .channels-column h2 { display: none; }
