@@ -818,12 +818,14 @@ function parseM3U(content) {
       const groupMatch = line.match(/group-title="([^"]+)"/i);
       const nameMatch = line.match(/,(.+)$/);
       const tvgIdMatch = line.match(/tvg-id="([^"]+)"/i);
+      const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
       const safeName = nameMatch ? nameMatch[1].trim() : "Canal";
       const category = groupMatch ? groupMatch[1] : "Sin categoría";
       const tvgId = tvgIdMatch ? tvgIdMatch[1] : "";
+      const logo = logoMatch ? logoMatch[1].trim() : "";
       const idBase = (tvgId || "") + "|" + category + "|" + safeName + "|" + extinf;
       const stableId = "ch_" + idBase.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-      currentChannel = { name: safeName, category: category, tvgId: tvgId, id: stableId };
+      currentChannel = { name: safeName, category: category, tvgId: tvgId, logo: logo, id: stableId };
       continue;
     }
 
@@ -940,6 +942,71 @@ function getDebugReport() {
 
 let debugRefreshTimer = null;
 
+/**
+ * El panel flota sobre la interfaz y se puede arrastrar por su cabecera, así
+ * que se puede mirar mientras se cambia de canal para ver qué pasa.
+ */
+function initDebugDrag() {
+  const overlay = document.getElementById("debugOverlay");
+  const header = document.getElementById("debugHeader");
+  if (!overlay || !header) return;
+
+  let drag = null;
+
+  const start = (clientX, clientY) => {
+    const rect = overlay.getBoundingClientRect();
+    // Se pasa de anclaje derecho a izquierdo para poder moverlo libremente.
+    overlay.style.right = "auto";
+    overlay.style.left = rect.left + "px";
+    overlay.style.top = rect.top + "px";
+    overlay.style.width = rect.width + "px";
+    drag = { dx: clientX - rect.left, dy: clientY - rect.top, w: rect.width, h: rect.height };
+  };
+
+  const move = (clientX, clientY) => {
+    if (!drag) return;
+    const maxLeft = Math.max(0, window.innerWidth - drag.w);
+    const maxTop = Math.max(0, window.innerHeight - 40);
+    overlay.style.left = Math.min(maxLeft, Math.max(0, clientX - drag.dx)) + "px";
+    overlay.style.top = Math.min(maxTop, Math.max(0, clientY - drag.dy)) + "px";
+  };
+
+  header.addEventListener("mousedown", (e) => {
+    if (e.target.tagName === "BUTTON") return;
+    e.preventDefault();
+    start(e.clientX, e.clientY);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (drag) move(e.clientX, e.clientY);
+  });
+  document.addEventListener("mouseup", () => {
+    drag = null;
+  });
+
+  header.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.target.tagName === "BUTTON" || e.touches.length !== 1) return;
+      start(e.touches[0].clientX, e.touches[0].clientY);
+    },
+    { passive: true }
+  );
+  header.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!drag || e.touches.length !== 1) return;
+      e.preventDefault();
+      move(e.touches[0].clientX, e.touches[0].clientY);
+    },
+    { passive: false }
+  );
+  header.addEventListener("touchend", () => {
+    drag = null;
+  });
+}
+
+initDebugDrag();
+
 function setDebugOpen(open) {
   const overlay = document.getElementById("debugOverlay");
   const output = document.getElementById("debugOutput");
@@ -984,6 +1051,7 @@ function renderCategories() {
       btn.className = "category-btn";
       btn.dataset.category = catName;
       btn.textContent = catName;
+      btn.title = catName;
       btn.addEventListener("click", () => selectCategory(catName));
       categoriesContainer.appendChild(btn);
     }
@@ -1005,6 +1073,37 @@ function selectCategory(categoryName) {
   if (currentFocus) currentFocus.col = 0;
 }
 
+function channelInitials(name) {
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2);
+  return words[0].charAt(0) + words[1].charAt(0);
+}
+
+function buildChannelThumb(channel) {
+  const fallback = document.createElement("div");
+  fallback.className = "channel-logo-fallback";
+  fallback.textContent = channelInitials(channel.name);
+  if (!channel.logo) return fallback;
+
+  const img = document.createElement("img");
+  img.className = "channel-logo";
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = "";
+  // Muchos logos apuntan a http y el navegador los bloquea al servir la web
+  // por https; otros simplemente ya no existen. En ambos casos, iniciales.
+  img.addEventListener(
+    "error",
+    () => {
+      if (img.parentNode) img.parentNode.replaceChild(fallback, img);
+    },
+    { once: true }
+  );
+  img.src = channel.logo;
+  return img;
+}
+
 function renderChannels(channels) {
   if (channelsContainer) channelsContainer.innerHTML = "";
 
@@ -1012,6 +1111,7 @@ function renderChannels(channels) {
     const channelDiv = document.createElement("div");
     channelDiv.className = "channel-item";
     channelDiv.dataset.id = channel.id;
+    channelDiv.appendChild(buildChannelThumb(channel));
 
     const info = document.createElement("div");
     info.className = "channel-info";
@@ -1827,23 +1927,66 @@ window.addEventListener("beforeunload", () => {
 let loginFocusIndex = -1;
 const loginElements = ["serverUrl", "username", "password", "m3uUrl", "loginSubmitBtn"];
 
+const BACK_KEYS = ["Escape", "Backspace", "BrowserBack", "GoBack"];
+// El botón Atrás de los mandos de Tizen y webOS llega con estos códigos.
+const BACK_KEYCODES = [10009, 461];
+
+function isTypingTarget(target) {
+  return !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+}
+
+// Al salir de pantalla completa el cursor vuelve a la lista, sobre el canal
+// que se está viendo, para poder seguir zapeando con el mando.
+function focusChannelList() {
+  currentFocus.col = 1;
+  const items = Array.from(document.querySelectorAll(".channel-item"));
+  const playing = items.findIndex((el) => el.classList.contains("playing"));
+  if (playing >= 0) currentFocus.row = playing;
+  updateCursorVisuals();
+}
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (isTypingTarget(e.target)) return;
     noteDebugZero();
     return;
   }
-  if (e.key === "Escape") {
+
+  if (BACK_KEYS.includes(e.key) || BACK_KEYCODES.includes(e.keyCode)) {
+    // Backspace dentro de un campo tiene que seguir borrando texto.
+    if (e.key === "Backspace" && isTypingTarget(e.target)) return;
+    if (isFullscreen()) {
+      e.preventDefault();
+      exitFullscreen();
+      focusChannelList();
+      return;
+    }
     setDebugOpen(false);
+    return;
+  }
+
+  if (e.key === " " || e.key === "MediaPlayPause" || e.key === "MediaPlay") {
+    if (isTypingTarget(e.target) || !video) return;
+    e.preventDefault();
+    if (video.paused) video.play();
+    else video.pause();
+    return;
   }
 
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"];
   if (!validKeys.includes(e.key)) return;
 
-  if (document.fullscreenElement || document.webkitFullscreenElement || currentFocus.col === 2) {
+  const fullscreen = isFullscreen();
+
+  if (fullscreen || currentFocus.col === 2) {
     if (e.key === "Enter") {
       e.preventDefault();
-      video.paused ? video.play() : video.pause();
+      if (fullscreen) {
+        exitFullscreen();
+        focusChannelList();
+      } else {
+        enterFullscreen();
+      }
       return;
     }
     if (e.key === "ArrowUp") {
@@ -1858,17 +2001,17 @@ document.addEventListener("keydown", (e) => {
     }
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      video.currentTime += 15;
+      seekBy(15);
       return;
     }
     if (e.key === "ArrowLeft") {
-      if (currentFocus.col === 2 && !document.fullscreenElement) {
+      if (!fullscreen && currentFocus.col === 2) {
         currentFocus.col = 1;
         updateCursorVisuals();
         return;
       }
       e.preventDefault();
-      video.currentTime -= 15;
+      seekBy(-15);
       return;
     }
     return;
