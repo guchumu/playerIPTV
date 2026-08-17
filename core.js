@@ -104,15 +104,23 @@ function detectDevice() {
 }
 
 function getBufferSeconds() {
-  const n = parseInt(localStorage.getItem(BUFFER_KEY) || String(DEFAULT_BUFFER_SECONDS), 10);
-  if (!n || n < 5) return DEFAULT_BUFFER_SECONDS;
+  const raw = localStorage.getItem(BUFFER_KEY);
+  const n = parseInt(raw == null ? String(DEFAULT_BUFFER_SECONDS) : raw, 10);
+  // El 0 es válido: significa arrancar sin esperar a acumular nada.
+  if (isNaN(n) || n < 0) return DEFAULT_BUFFER_SECONDS;
   return Math.min(90, n);
 }
 
 function setBufferSeconds(value) {
-  const n = Math.min(90, Math.max(5, parseInt(value, 10) || DEFAULT_BUFFER_SECONDS));
+  const n = Math.min(90, Math.max(0, parseInt(value, 10) || 0));
   localStorage.setItem(BUFFER_KEY, String(n));
   return n;
+}
+
+// Los motores necesitan un techo de buffer razonable aunque no se quiera
+// esperar al arrancar; son cosas distintas.
+function getEngineBufferSeconds() {
+  return Math.max(getBufferSeconds(), 10);
 }
 
 function stopPlayback() {
@@ -932,7 +940,14 @@ function describeMediaError() {
     4: "MEDIA_ERR_SRC_NOT_SUPPORTED (formato o URL no soportados)",
   };
   const code = video.error.code;
-  return (names[code] || "código " + code) + (video.error.message ? " · " + video.error.message : "");
+  const raw = video.error.message || "";
+  let text = (names[code] || "código " + code) + (raw ? " · " + raw : "");
+  // Chrome describe este caso con un mensaje interno ilegible, pero siempre
+  // significa lo mismo: la conexión se cerró antes de mandar un solo fotograma.
+  if (/endOfStream before demuxer initialization/i.test(raw)) {
+    text += " → traducido: el proveedor cortó la conexión sin enviar vídeo (canal caído o límite de conexiones de la cuenta)";
+  }
+  return text;
 }
 
 /**
@@ -966,25 +981,34 @@ async function probeStream() {
   if (button) button.disabled = true;
 
   const base = window.location.origin + window.location.pathname.replace("index.html", "");
-  const target = base + "stream.php?url=" + encodeURIComponent(url);
+  // El modo probe informa de lo que contesta el proveedor. Preguntar por el
+  // relé normal siempre daba 200 porque su cabecera se envía antes de conocer
+  // la respuesta del origen.
+  const target = base + "stream.php?probe=1&url=" + encodeURIComponent(url);
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const cut = setTimeout(() => controller && controller.abort(), 8000);
+  const cut = setTimeout(() => controller && controller.abort(), 15000);
 
   try {
     const res = await fetch(target, {
       cache: "no-store",
       signal: controller ? controller.signal : undefined,
     });
-    const type = res.headers.get("content-type") || "sin tipo";
-    const head = "HTTP " + res.status + " " + (res.statusText || "") + " · " + type;
+    const info = await res.json();
 
-    // Un stream sano devuelve binario; si contesta texto, casi siempre es el
-    // mensaje de error del proveedor y merece la pena leerlo.
-    if (!res.ok || /text|json|html|xml/i.test(type)) {
-      const body = await res.text();
-      logPlayback("diagnostico", head + " · respuesta: " + body.slice(0, 300).replace(/\s+/g, " ").trim());
+    if (info.error) {
+      logPlayback("diagnostico", "el relé rechazó la petición: " + info.error);
+    } else if (info.curl) {
+      logPlayback("diagnostico", "no se pudo conectar con el proveedor · " + info.curl);
+    } else if (!info.status) {
+      logPlayback("diagnostico", "el proveedor no contestó nada");
+    } else if (info.status >= 400) {
+      logPlayback("diagnostico", "el proveedor respondió HTTP " + info.status + (info.sample ? " · " + info.sample : ""));
+    } else if (!info.bytes) {
+      logPlayback("diagnostico", "HTTP " + info.status + " pero sin datos: el proveedor acepta y no emite (canal caído o límite de conexiones)");
+    } else if (!info.ts) {
+      logPlayback("diagnostico", "HTTP " + info.status + " · " + (info.type || "sin tipo") + " · llegan " + info.bytes + " bytes que no son TS" + (info.sample ? ": " + info.sample : ""));
     } else {
-      logPlayback("diagnostico", head + " · el servidor envía datos, el fallo es del reproductor");
+      logPlayback("diagnostico", "HTTP " + info.status + " · TS correcto · " + info.bytes + " bytes: el origen emite bien ahora mismo");
     }
   } catch (e) {
     logPlayback("diagnostico", "sin respuesta: " + (e && e.name === "AbortError" ? "tiempo agotado" : e && e.message));
@@ -1317,7 +1341,9 @@ function renderChannels(channels) {
 }
 
 /********** MOTOR DE REPRODUCCIÓN **********/
-const PLAYBACK_RETRY_DELAYS = [2000, 5000, 10000];
+// Cuando el proveedor cierra la emisión, insistir en seguida solo gasta
+// conexiones del límite de la cuenta sin darle tiempo a liberar la anterior.
+const PLAYBACK_RETRY_DELAYS = [3000, 8000, 15000];
 let currentChannelRef = null;
 let playbackRetries = 0;
 let playbackRetryTimer = null;
@@ -1338,20 +1364,36 @@ function clearPlaybackRetry() {
 let prebufferTimer = null;
 let prebufferActive = false;
 let prebufferResult = "";
+let positionLogged = false;
 
 function getPrebufferTarget() {
   return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
 }
 
-// Con MSE el tiempo del stream no siempre empieza en cero, así que reproducir
-// sin colocarse dentro del tramo cargado deja la imagen congelada.
+/**
+ * Con MSE el tiempo del stream casi nunca empieza en cero: mpegts.js conserva
+ * las marcas de tiempo del TS, así que el tramo cargado puede empezar en el
+ * segundo 11 mientras el cursor sigue en el 0. El navegador se queda entonces
+ * esperando datos para una posición que nunca va a llegar, y la imagen no
+ * arranca aunque haya vídeo de sobra descargado.
+ *
+ * Se llama en cada evento de carga hasta que la reproducción arranca.
+ */
 function ensureInsideBuffer() {
-  if (!video || !video.buffered || !video.buffered.length) return;
+  if (!video || !video.buffered || !video.buffered.length) return false;
   try {
     const first = video.buffered.start(0);
     const last = video.buffered.end(video.buffered.length - 1);
-    if (video.currentTime < first || video.currentTime > last) video.currentTime = first;
-  } catch (e) {}
+    if (video.currentTime >= first && video.currentTime <= last) return false;
+    if (!positionLogged) {
+      positionLogged = true;
+      logPlayback("posicion corregida", "el cursor estaba en " + video.currentTime.toFixed(1) + "s y el vídeo empieza en " + first.toFixed(1) + "s");
+    }
+    video.currentTime = first + 0.05;
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function clearPrebuffer() {
@@ -1497,6 +1539,7 @@ function playChannel(channel) {
   resetPlaybackLog();
   startLogged = false;
   prebufferResult = "";
+  positionLogged = false;
   lastDroppedFrames = 0;
   logPlayback("canal", channel.name + " · " + (channel.category || "sin categoría"));
   clearPlaybackRetry();
@@ -1517,7 +1560,7 @@ function startPlayback(channel) {
   const originalUrl = channel.url;
   const isTs = /\.ts(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".ts");
   const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
-  const bufferSec = getBufferSeconds();
+  const bufferSec = getEngineBufferSeconds();
 
   // Solo las ramas con MSE controlan su propio buffer; en el reproductor del
   // sistema pausar no garantiza que siga llenando.
@@ -1683,8 +1726,21 @@ if (video) {
 
   // Desglose del arranque: separa lo que tarda la conexión de lo que tarda el
   // decodificador en encontrar un fotograma clave.
-  video.addEventListener("loadedmetadata", () => logPlayback("metadatos", "cabecera del stream leída"));
-  video.addEventListener("loadeddata", () => logPlayback("primer dato", "listo para decodificar"));
+  video.addEventListener("loadedmetadata", () => {
+    logPlayback("metadatos", "cabecera del stream leída");
+    ensureInsideBuffer();
+  });
+  video.addEventListener("loadeddata", () => {
+    logPlayback("primer dato", "listo para decodificar");
+    ensureInsideBuffer();
+  });
+  video.addEventListener("canplay", ensureInsideBuffer);
+
+  // Hasta que arranca de verdad se vigila en cada llegada de datos: el desfase
+  // solo se puede corregir cuando ya hay algo en el buffer.
+  video.addEventListener("progress", () => {
+    if (!startLogged) ensureInsideBuffer();
+  });
   // mpegts.js sigue descargando por su cuenta con el vídeo en pausa, pero
   // hls.js se detiene al llegar a maxBufferLength. Durante la pausa interesa
   // dejarlo crecer: es lo que da colchón al reanudar.
@@ -1699,7 +1755,7 @@ if (video) {
     cancelPrebuffer("cancelado por el usuario");
     if (!hls) return;
     try {
-      hls.config.maxBufferLength = getBufferSeconds();
+      hls.config.maxBufferLength = getEngineBufferSeconds();
     } catch (e) {}
   });
 
@@ -2395,9 +2451,11 @@ if (refreshBtn) refreshBtn.addEventListener("click", doRefresh);
 const bufferSelect = document.getElementById("bufferSelect");
 if (bufferSelect) {
   bufferSelect.value = String(getBufferSeconds());
+  // Un valor guardado de una versión anterior puede no estar en la lista.
+  if (!bufferSelect.value) bufferSelect.value = String(setBufferSeconds(DEFAULT_BUFFER_SECONDS));
   bufferSelect.addEventListener("change", () => {
     const n = setBufferSeconds(bufferSelect.value);
-    showToast("Buffer: " + n + "s (al cambiar de canal)");
+    showToast(n > 0 ? "Colchón de " + n + "s antes de ver imagen" : "Arranque rápido, sin esperar colchón");
   });
 }
 
