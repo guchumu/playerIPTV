@@ -954,7 +954,9 @@ async function probeStream() {
   // número limitado. Ni en paralelo ni en ráfaga.
   if (probeRunning) return;
   if (Date.now() - lastProbeAt < 15000) {
-    logPlayback("diagnostico", "hay que esperar 15s entre consultas");
+    // Avisar por toast y no por registro: insistir con el botón llenaba el
+    // log de rechazos y expulsaba justo los eventos que hacía falta leer.
+    showToast("Espera unos segundos entre diagnósticos");
     return;
   }
 
@@ -994,7 +996,12 @@ async function probeStream() {
       } catch (e) {}
     }
     probeRunning = false;
-    if (button) button.disabled = false;
+    // Sigue bloqueado durante el enfriamiento para que se vea que no sirve
+    // de nada insistir.
+    setTimeout(() => {
+      const b = document.getElementById("debugProbeBtn");
+      if (b) b.disabled = false;
+    }, 15000);
   }
 }
 
@@ -1010,6 +1017,26 @@ function getBufferAhead() {
   } catch (e) {
     return 0;
   }
+}
+
+let lastDroppedFrames = 0;
+
+// Perder fotogramas en bloque no genera ningún evento del navegador, pero se
+// ve como tirones. Anotarlo permite distinguirlo de un corte por falta de
+// buffer, que es un problema distinto.
+function checkDroppedFrames() {
+  if (!video || !video.getVideoPlaybackQuality) return;
+  try {
+    const dropped = video.getVideoPlaybackQuality().droppedVideoFrames;
+    if (dropped < lastDroppedFrames) {
+      lastDroppedFrames = dropped;
+      return;
+    }
+    if (dropped - lastDroppedFrames >= 25) {
+      logPlayback("fotogramas perdidos", dropped - lastDroppedFrames + " de golpe (total " + dropped + ")");
+      lastDroppedFrames = dropped;
+    }
+  } catch (e) {}
 }
 
 function getPlaybackStats() {
@@ -1332,6 +1359,22 @@ function clearPrebuffer() {
   prebufferTimer = null;
 }
 
+/**
+ * Al reanudar tras la pausa, lo acumulado suele quedar en un tramo aparte:
+ * el flujo se corta un instante y el navegador crea un segundo rango en vez
+ * de alargar el primero. Seguir reproduciendo desde donde estaba obliga a
+ * cruzar ese hueco, que es lo que congela la imagen y tira fotogramas.
+ */
+function jumpOverBufferGap() {
+  if (!video || !video.buffered || video.buffered.length < 2) return;
+  try {
+    const start = video.buffered.start(video.buffered.length - 1);
+    if (video.currentTime >= start) return;
+    logPlayback("hueco", "salto de " + (start - video.currentTime).toFixed(1) + "s al tramo continuo");
+    video.currentTime = start + 0.05;
+  } catch (e) {}
+}
+
 function cancelPrebuffer(reason) {
   if (!prebufferActive) return;
   prebufferActive = false;
@@ -1373,6 +1416,7 @@ function beginPrebufferFill(channel) {
     clearPrebuffer();
     prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
     logPlayback("prebuffer", prebufferResult);
+    jumpOverBufferGap();
     showVideoSpinner(false);
     const p = video.play();
     if (p) p.catch(() => {});
@@ -1453,6 +1497,7 @@ function playChannel(channel) {
   resetPlaybackLog();
   startLogged = false;
   prebufferResult = "";
+  lastDroppedFrames = 0;
   logPlayback("canal", channel.name + " · " + (channel.category || "sin categoría"));
   clearPlaybackRetry();
   rememberLastChannel(channel);
@@ -1760,6 +1805,7 @@ function updatePlaybackStatus() {
   }
 
   enforceLiveDelay();
+  checkDroppedFrames();
 
   if (statusQuality) {
     const parts = [];
