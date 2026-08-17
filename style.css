@@ -421,6 +421,31 @@ html, body {
   text-overflow: ellipsis;
   color: #94a3b8;
 }
+.status-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.status-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: #334155;
+  color: #e2e8f0;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.status-btn[hidden] { display: none; }
+.status-btn svg { width: 13px; height: 13px; fill: currentColor; display: block; }
+.status-btn.is-stop { background: #ef4444; color: #fff; padding: 5px; }
+#goLiveBtn { background: #4f46e5; color: #fff; }
 body.is-tv .playback-status { font-size: 1rem; padding: 0.5rem 0.8rem; }
 body.is-tv .status-bar { width: 110px; height: 7px; }
 

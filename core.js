@@ -1241,9 +1241,11 @@ function startPlayback(channel) {
         // acelera el arranque pero deja la reproducción pegada al borde del
         // directo y cortándose, así que manda la estabilidad.
         stashInitialSize: Math.max(384 * 1024, bufferSec * 48 * 1024),
-        liveBufferLatencyChasing: true,
-        liveBufferLatencyMaxLatency: Math.max(3, Math.min(bufferSec, 20)),
-        liveBufferLatencyMinRemain: 1,
+        // El perseguidor de latencia de mpegts.js salta al borde del directo en
+        // cuanto hay unos segundos acumulados, que es justo el colchón que
+        // evita los cortes. Se desactiva y el límite lo pone enforceLiveDelay,
+        // que solo interviene si el retraso se dispara.
+        liveBufferLatencyChasing: false,
       }
     );
     mpegtsPlayer.attachMediaElement(video);
@@ -1269,7 +1271,6 @@ function startPlayback(channel) {
         maxBufferLength: bufferSec,
         maxMaxBufferLength: bufferSec * 2,
         liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: Math.max(5, Math.ceil(bufferSec / 2)),
         backBufferLength: 0,
       });
       hls.loadSource(originalUrl);
@@ -1335,6 +1336,22 @@ if (video) {
     clearTimeout(bufferingSpinnerTimer);
     bufferingSpinnerTimer = null;
   });
+  // mpegts.js sigue descargando por su cuenta con el vídeo en pausa, pero
+  // hls.js se detiene al llegar a maxBufferLength. Durante la pausa interesa
+  // dejarlo crecer: es lo que da colchón al reanudar.
+  video.addEventListener("pause", () => {
+    if (!hls) return;
+    try {
+      hls.config.maxBufferLength = 300;
+    } catch (e) {}
+  });
+  video.addEventListener("play", () => {
+    if (!hls) return;
+    try {
+      hls.config.maxBufferLength = getBufferSeconds();
+    } catch (e) {}
+  });
+
   video.addEventListener("error", handlePlaybackFailure);
   video.addEventListener("ended", handlePlaybackFailure);
 }
@@ -1346,10 +1363,55 @@ const statusBarFill = document.getElementById("statusBarFill");
 const statusQuality = document.getElementById("statusQuality");
 const statusStalls = document.getElementById("statusStalls");
 
+const goLiveBtn = document.getElementById("goLiveBtn");
+const stopBtn = document.getElementById("stopBtn");
+
+// Sin perseguidor de latencia el retraso podría crecer sin fin tras muchos
+// baches, así que hay un tope; por debajo de él el colchón es bienvenido.
+const MAX_LIVE_DELAY = 90;
+const LIVE_EDGE_MARGIN = 1.5;
+
 function setStatusLevel(level) {
   if (statusDot) statusDot.className = "status-dot " + level;
   if (statusBarFill) statusBarFill.className = level === "is-good" ? "" : level;
 }
+
+function goLive() {
+  if (!video) return;
+  try {
+    if (!video.buffered.length) return;
+    const end = video.buffered.end(video.buffered.length - 1);
+    video.currentTime = Math.max(0, end - LIVE_EDGE_MARGIN);
+    if (video.paused) video.play().catch(() => {});
+  } catch (e) {}
+}
+
+function enforceLiveDelay() {
+  // Mientras está en pausa se deja acumular a propósito: es lo que crea el
+  // colchón. El tope solo se aplica cuando se está reproduciendo.
+  if (!video || video.paused) return;
+  if (getBufferAhead() > MAX_LIVE_DELAY) goLive();
+}
+
+function stopChannel() {
+  if (!currentlyPlayingId && !currentChannelRef) return;
+  clearPlaybackRetry();
+  currentChannelRef = null;
+  currentlyPlayingId = null;
+  stopPlayback();
+  showVideoSpinner(false);
+  sendActivity("stop");
+  activeConnection = null;
+  document.querySelectorAll(".channel-item").forEach((item) => item.classList.remove("playing"));
+  if (epgNowEl) epgNowEl.textContent = "--:--";
+  if (epgNextEl) epgNextEl.textContent = "--:--";
+  renderEpgTimeline();
+  updatePlaybackStatus();
+  showToast("Canal detenido");
+}
+
+if (goLiveBtn) goLiveBtn.addEventListener("click", goLive);
+if (stopBtn) stopBtn.addEventListener("click", stopChannel);
 
 function updatePlaybackStatus() {
   if (!statusBufferText) return;
@@ -1359,9 +1421,13 @@ function updatePlaybackStatus() {
     if (statusBarFill) statusBarFill.style.width = "0%";
     if (statusQuality) statusQuality.textContent = "Sin canal";
     if (statusStalls) statusStalls.textContent = "";
+    if (goLiveBtn) goLiveBtn.hidden = true;
+    if (stopBtn) stopBtn.hidden = true;
     setStatusLevel("");
     return;
   }
+
+  if (stopBtn) stopBtn.hidden = false;
 
   const target = getBufferSeconds();
   const ahead = getBufferAhead();
@@ -1371,6 +1437,16 @@ function updatePlaybackStatus() {
   if (statusBarFill) statusBarFill.style.width = Math.round(ratio * 100) + "%";
   // Por debajo de dos segundos de colchón cualquier bache corta la imagen.
   setStatusLevel(ahead < 2 ? "is-empty" : ratio < 0.35 ? "is-low" : "is-good");
+
+  // Lo acumulado por delante es exactamente lo que se va por detrás del
+  // directo, así que sirve de las dos cosas: colchón y retraso.
+  if (goLiveBtn) {
+    const behind = ahead >= 8;
+    goLiveBtn.hidden = !behind;
+    if (behind) goLiveBtn.textContent = "Ir al directo (−" + Math.round(ahead) + "s)";
+  }
+
+  enforceLiveDelay();
 
   if (statusQuality) {
     const parts = [];
