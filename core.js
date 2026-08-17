@@ -28,6 +28,10 @@ let epgResolvedIds = {};
 let epgLoadedAt = 0;
 let epgRefreshTimer = null;
 let epgReloadTimer = null;
+let epgRetryTimer = null;
+let epgRetryIndex = 0;
+let epgLastStatus = "sin intentar";
+const EPG_RETRY_DELAYS = [8000, 20000, 45000, 90000, 180000, 300000];
 let channelById = new Map();
 let pollingInterval = null;
 let sessionToken = null;
@@ -541,12 +545,23 @@ function normalizeEpgKey(value) {
 async function loadEPG() {
   try {
     const res = await fetch(EPG_URL, { cache: "no-store" });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      epgLastStatus = "HTTP " + res.status + (res.status === 404 ? " (falta epg_api.php en el servidor)" : "");
+      scheduleEpgRetry();
+      return false;
+    }
+
     const data = await res.json();
-    if (!data || !data.c) return false;
+    const ids = data && data.c ? Object.keys(data.c) : [];
+    if (!ids.length) {
+      // La primera visita deja al servidor generando la caché; se reintenta.
+      epgLastStatus = "vacía, el servidor aún la está generando";
+      scheduleEpgRetry();
+      return false;
+    }
 
     const index = {};
-    Object.keys(data.c).forEach((id) => {
+    ids.forEach((id) => {
       const list = data.c[id];
       if (!list || !list.length) return;
       index[id] = list.map((p) => ({
@@ -560,14 +575,32 @@ async function loadEPG() {
     epgAliases = data.a || {};
     epgResolvedIds = {};
     epgLoadedAt = Date.now();
+    epgRetryIndex = 0;
+    epgLastStatus = ids.length + " canales";
 
     refreshVisibleChannelEPG();
     refreshPlayerEPG();
     scheduleEpgTimers();
     return true;
   } catch (e) {
+    epgLastStatus = "error de red o JSON inválido";
+    scheduleEpgRetry();
     return false;
   }
+}
+
+/**
+ * Generar la guía la primera vez lleva minutos (descarga y parseo del XMLTV),
+ * así que el primer intento casi siempre llega en vacío y hay que insistir.
+ */
+function scheduleEpgRetry() {
+  if (epgRetryIndex >= EPG_RETRY_DELAYS.length) return;
+  const delay = EPG_RETRY_DELAYS[epgRetryIndex];
+  epgRetryIndex++;
+  clearTimeout(epgRetryTimer);
+  epgRetryTimer = setTimeout(() => {
+    loadEPG();
+  }, delay);
 }
 
 function scheduleEpgTimers() {
@@ -800,9 +833,11 @@ function getDebugReport() {
     "extinf sin url: " + (d.skipped || 0),
     "parse ms: " + (d.ms || 0),
     "buffer: " + getBufferSeconds() + "s",
+    "epg estado: " + epgLastStatus,
     "epg canales: " + Object.keys(epgIndex).length,
     "epg alias: " + Object.keys(epgAliases).length,
     "epg cargada: " + (epgLoadedAt ? new Date(epgLoadedAt).toLocaleTimeString() : "no"),
+    "epg intentos: " + epgRetryIndex,
     "muestras url raras:",
     d.skippedSamples && d.skippedSamples.length ? d.skippedSamples.join("\n") : "  (ninguna)",
     "canales por categoria:",
@@ -996,6 +1031,7 @@ function doLogout() {
   stopActivityMonitoring();
   clearInterval(epgRefreshTimer);
   clearInterval(epgReloadTimer);
+  clearTimeout(epgRetryTimer);
   localStorage.removeItem("xtream_user");
   stopPlayback();
   currentUser = null;

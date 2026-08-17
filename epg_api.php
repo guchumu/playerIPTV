@@ -272,6 +272,32 @@ $xmlFile = $cacheDir . '/epg_source.xml';
 $lockFile = $cacheDir . '/epg_build.lock';
 $now = time();
 
+// epg_api.php?diag=1 — para ver desde el navegador por qué no hay guía.
+if (isset($_GET['diag'])) {
+    $diag = array(
+        'php' => PHP_VERSION,
+        'xmlreader' => class_exists('XMLReader'),
+        'curl' => function_exists('curl_init'),
+        'fuente' => defined('EPG_SOURCE') ? EPG_SOURCE : '(no definida)',
+        'cache_dir' => $cacheDir,
+        'cache_escribible' => is_writable($cacheDir),
+        'xml_existe' => is_file($xmlFile),
+        'xml_mb' => is_file($xmlFile) ? round(filesize($xmlFile) / 1048576, 1) : 0,
+        'xml_edad_min' => is_file($xmlFile) ? round(($now - filemtime($xmlFile)) / 60) : null,
+        'json_existe' => is_file($jsonFile),
+        'json_kb' => is_file($jsonFile) ? round(filesize($jsonFile) / 1024) : 0,
+        'json_edad_min' => is_file($jsonFile) ? round(($now - filemtime($jsonFile)) / 60) : null,
+        'max_execution_time' => ini_get('max_execution_time'),
+        'memory_limit' => ini_get('memory_limit'),
+    );
+    if (is_file($jsonFile)) {
+        $peek = json_decode((string) @file_get_contents($jsonFile), true);
+        $diag['json_canales'] = (is_array($peek) && isset($peek['c'])) ? count((array) $peek['c']) : 0;
+    }
+    echo json_encode($diag, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    exit;
+}
+
 $jsonFresh = is_file($jsonFile) && ($now - filemtime($jsonFile)) < EPG_JSON_TTL;
 if ($jsonFresh && filesize($jsonFile) > 2) {
     readfile($jsonFile);
