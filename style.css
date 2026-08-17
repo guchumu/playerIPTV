@@ -16,6 +16,83 @@ html, body {
 .screen { display: none; width: 100%; height: 100%; }
 .screen.active { display: flex; }
 
+/********** INTRO (solo sin sesión guardada) **********/
+#splashScreen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #1f2933 0%, #111827 55%, #020617 100%);
+  color: #f9fafb;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+html.needs-splash #splashScreen {
+  display: flex;
+  opacity: 1;
+  animation: splash-autohide 2.5s ease forwards;
+}
+html.needs-splash.splash-leaving #splashScreen {
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+html.has-session #splashScreen,
+html.splash-done #splashScreen {
+  display: none;
+}
+.splash-inner { text-align: center; max-width: 90%; }
+.splash-logo {
+  display: block;
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+  margin: 0 auto 1.2rem;
+  animation: splash-in 0.75s ease-out both;
+}
+.splash-title {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  animation: splash-in 0.75s ease-out 0.12s both;
+}
+.splash-tagline {
+  margin-top: 0.65rem;
+  color: #94a3b8;
+  font-size: 1.05rem;
+  animation: splash-in 0.75s ease-out 0.24s both;
+}
+.splash-hint {
+  margin-top: 2.2rem;
+  font-size: 0.8rem;
+  color: #64748b;
+  animation: splash-hint 1.6s ease-in-out 0.7s infinite;
+}
+.splash-hint-tv { display: none; }
+body.is-tv .splash-logo { width: 168px; height: 168px; }
+body.is-tv .splash-title { font-size: 2.8rem; }
+body.is-tv .splash-tagline { font-size: 1.35rem; }
+body.is-tv .splash-hint { font-size: 1.1rem; }
+body.is-tv .splash-hint-touch { display: none; }
+body.is-tv .splash-hint-tv { display: inline; }
+
+@keyframes splash-in {
+  from { opacity: 0; transform: scale(0.92) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes splash-hint {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.95; }
+}
+@keyframes splash-autohide {
+  0%, 82% { opacity: 1; }
+  100% { opacity: 0; pointer-events: none; }
+}
+
 /********** LOGIN Y CARGA REMOTA **********/
 #loginScreen { align-items: center; justify-content: center; overflow-y: auto; }
 .login-container {

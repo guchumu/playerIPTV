@@ -209,6 +209,68 @@ function showScreen(name) {
     main.classList.toggle("active", !showLogin);
     main.style.display = showLogin ? "none" : "flex";
   }
+  if (!showLogin) dismissSplash(true);
+}
+
+/********** INTRO **********/
+// Sin credenciales guardadas se muestra una portada breve. Con sesión, ni
+// un frame: el auto-login sigue como siempre y Cancelar sigue funcionando.
+function canAutoLoginFromCache() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("xtream_user") || "null");
+    return !!(saved && ((saved.username && saved.password) || saved.m3uUrl));
+  } catch (e) {
+    return false;
+  }
+}
+
+function isSplashActive() {
+  const html = document.documentElement;
+  return (
+    html.classList.contains("needs-splash") &&
+    !html.classList.contains("splash-done") &&
+    !html.classList.contains("splash-leaving")
+  );
+}
+
+function dismissSplash(instant) {
+  const html = document.documentElement;
+  if (html.classList.contains("splash-done") || html.classList.contains("has-session")) {
+    html.classList.remove("needs-splash", "splash-leaving");
+    html.classList.add("splash-done");
+    return;
+  }
+  if (!html.classList.contains("needs-splash")) return;
+  if (instant) {
+    html.classList.add("splash-done");
+    html.classList.remove("needs-splash", "splash-leaving");
+    return;
+  }
+  if (html.classList.contains("splash-leaving")) return;
+  html.classList.add("splash-leaving");
+  window.setTimeout(() => {
+    html.classList.add("splash-done");
+    html.classList.remove("needs-splash", "splash-leaving");
+  }, 450);
+}
+
+function initSplash() {
+  const html = document.documentElement;
+  if (canAutoLoginFromCache()) {
+    html.classList.add("has-session", "splash-done");
+    html.classList.remove("needs-splash", "splash-leaving");
+    return;
+  }
+  html.classList.add("needs-splash");
+  html.classList.remove("has-session");
+  const splash = document.getElementById("splashScreen");
+  if (!splash) {
+    html.classList.add("splash-done");
+    html.classList.remove("needs-splash");
+    return;
+  }
+  splash.addEventListener("click", () => dismissSplash());
+  window.setTimeout(() => dismissSplash(), 2000);
 }
 
 /********** DEVICE ID & CARGA REMOTA **********/
@@ -480,6 +542,7 @@ function registrarServiceWorker() {
 
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
+  initSplash();
   registrarServiceWorker();
   prepararInstalacion();
   showDeviceId();
@@ -2685,6 +2748,22 @@ function focusChannelList() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (isSplashActive()) {
+    const skipSplash =
+      e.key === "Enter" ||
+      e.key === " " ||
+      e.key === "Escape" ||
+      e.key === "OK" ||
+      e.key === "Select" ||
+      BACK_KEYS.includes(e.key) ||
+      BACK_KEYCODES.includes(e.keyCode);
+    if (skipSplash) {
+      e.preventDefault();
+      dismissSplash();
+    }
+    return;
+  }
+
   if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
     if (isTypingTarget(e.target)) return;
     noteDebugZero();

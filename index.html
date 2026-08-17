@@ -2,6 +2,17 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var s = JSON.parse(localStorage.getItem("xtream_user") || "null");
+          var ok = !!(s && ((s.username && s.password) || s.m3uUrl));
+          document.documentElement.classList.add(ok ? "has-session" : "needs-splash");
+        } catch (e) {
+          document.documentElement.classList.add("needs-splash");
+        }
+      })();
+    </script>
     <title>StreamBox IPTV</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#111827" />
@@ -11,15 +22,27 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-    <link rel="stylesheet" href="style.css?v=20260817y" />
+    <link rel="stylesheet" href="style.css?v=20260817z" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
+    <div id="splashScreen" role="button" tabindex="-1" aria-label="StreamBox IPTV. Pulsa para continuar">
+        <div class="splash-inner">
+            <img src="logo.png" alt="" class="splash-logo" />
+            <h1 class="splash-title">StreamBox IPTV</h1>
+            <p class="splash-tagline">Tu televisión, en cualquier pantalla</p>
+            <p class="splash-hint">
+                <span class="splash-hint-touch">Pulsa para continuar</span>
+                <span class="splash-hint-tv">Pulsa OK para continuar</span>
+            </p>
+        </div>
+    </div>
+
     <div id="loginScreen" class="screen active">
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260817y</p>
+            <p class="build-tag">v20260817z</p>
 
             <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
 
@@ -183,6 +206,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260817y"></script>
+    <script src="core.js?v=20260817z"></script>
 </body>
 </html>
