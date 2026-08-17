@@ -69,7 +69,11 @@ function showSpinner(show, message) {
 
 // Carga o rebuffering de un canal: solo tapa el vídeo, nunca la aplicación
 // entera como hace el spinner global del login.
+let bufferingSpinnerTimer = null;
+
 function showVideoSpinner(show) {
+  clearTimeout(bufferingSpinnerTimer);
+  bufferingSpinnerTimer = null;
   if (spinner) spinner.style.display = show ? "flex" : "none";
 }
 
@@ -893,7 +897,9 @@ function getPlaybackStats() {
     } catch (e) {}
   }
 
+  lines.push("  cortes en este canal: " + stallCount);
   lines.push("  reintentos: " + playbackRetries);
+  lines.push("  buffer configurado: " + getBufferSeconds() + "s");
   lines.push("  ajuste imagen: " + FIT_MODES[getFitIndex()].value);
   lines.push("  chromecast: " + (castReady ? "listo" : "no disponible"));
   return lines.join("\n");
@@ -1030,6 +1036,7 @@ let currentChannelRef = null;
 let playbackRetries = 0;
 let playbackRetryTimer = null;
 let hlsRecoveries = 0;
+let stallCount = 0;
 
 function clearPlaybackRetry() {
   clearTimeout(playbackRetryTimer);
@@ -1040,8 +1047,20 @@ function clearPlaybackRetry() {
  * En IPTV los cortes son constantes, así que un fallo no debe dejar la pantalla
  * en negro: se reintenta el mismo canal antes de darse por vencido.
  */
+function playbackLooksAlive() {
+  // readyState >= 3 significa que hay fotogramas listos para seguir pintando.
+  return !!video && !video.paused && !video.ended && video.readyState >= 3;
+}
+
 function handlePlaybackFailure() {
   if (teardownInProgress || !currentChannelRef) return;
+  // Un reintento ya en cola hace de freno: sin esto, una ráfaga de avisos de
+  // error encadenaría varios reinicios seguidos del mismo canal.
+  if (playbackRetryTimer) return;
+  // mpegts.js y hls.js también avisan de fallos de los que se recuperan solos.
+  // Si el vídeo sigue avanzando, reiniciar cortaría una emisión que va bien.
+  if (playbackLooksAlive()) return;
+
   showVideoSpinner(false);
 
   if (playbackRetries >= PLAYBACK_RETRY_DELAYS.length) {
@@ -1056,6 +1075,8 @@ function handlePlaybackFailure() {
   const channel = currentChannelRef;
   clearPlaybackRetry();
   playbackRetryTimer = setTimeout(() => {
+    playbackRetryTimer = null;
+    if (playbackLooksAlive()) return;
     if (currentChannelRef && currentChannelRef.id === channel.id) startPlayback(channel);
   }, delay);
 }
@@ -1063,6 +1084,7 @@ function handlePlaybackFailure() {
 function playChannel(channel) {
   currentChannelRef = channel;
   playbackRetries = 0;
+  stallCount = 0;
   clearPlaybackRetry();
   rememberLastChannel(channel);
   startPlayback(channel);
@@ -1108,9 +1130,10 @@ function startPlayback(channel) {
       {
         enableWorker: true,
         enableStashBuffer: true,
-        // Arranque con poco relleno: el buffer elegido sigue aplicándose después,
-        // pero esperar a llenarlo antes del primer fotograma hacía el zapeo lento.
-        stashInitialSize: 256 * 1024,
+        // Este colchón es lo que absorbe los altibajos de la conexión. Bajarlo
+        // acelera el arranque pero deja la reproducción pegada al borde del
+        // directo y cortándose, así que manda la estabilidad.
+        stashInitialSize: Math.max(384 * 1024, bufferSec * 48 * 1024),
         liveBufferLatencyChasing: true,
         liveBufferLatencyMaxLatency: Math.max(3, Math.min(bufferSec, 20)),
         liveBufferLatencyMinRemain: 1,
@@ -1192,8 +1215,18 @@ if (video) {
     clearPlaybackRetry();
     showVideoSpinner(false);
   });
+  // En directo los microcortes de menos de un segundo son constantes. Tapar el
+  // vídeo cada vez hace parecer que va peor de lo que va, así que el aviso solo
+  // aparece si la parada dura de verdad.
   video.addEventListener("waiting", () => {
-    if (!teardownInProgress) showVideoSpinner(true);
+    if (teardownInProgress) return;
+    stallCount++;
+    if (bufferingSpinnerTimer) return;
+    bufferingSpinnerTimer = setTimeout(() => showVideoSpinner(true), 900);
+  });
+  video.addEventListener("canplay", () => {
+    clearTimeout(bufferingSpinnerTimer);
+    bufferingSpinnerTimer = null;
   });
   video.addEventListener("error", handlePlaybackFailure);
   video.addEventListener("ended", handlePlaybackFailure);
