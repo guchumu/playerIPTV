@@ -6,7 +6,7 @@
         </trust-anchors>
     </base-config>
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">masquecero.net</domain>
+        <domain includeSubdomains="true">acortador.vip</domain>
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
 </network-security-config>

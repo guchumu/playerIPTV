@@ -4,17 +4,18 @@
   "webDir": "www",
   "backgroundColor": "#020617",
   "server": {
-    "url": "https://masquecero.net/player/",
+    "url": "https://acortador.vip/player/",
     "cleartext": true,
     "allowNavigation": [
-      "masquecero.net",
-      "*.masquecero.net"
+      "acortador.vip",
+      "*.acortador.vip"
     ]
   },
   "android": {
     "allowMixedContent": true,
     "backgroundColor": "#020617",
-    "webContentsDebuggingEnabled": false
+    "webContentsDebuggingEnabled": false,
+    "captureInput": false
   },
   "ios": {
     "contentInset": "automatic",

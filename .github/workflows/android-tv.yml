@@ -1,0 +1,129 @@
+name: APK Android TV
+
+# Compila el APK en los servidores de GitHub, que ya traen el SDK de Android.
+# Así no hace falta instalar Java, Node ni Android Studio en ningún ordenador.
+#
+# Lanzarlo a mano: pestaña Actions -> "APK Android TV" -> "Run workflow".
+# El APK queda en los artefactos de la ejecución. Si se lanza con una etiqueta
+# vNNN también se publica como Release descargable.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Preparar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar Capacitor
+        working-directory: native
+        run: npm install --no-audit --no-fund
+
+      - name: Generar el proyecto Android
+        working-directory: native
+        run: npx cap add android
+
+      - name: Aplicar la configuración de Android TV
+        run: python3 tools/patch_android_tv.py native/android
+
+      - name: Numerar la versión con el número de ejecución
+        working-directory: native/android/app
+        run: |
+          # Que cada APK tenga versionCode mayor: sin esto el televisor
+          # rechaza la actualización por considerarla una versión anterior.
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" build.gradle
+          grep -E "versionCode|versionName" build.gradle
+
+      - name: Preparar la clave de firma
+        id: firma
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -e
+          RUTA="$RUNNER_TEMP/streambox.keystore"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUTA"
+            echo "usando la clave guardada en los secretos"
+            echo "generada=no" >> "$GITHUB_OUTPUT"
+          else
+            # Primera vez: se crea una clave y se publica para guardarla como
+            # secreto. Las actualizaciones necesitan SIEMPRE la misma clave.
+            keytool -genkeypair -v -keystore "$RUTA" \
+              -alias streambox -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass streambox -keypass streambox \
+              -dname "CN=StreamBox IPTV, OU=Casa, O=StreamBox, L=Madrid, C=ES"
+            base64 -w0 "$RUTA" > "$RUNNER_TEMP/keystore-base64.txt"
+            echo "clave nueva generada"
+            echo "generada=si" >> "$GITHUB_OUTPUT"
+          fi
+          echo "ruta=$RUTA" >> "$GITHUB_OUTPUT"
+
+      - name: Compilar el APK firmado
+        working-directory: native/android
+        env:
+          CLAVE: ${{ steps.firma.outputs.ruta }}
+          CLAVE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'streambox' }}
+          CLAVE_ALIAS: ${{ secrets.KEY_ALIAS || 'streambox' }}
+          CLAVE_ALIAS_PASS: ${{ secrets.KEY_PASSWORD || 'streambox' }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$CLAVE" \
+            -Pandroid.injected.signing.store.password="$CLAVE_PASS" \
+            -Pandroid.injected.signing.key.alias="$CLAVE_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CLAVE_ALIAS_PASS"
+
+      - name: Renombrar y comprobar el APK
+        id: apk
+        run: |
+          set -e
+          ORIGEN=native/android/app/build/outputs/apk/release/app-release.apk
+          DESTINO="streambox-tv-1.0.${{ github.run_number }}.apk"
+          cp "$ORIGEN" "$DESTINO"
+          ls -lh "$DESTINO"
+          echo "nombre=$DESTINO" >> "$GITHUB_OUTPUT"
+          # Comprobación de que el banner y leanback han entrado de verdad.
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          "$AAPT" dump badging "$DESTINO" | grep -Ei "leanback|banner|package:|sdkVersion" || true
+
+      - name: Publicar el APK como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.nombre }}
+          path: ${{ steps.apk.outputs.nombre }}
+          retention-days: 90
+
+      - name: Publicar la clave nueva (guárdala como secreto KEYSTORE_BASE64)
+        if: steps.firma.outputs.generada == 'si'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clave-de-firma-GUARDAR-COMO-SECRETO
+          path: ${{ runner.temp }}/keystore-base64.txt
+          retention-days: 7
+
+      - name: Adjuntar el APK a la Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.nombre }}

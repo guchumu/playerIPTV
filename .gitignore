@@ -4,10 +4,11 @@ cache/
 cuentas/*.json
 node_modules/
 native/node_modules/
-native/android/app/build/
-native/android/.gradle/
-native/ios/App/Pods/
-native/ios/App/build/
+native/package-lock.json
+# Los proyectos nativos los regenera `npx cap add` y los adapta
+# tools/patch_android_tv.py, así que no se versionan.
+native/android/
+native/ios/
 *.apk
 !downloads/*.apk
 *.aab
