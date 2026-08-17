@@ -1,5 +1,6 @@
 .DS_Store
 epg_cache.xml
+cache/
 cuentas/*.json
 node_modules/
 native/node_modules/
