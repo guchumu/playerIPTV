@@ -1060,3 +1060,24 @@ if (headerTitle) {
     }
   });
 }
+
+const iosDownloadBtn = document.getElementById("iosDownloadBtn");
+const iosInstallOverlay = document.getElementById("iosInstallOverlay");
+const iosInstallClose = document.getElementById("iosInstallClose");
+const iosIpaLink = document.getElementById("iosIpaLink");
+if (iosDownloadBtn && iosInstallOverlay) {
+  iosDownloadBtn.addEventListener("click", async () => {
+    let hasIpa = false;
+    try {
+      const res = await fetch("downloads/streambox.ipa", { method: "HEAD" });
+      hasIpa = res.ok;
+    } catch (e) {}
+    if (iosIpaLink) iosIpaLink.hidden = !hasIpa;
+    iosInstallOverlay.hidden = false;
+  });
+}
+if (iosInstallClose && iosInstallOverlay) {
+  iosInstallClose.addEventListener("click", () => {
+    iosInstallOverlay.hidden = true;
+  });
+}

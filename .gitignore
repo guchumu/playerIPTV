@@ -8,8 +8,10 @@ native/android/.gradle/
 native/ios/App/Pods/
 native/ios/App/build/
 *.apk
+!downloads/*.apk
 *.aab
 *.ipa
+!downloads/*.ipa
 *.dSYM
 *.xcuserstate
 xcuserdata/

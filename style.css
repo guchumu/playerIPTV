@@ -79,6 +79,39 @@ html, body {
   cursor: pointer;
   margin-top: 0.2rem;
 }
+
+.app-download-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 1rem;
+}
+.app-dl {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+  border: none;
+  border-radius: 10px;
+  padding: 0.7rem 0.5rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: #fff;
+  font-family: inherit;
+}
+.app-dl.android { background: #16a34a; }
+.app-dl.ios { background: #334155; }
+.app-download-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-align: center;
+}
+.ios-install-steps {
+  margin: 0 0 12px 1.1rem;
+  color: #e2e8f0;
+  line-height: 1.5;
+}
+.ios-install-panel .app-dl { display: inline-block; width: auto; padding: 0.6rem 1rem; }
 .error { margin-top: 0.5rem; color: #f97373; font-size: 0.85rem; text-align: center; }
 #loginForm input:focus, #loginForm button:focus {
   outline: 3px solid #fbbf24;
