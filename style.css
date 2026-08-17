@@ -26,12 +26,19 @@ body {
 /********** PANTALLAS **********/
 .screen {
   display: none;
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 .screen.active {
   display: flex;
+}
+
+.screen[hidden] {
+  display: none !important;
 }
 
 /********** LOGIN **********/
@@ -175,6 +182,10 @@ body {
   border-right: 1px solid rgba(148, 163, 184, 0.25);
   padding: 0.5rem;
   background: radial-gradient(circle at left, #020617 0%, #020617 40%, #0b1120 100%);
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .search-container {
@@ -193,8 +204,9 @@ body {
 
 .categories-list {
   margin-top: 0.4rem;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  max-height: calc(100% - 40px);
 }
 
 .category-btn {
@@ -224,7 +236,10 @@ body {
   border-right: 1px solid rgba(148, 163, 184, 0.25);
   padding: 0.5rem 0.6rem;
   background: linear-gradient(135deg, #020617 0%, #020617 60%, #020617 100%);
+  min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .channels-column h2 {
@@ -233,8 +248,15 @@ body {
 }
 
 .channels-list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  height: calc(100% - 22px);
+}
+
+.empty-list-msg {
+  padding: 0.8rem 0.4rem;
+  color: #f97373;
+  font-size: 0.85rem;
 }
 
 /* Tarjetas de canal simplificadas */

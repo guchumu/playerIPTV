@@ -94,8 +94,11 @@ function showScreen(name) {
   const login = document.getElementById("loginScreen");
   const main = document.getElementById("mainScreen");
   if (!login || !main) return;
-  login.classList.toggle("active", name === "login");
-  main.classList.toggle("active", name === "main");
+  const showLogin = name === "login";
+  login.classList.toggle("active", showLogin);
+  main.classList.toggle("active", !showLogin);
+  login.hidden = !showLogin;
+  main.hidden = showLogin;
   login.style.display = "";
   main.style.display = "";
 }
@@ -398,9 +401,9 @@ function logoutUser() {
 }
 
 async function enterApp() {
+  await loadM3UFromXtream();
   updateHeaderInfo();
   showScreen("main");
-  await loadM3UFromXtream();
   generateSessionToken();
   startActivityMonitoring();
   initializeVideoControls();
@@ -421,18 +424,45 @@ async function enterApp() {
   }, 2500);
 }
 
-document.getElementById("loginForm").addEventListener("submit", async (e) => {
+function readFilledLogin(form) {
+  const scope = form || document.getElementById("loginForm");
+  if (!scope) return { username: "", password: "" };
+  const userInput = scope.querySelector('input[name="username"], #username');
+  const passInput = scope.querySelector('input[name="password"], #password');
+  let username = userInput ? userInput.value.trim() : "";
+  let password = passInput ? passInput.value.trim() : "";
+  if (!username || !password) {
+    document.querySelectorAll("form").forEach((other) => {
+      if (other === scope) return;
+      const u = other.querySelector('input[name="username"], input[type="text"]');
+      const p = other.querySelector('input[name="password"], input[type="password"]');
+      const uv = u ? u.value.trim() : "";
+      const pv = p ? p.value.trim() : "";
+      if (uv && pv) {
+        username = username || uv;
+        password = password || pv;
+      }
+    });
+  }
+  return { username, password };
+}
+
+const loginFormEl = document.getElementById("loginForm");
+if (loginFormEl) {
+  loginFormEl.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const username = document.getElementById("username").value.trim();
-  const password = document.getElementById("password").value.trim();
+  e.stopPropagation();
+  const creds = readFilledLogin(e.currentTarget);
+  const username = creds.username;
+  const password = creds.password;
   const loginError = document.getElementById("loginError");
 
   if (!username || !password) {
-    loginError.textContent = "Por favor completa todos los campos";
+    if (loginError) loginError.textContent = "Por favor completa todos los campos";
     return;
   }
 
-  loginError.textContent = "Conectando...";
+  if (loginError) loginError.textContent = "Conectando...";
   try {
     const response = await fetchXtream("player_api.php", { username, password });
     const parsed = await readXtreamJson(response);
@@ -445,15 +475,16 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
         server_info: data.server_info,
       };
       localStorage.setItem("xtream_user", JSON.stringify(currentUser));
-      loginError.textContent = "";
+      if (loginError) loginError.textContent = "";
       await enterApp();
     } else {
       throw new Error(xtreamLoginFailureMessage(response, data, parsed.text));
     }
   } catch (error) {
-    loginError.textContent = error.message || "Error al iniciar sesión";
+    if (loginError) loginError.textContent = error.message || "Error al iniciar sesión";
   }
-});
+  });
+}
 
 async function refreshPlaylist() {
   const refreshBtn = document.getElementById("refreshBtn");
@@ -483,40 +514,47 @@ async function loadM3UFromXtream() {
     username: currentUser.username,
     password: currentUser.password,
     type: "m3u_plus",
-    output: "m3u8",
+    output: "ts",
   });
   const m3uContent = await response.text();
+  const trimmed = (m3uContent || "").trim();
+  if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
+    throw new Error("No se pudo descargar la lista M3U");
+  }
   parseM3U(m3uContent);
+  if (!channelsData.length) {
+    throw new Error("La lista no contiene canales");
+  }
 }
 
 function parseM3U(content) {
-  const lines = content.split(/\r?\n/);
+  const lines = content.split("\n");
   const channels = [];
   const categories = {};
-  let current = null;
+  let currentChannel = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line.indexOf("#EXTINF:") === 0) {
-      const logoMatch = line.match(/tvg-logo="([^"]*)"/);
-      const idMatch = line.match(/tvg-id="([^"]*)"/);
-      const groupMatch = line.match(/group-title="([^"]*)"/);
+    if (line.startsWith("#EXTINF:")) {
+      const groupMatch = line.match(/group-title="([^"]+)"/);
       const nameMatch = line.match(/,(.+)$/);
-      current = {
-        name: nameMatch ? nameMatch[1].trim() : "Canal sin nombre",
-        logo: logoMatch ? logoMatch[1] : "",
-        tvgId: idMatch ? idMatch[1] : "",
+      const tvgIdMatch = line.match(/tvg-id="([^"]+)"/);
+      const logoMatch = line.match(/tvg-logo="([^"]*)"/);
+      const safeName = nameMatch ? nameMatch[1].trim() : "Canal";
+      const stableId = "ch_" + safeName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      currentChannel = {
+        name: safeName,
         category: groupMatch ? groupMatch[1] : "Sin categoría",
-        url: "",
-        id: "",
+        tvgId: tvgIdMatch ? tvgIdMatch[1] : "",
+        logo: logoMatch ? logoMatch[1] : "",
+        id: stableId,
       };
-    } else if (current && (line.indexOf("http") === 0 || line.indexOf("rtmp") === 0)) {
-      current.url = line;
-      current.id = stableChannelId(current);
-      channels.push(current);
-      if (!categories[current.category]) categories[current.category] = [];
-      categories[current.category].push(current);
-      current = null;
+    } else if ((line.startsWith("http") || line.startsWith("rtmp")) && currentChannel) {
+      currentChannel.url = line;
+      channels.push(currentChannel);
+      if (!categories[currentChannel.category]) categories[currentChannel.category] = [];
+      categories[currentChannel.category].push(currentChannel);
+      currentChannel = null;
     }
   }
 
@@ -537,8 +575,19 @@ function getCurrentChannelList() {
   return categoriesData[currentCategory] || [];
 }
 
+function showEmptyChannelList(message) {
+  [channelsContainer, channelsContainerMobile].forEach((container) => {
+    if (!container) return;
+    container.innerHTML = "";
+    const msg = document.createElement("div");
+    msg.className = "empty-list-msg";
+    msg.textContent = message;
+    container.appendChild(msg);
+  });
+}
+
 function renderCategories() {
-  categoriesContainer.innerHTML = "";
+  if (categoriesContainer) categoriesContainer.innerHTML = "";
   if (categoriesContainerMobile) categoriesContainerMobile.innerHTML = "";
 
   const categoryNames = Object.keys(categoriesData).sort(function (a, b) {
@@ -550,7 +599,9 @@ function renderCategories() {
   const all = special.concat(categoryNames);
 
   all.forEach((catName, index) => {
-    categoriesContainer.appendChild(createCategoryButton(catName, index));
+    if (categoriesContainer) {
+      categoriesContainer.appendChild(createCategoryButton(catName, index));
+    }
     if (categoriesContainerMobile) {
       categoriesContainerMobile.appendChild(createAccordionCategory(catName, index));
     }
@@ -560,6 +611,8 @@ function renderCategories() {
     const keep = all.indexOf(currentCategory);
     const idx = keep >= 0 ? keep : 0;
     selectCategory(all[idx], idx);
+  } else {
+    showEmptyChannelList("No hay canales en la lista");
   }
 }
 
@@ -706,6 +759,10 @@ function createChannelItem(channel, index) {
 }
 
 function renderChannels(channels) {
+  if (!channels || !channels.length) {
+    showEmptyChannelList("No hay canales en esta categoría");
+    return;
+  }
   const containers = [channelsContainer];
   if (channelsContainerMobile) containers.push(channelsContainerMobile);
   containers.forEach((container) => {
@@ -715,7 +772,9 @@ function renderChannels(channels) {
       container.appendChild(createChannelItem(channel, index));
     });
   });
-  if (channels.length > 0) updateCursor();
+  try {
+    updateCursor();
+  } catch (e) {}
 }
 
 function toggleFavorite(channelId) {
@@ -1056,10 +1115,12 @@ async function loadEPG() {
 
 /********** TECLADO / MANDO **********/
 function getVisibleCategoryButtons() {
+  if (!categoriesContainer) return [];
   return Array.from(categoriesContainer.querySelectorAll(".category-btn"));
 }
 
 function getVisibleChannelItems() {
+  if (!channelsContainer) return [];
   return Array.from(channelsContainer.querySelectorAll(".channel-item"));
 }
 

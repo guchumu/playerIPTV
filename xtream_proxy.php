@@ -56,7 +56,6 @@ if (defined('CURL_HTTP_VERSION_1_1')) {
 
 $response = curl_exec($ch);
 $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 $error = curl_error($ch);
 $errno = curl_errno($ch);
 curl_close($ch);
@@ -73,9 +72,7 @@ if ($response === false || $errno || $httpCode <= 0 || ($httpCode >= 300 && $htt
 
 http_response_code($httpCode);
 
-if ($contentType) {
-    header('Content-Type: ' . $contentType);
-} elseif ($endpoint === 'player_api.php') {
+if ($endpoint === 'player_api.php') {
     header('Content-Type: application/json; charset=utf-8');
 } else {
     header('Content-Type: text/plain; charset=utf-8');

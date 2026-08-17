@@ -22,10 +22,11 @@
       <div class="login-container">
         <img src="logo.png" alt="" class="login-logo" />
         <h1>StreamBox IPTV</h1>
-        <form id="loginForm">
+        <form id="loginForm" method="post" action="#" autocomplete="on">
           <input
             type="text"
             id="username"
+            name="username"
             placeholder="Usuario"
             autocomplete="username"
             enterkeyhint="next"
@@ -33,6 +34,7 @@
           <input
             type="password"
             id="password"
+            name="password"
             placeholder="Contraseña"
             autocomplete="current-password"
             enterkeyhint="go"
@@ -43,7 +45,7 @@
       </div>
     </div>
 
-    <div id="mainScreen" class="screen">
+    <div id="mainScreen" class="screen" hidden>
       <header class="compact-header">
         <div class="header-left">
           <h1>StreamBox IPTV</h1>
