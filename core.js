@@ -31,6 +31,7 @@ let epgReloadTimer = null;
 let epgRetryTimer = null;
 let epgRetryIndex = 0;
 let epgLastStatus = "sin intentar";
+let loginCancelled = false;
 const EPG_RETRY_DELAYS = [8000, 20000, 45000, 90000, 180000, 300000];
 let channelById = new Map();
 let pollingInterval = null;
@@ -227,6 +228,7 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 
 /********** MOTOR CENTRAL DE LOGIN **********/
 async function performLoginAction(serverUrl, username, password, m3uUrl) {
+  loginCancelled = false;
   setLoginStatus("Descargando lista... Por favor espera.");
   showSpinner(true, "Conectando...");
 
@@ -249,6 +251,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       } catch (err) {}
       const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
       const m3uContent = await response.text();
+      if (loginCancelled) return false;
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         throw new Error("No se pudo cargar la URL.");
       }
@@ -279,6 +282,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       showSpinner(true, "Validando acceso...");
       const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
+      if (loginCancelled) return false;
       let data = null;
       try {
         data = JSON.parse(rawText);
@@ -321,21 +325,43 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 }
 
 /********** AUTO-LOGIN **********/
+function cancelLogin() {
+  loginCancelled = true;
+  showSpinner(false);
+  setLoginStatus("Entrada automática cancelada. Pulsa Cargar Contenido.");
+  startRemotePolling();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   showDeviceId();
   startRemotePolling();
+
+  let saved = null;
   try {
-    const saved = localStorage.getItem("xtream_user");
-    if (!saved) return;
-    const u = JSON.parse(saved);
-    if (u.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = u.server;
-    if (u.username && u.username !== "Invitado M3U" && document.getElementById("username")) {
-      document.getElementById("username").value = u.username;
-    }
-    if (u.password && document.getElementById("password")) document.getElementById("password").value = u.password;
-    if (u.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = u.m3uUrl;
+    const raw = localStorage.getItem("xtream_user");
+    if (raw) saved = JSON.parse(raw);
   } catch (e) {}
+  if (!saved) return;
+
+  try {
+    if (saved.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = saved.server;
+    if (saved.username && saved.username !== "Invitado M3U" && document.getElementById("username")) {
+      document.getElementById("username").value = saved.username;
+    }
+    if (saved.password && document.getElementById("password")) document.getElementById("password").value = saved.password;
+    if (saved.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = saved.m3uUrl;
+  } catch (e) {}
+
+  const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
+  if (!canAutoLogin) return;
+
+  // Se entra solo, pero el overlay lleva botón de cancelar: antes un fallo aquí
+  // dejaba la pantalla bloqueada en "Descargando lista..." sin salida.
+  setTimeout(() => {
+    if (loginCancelled) return;
+    performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl);
+  }, 400);
 });
 
 window.addEventListener("resize", detectDevice);
@@ -1051,6 +1077,9 @@ async function doRefresh() {
   );
   showToast(ok ? "Lista actualizada correctamente" : "Error al actualizar la lista");
 }
+
+const spinnerCancelBtn = document.getElementById("spinnerCancelBtn");
+if (spinnerCancelBtn) spinnerCancelBtn.addEventListener("click", cancelLogin);
 
 const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) logoutBtn.addEventListener("click", doLogout);

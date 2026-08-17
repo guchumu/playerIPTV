@@ -140,6 +140,17 @@ html, body {
   color: #e2e8f0;
   font-size: 0.95rem;
 }
+.spinner-cancel {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
 #loginForm input:focus, #loginForm button:focus {
   outline: 3px solid #fbbf24;
   background: #1e293b;
