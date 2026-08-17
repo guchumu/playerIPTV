@@ -864,6 +864,20 @@ function parseM3U(content) {
   };
 }
 
+// Segundos ya descargados por delante del punto que se está viendo: es el
+// colchón real que queda antes de que la imagen se pare.
+function getBufferAhead() {
+  if (!video) return 0;
+  try {
+    for (let i = 0; i < video.buffered.length; i++) {
+      if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+        return Math.max(0, video.buffered.end(i) - video.currentTime);
+      }
+    }
+  } catch (e) {}
+  return 0;
+}
+
 function getPlaybackStats() {
   if (!video) return "  (sin reproductor)";
 
@@ -873,15 +887,7 @@ function getPlaybackStats() {
   lines.push("  motor: " + (hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
   lines.push("  resolucion: " + (video.videoWidth || 0) + "x" + (video.videoHeight || 0));
 
-  let buffered = 0;
-  try {
-    for (let i = 0; i < video.buffered.length; i++) {
-      if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
-        buffered = video.buffered.end(i) - video.currentTime;
-      }
-    }
-  } catch (e) {}
-  lines.push("  buffer por delante: " + buffered.toFixed(1) + "s");
+  lines.push("  buffer por delante: " + getBufferAhead().toFixed(1) + "s");
 
   try {
     if (video.getVideoPlaybackQuality) {
@@ -1188,6 +1194,7 @@ function playChannel(channel) {
   clearPlaybackRetry();
   rememberLastChannel(channel);
   startPlayback(channel);
+  updatePlaybackStatus();
 }
 
 function startPlayback(channel) {
@@ -1331,6 +1338,57 @@ if (video) {
   video.addEventListener("error", handlePlaybackFailure);
   video.addEventListener("ended", handlePlaybackFailure);
 }
+
+/********** ESTADO DE REPRODUCCIÓN SIEMPRE VISIBLE **********/
+const statusDot = document.getElementById("statusDot");
+const statusBufferText = document.getElementById("statusBufferText");
+const statusBarFill = document.getElementById("statusBarFill");
+const statusQuality = document.getElementById("statusQuality");
+const statusStalls = document.getElementById("statusStalls");
+
+function setStatusLevel(level) {
+  if (statusDot) statusDot.className = "status-dot " + level;
+  if (statusBarFill) statusBarFill.className = level === "is-good" ? "" : level;
+}
+
+function updatePlaybackStatus() {
+  if (!statusBufferText) return;
+
+  if (!currentlyPlayingId) {
+    statusBufferText.textContent = "Buffer --";
+    if (statusBarFill) statusBarFill.style.width = "0%";
+    if (statusQuality) statusQuality.textContent = "Sin canal";
+    if (statusStalls) statusStalls.textContent = "";
+    setStatusLevel("");
+    return;
+  }
+
+  const target = getBufferSeconds();
+  const ahead = getBufferAhead();
+  const ratio = target > 0 ? Math.min(1, ahead / target) : 0;
+
+  statusBufferText.textContent = "Buffer " + ahead.toFixed(1) + " / " + target + " s";
+  if (statusBarFill) statusBarFill.style.width = Math.round(ratio * 100) + "%";
+  // Por debajo de dos segundos de colchón cualquier bache corta la imagen.
+  setStatusLevel(ahead < 2 ? "is-empty" : ratio < 0.35 ? "is-low" : "is-good");
+
+  if (statusQuality) {
+    const parts = [];
+    if (video && video.videoWidth) parts.push(video.videoWidth + "×" + video.videoHeight);
+    try {
+      const level = hls && hls.levels ? hls.levels[hls.currentLevel] : null;
+      if (level && level.bitrate) parts.push(Math.round(level.bitrate / 1000) + " kbps");
+    } catch (e) {}
+    statusQuality.textContent = parts.length ? parts.join(" · ") : "Conectando...";
+  }
+
+  if (statusStalls) {
+    statusStalls.textContent = stallCount === 1 ? "1 corte" : stallCount + " cortes";
+  }
+}
+
+setInterval(updatePlaybackStatus, 1000);
+updatePlaybackStatus();
 
 /********** ÚLTIMO CANAL **********/
 const LAST_CHANNEL_KEY = "streambox_last_channel";

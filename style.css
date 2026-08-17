@@ -367,6 +367,63 @@ html, body {
   display: none !important;
 }
 
+/********** ESTADO DE REPRODUCCIÓN SIEMPRE VISIBLE **********/
+.playback-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.9);
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+  transition: background 0.2s ease;
+}
+.status-dot.is-good { background: #22c55e; }
+.status-dot.is-low { background: #f59e0b; }
+.status-dot.is-empty { background: #ef4444; }
+.status-buffer {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.status-bar {
+  display: block;
+  width: 70px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+}
+.status-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: #22c55e;
+  transition: width 0.3s linear, background 0.2s ease;
+}
+.status-bar i.is-low { background: #f59e0b; }
+.status-bar i.is-empty { background: #ef4444; }
+.status-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #94a3b8;
+}
+body.is-tv .playback-status { font-size: 1rem; padding: 0.5rem 0.8rem; }
+body.is-tv .status-bar { width: 110px; height: 7px; }
+
 /********** PARRILLA EPG BAJO EL VÍDEO **********/
 .epg-timeline-box {
   background: rgba(15, 23, 42, 0.9);
@@ -678,6 +735,7 @@ body.is-tv .device-id { font-size: 2.4rem; }
   .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
   .epg-container { margin: 10px; }
   .epg-timeline-box { margin: 0 10px 10px; }
+  .playback-status { margin: 10px 10px 0; }
   .track-control { font-size: 0.65rem; }
   .track-control select { max-width: 84px; }
   .categories-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 5px; gap: 8px; }
