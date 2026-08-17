@@ -20,6 +20,19 @@ const DEFAULT_BUFFER_SECONDS = 10;
 // Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
 // que un ajuste alto sigue valiendo como techo pero no como espera.
 const PREBUFFER_MAX_SECONDS = 20;
+/**
+ * Tope real de espera al cambiar de canal.
+ *
+ * Un colchón de N segundos solo se construye dejando que pasen N segundos: si
+ * el origen emite a tiempo real, lo acumulado crece a la misma velocidad que
+ * el reloj. Por eso pedir 10s de colchón costaba 10s de pantalla en negro.
+ *
+ * Ya no hace falta pagarlo: la reproducción arranca en el punto más antiguo de
+ * lo descargado, así que la ráfaga inicial que manda el proveedor ya se hereda
+ * como colchón sin esperar nada. Esta espera solo remata lo que falte, y con
+ * un tope corto para que zapear sea llevadero.
+ */
+const PREBUFFER_MAX_WAIT_MS = 4000;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -74,12 +87,16 @@ function showSpinner(show, message) {
 // entera como hace el spinner global del login.
 let bufferingSpinnerTimer = null;
 
-function showVideoSpinner(show, message) {
+function showVideoSpinner(show, message, skippable) {
   clearTimeout(bufferingSpinnerTimer);
   bufferingSpinnerTimer = null;
   if (spinner) spinner.style.display = show ? "flex" : "none";
   const text = document.getElementById("spinnerText");
   if (text) text.textContent = show ? message || "" : "";
+  // El botón de saltar solo tiene sentido mientras se acumula colchón: en una
+  // parada por falta de datos no habría nada que mostrar al pulsarlo.
+  const skip = document.getElementById("spinnerSkip");
+  if (skip) skip.hidden = !(show && skippable);
 }
 
 function setLoginStatus(message) {
@@ -1441,6 +1458,17 @@ function beginPrebufferFill(channel) {
     return;
   }
 
+  // Arrancar en el punto más antiguo de lo descargado suele dejar ya bastante
+  // colchón heredado de la ráfaga inicial del proveedor. Cuando ocurre, pausar
+  // para nada solo provocaría un tirón al reanudar.
+  const heredado = getBufferAhead();
+  if (heredado >= target) {
+    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno, sin esperar)";
+    logPlayback("prebuffer", prebufferResult);
+    showVideoSpinner(false);
+    return;
+  }
+
   prebufferActive = true;
   prebufferResult = "llenando...";
   try {
@@ -1448,10 +1476,10 @@ function beginPrebufferFill(channel) {
   } catch (e) {}
 
   const startedAt = Date.now();
-  const initial = getBufferAhead();
+  const initial = heredado;
   let best = initial;
-  const deadline = startedAt + target * 1000 + 5000;
-  const growthCheck = startedAt + 3000;
+  const deadline = startedAt + Math.min(target * 1000, PREBUFFER_MAX_WAIT_MS);
+  const growthCheck = startedAt + 1500;
 
   const finish = (reason) => {
     prebufferActive = false;
@@ -1475,16 +1503,17 @@ function beginPrebufferFill(channel) {
     if (ahead > best) best = ahead;
     if (ahead >= target) return finish("completo");
     // Hay fuentes que emiten en tiempo estricto y no dejan acumular nada.
-    // Detectarlo en tres segundos evita esperas larguísimas para nada.
+    // Detectarlo pronto evita esperar para nada.
     if (Date.now() > growthCheck && best - initial < 0.5) return finish("la fuente no acumula, se sigue sin esperar");
-    if (Date.now() > deadline) return finish("tiempo agotado");
+    if (Date.now() > deadline) return finish("tope de espera, se sigue con lo acumulado");
 
     if (!video.paused) {
       try {
         video.pause();
       } catch (e) {}
     }
-    showVideoSpinner(true, "Búfer " + ahead.toFixed(1) + " / " + target + " s");
+    const restante = Math.max(0, deadline - Date.now()) / 1000;
+    showVideoSpinner(true, "Colchón " + ahead.toFixed(1) + "s de " + target + "s · " + restante.toFixed(0) + "s", true);
     prebufferTimer = setTimeout(tick, 250);
   };
 
@@ -2447,6 +2476,18 @@ if (logoutBtn) logoutBtn.addEventListener("click", doLogout);
 
 const refreshBtn = document.getElementById("refreshBtn");
 if (refreshBtn) refreshBtn.addEventListener("click", doRefresh);
+
+const spinnerSkip = document.getElementById("spinnerSkip");
+if (spinnerSkip) {
+  spinnerSkip.addEventListener("click", (ev) => {
+    // El clic no debe llegar al vídeo, que lo interpretaría como pausa.
+    ev.stopPropagation();
+    cancelPrebuffer("espera saltada a mano");
+    jumpOverBufferGap();
+    const p = video && video.play();
+    if (p) p.catch(() => {});
+  });
+}
 
 const bufferSelect = document.getElementById("bufferSelect");
 if (bufferSelect) {
