@@ -148,7 +148,7 @@ function getDeviceId() {
   return id;
 }
 
-function startRemotePolling() {
+function showDeviceId() {
   const deviceId = getDeviceId();
   const displayEl = document.getElementById("deviceIdDisplay");
   if (displayEl) displayEl.textContent = deviceId;
@@ -157,12 +157,17 @@ function startRemotePolling() {
     const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
     uploadUrlEl.textContent = base + "upload.php";
   }
+  return deviceId;
+}
+
+function startRemotePolling() {
+  const deviceId = showDeviceId();
 
   if (pollingInterval) clearInterval(pollingInterval);
 
   pollingInterval = setInterval(async () => {
     try {
-      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
+      const res = await fetchWithTimeout("api_dispositivos.php?id=" + encodeURIComponent(deviceId), 8000);
       const data = await res.json();
       if (data && data.status !== "esperando" && (data.serverUrl || data.m3uUrl)) {
         clearInterval(pollingInterval);
@@ -170,6 +175,15 @@ function startRemotePolling() {
       }
     } catch (e) {}
   }, 5000);
+}
+
+function fetchWithTimeout(url, ms) {
+  const timeoutMs = ms || 45000;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = setTimeout(() => {
+    if (controller) controller.abort();
+  }, timeoutMs);
+  return fetch(url, controller ? { signal: controller.signal } : {}).finally(() => clearTimeout(timer));
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -218,7 +232,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       try {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
-      const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
+      const response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 45000);
+      if (loginError) loginError.textContent = "Procesando lista...";
       const m3uContent = await response.text();
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         throw new Error("No se pudo cargar la URL.");
@@ -266,6 +281,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
         localStorage.setItem("xtream_user", JSON.stringify(currentUser));
 
+        if (loginError) loginError.textContent = "Descargando canales...";
         await loadM3UFromXtream();
         finishLogin(currentUser);
         if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
@@ -278,7 +294,12 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
     throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
   } catch (error) {
     showSpinner(false);
-    if (loginError) loginError.textContent = error.message || "Error al iniciar sesión.";
+    const aborted = error && (error.name === "AbortError" || /aborted/i.test(String(error.message || "")));
+    if (loginError) {
+      loginError.textContent = aborted
+        ? "Tiempo de espera agotado al descargar la lista"
+        : error.message || "Error al iniciar sesión.";
+    }
     startRemotePolling();
     return false;
   }
@@ -287,12 +308,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 /********** AUTO-LOGIN **********/
 window.addEventListener("DOMContentLoaded", async () => {
   detectDevice();
+  showDeviceId();
+  startRemotePolling();
   const savedUser = localStorage.getItem("xtream_user");
-  if (savedUser) {
+  if (!savedUser) return;
+  try {
     currentUser = JSON.parse(savedUser);
+  } catch (e) {
+    localStorage.removeItem("xtream_user");
+    return;
+  }
+  if ((currentUser.username && currentUser.password) || currentUser.m3uUrl) {
     performLoginAction(currentUser.server, currentUser.username, currentUser.password, currentUser.m3uUrl);
-  } else {
-    startRemotePolling();
   }
 });
 
@@ -316,8 +343,9 @@ async function fetchXtream(endpoint, params, serverOverride) {
   const targetServer = serverOverride || currentServer;
   const queryString = new URLSearchParams(params || {}).toString();
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
-  return await fetch(
-    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "")
+  return await fetchWithTimeout(
+    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : ""),
+    45000
   );
 }
 
