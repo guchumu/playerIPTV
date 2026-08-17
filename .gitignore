@@ -1,4 +1,6 @@
 .DS_Store
+epg_cache.xml
+cuentas/*.json
 node_modules/
 native/node_modules/
 native/android/app/build/

@@ -1,152 +1,100 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <title>StreamBox IPTV</title>
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#111827" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="StreamBox" />
-    <link rel="manifest" href="manifest.json" />
-    <link rel="icon" href="logo.png" />
-    <link rel="apple-touch-icon" href="logo.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StreamBox">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="icon" href="logo.png">
     <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
+    <link rel="manifest" href="manifest.json" />
+</head>
+<body>
     <div id="loginScreen" class="screen active">
-      <div class="login-container">
-        <img src="logo.png" alt="" class="login-logo" />
-        <h1>StreamBox IPTV</h1>
-        <form id="loginForm" method="post" action="#" autocomplete="on">
-          <input
-            type="text"
-            id="username"
-            name="username"
-            placeholder="Usuario"
-            autocomplete="username"
-            enterkeyhint="next"
-          />
-          <input
-            type="password"
-            id="password"
-            name="password"
-            placeholder="Contraseña"
-            autocomplete="current-password"
-            enterkeyhint="go"
-          />
-          <button type="submit">Entrar</button>
-          <div id="loginError" class="error"></div>
-        </form>
-      </div>
+        <div class="login-container">
+            <img src="logo.png" alt="" class="login-logo" />
+            <h1>StreamBox IPTV</h1>
+
+            <div class="remote-upload-box">
+                <p>Carga tu lista desde el móvil en:</p>
+                <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
+                <p>Tu código de dispositivo (Device ID):</p>
+                <div id="deviceIdDisplay" class="device-id">Cargando...</div>
+            </div>
+
+            <div class="login-divider">— O ESCRÍBELA MANUALMENTE —</div>
+
+            <form id="loginForm" autocomplete="on">
+                <div class="input-group">
+                    <label>Acceso Xtream Codes</label>
+                    <input type="text" id="serverUrl" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" />
+                    <input type="text" id="username" name="username" placeholder="Usuario" autocomplete="username" />
+                    <input type="password" id="password" name="password" placeholder="Contraseña" autocomplete="current-password" />
+                </div>
+                <div class="login-divider">— O BIEN —</div>
+                <div class="input-group">
+                    <label>Lista M3U Directa</label>
+                    <input type="text" id="m3uUrl" name="m3uUrl" placeholder="http://servidor.com:8080/get.php?..." />
+                </div>
+                <button type="submit" id="loginSubmitBtn">Cargar Contenido</button>
+                <div id="loginError" class="error"></div>
+            </form>
+        </div>
     </div>
 
-    <div id="mainScreen" class="screen" hidden>
-      <header class="compact-header">
-        <div class="header-left">
-          <h1>StreamBox IPTV</h1>
+    <div id="mainScreen" class="screen">
+        <header class="compact-header">
+            <div class="header-left"><h1>StreamBox IPTV</h1></div>
+            <div class="header-right">
+                <span id="accountExpiryLabel"></span>
+                <span id="headerUser"></span>
+                <button id="refreshBtn" class="action-btn" type="button" title="Refrescar lista">🔄</button>
+                <button id="castButton" class="action-btn" type="button" title="Chromecast" style="display:none;">📺</button>
+                <button id="logoutBtn" class="action-btn" type="button" title="Salir">⏻</button>
+            </div>
+        </header>
+
+        <div class="main-container">
+            <aside class="categories-column">
+                <div id="categoriesContainer" class="categories-list"></div>
+            </aside>
+
+            <section class="channels-column">
+                <h2 id="channelColumnTitle">Canales</h2>
+                <div id="channelsContainer" class="channels-list"></div>
+            </section>
+
+            <section class="player-column">
+                <div class="video-wrapper">
+                    <video id="videoPlayer" playsinline webkit-playsinline controls style="width: 100%; height: 100%; touch-action: manipulation;"></video>
+                    <div id="spinner" class="spinner-overlay"><div class="spinner"></div></div>
+                </div>
+
+                <a id="externalPlayerBtn" class="external-player-btn" href="#" style="display: none;">
+                    ⚠️ ¿Mudo o en negro? Abrir en VLC
+                </a>
+
+                <div class="epg-container">
+                    <div class="epg-header"><span>AHORA</span><span>DESPUÉS</span></div>
+                    <div class="epg-info">
+                        <div id="epgNow" class="epg-now">--:--</div>
+                        <div id="epgNext" class="epg-next">--:--</div>
+                    </div>
+                </div>
+            </section>
         </div>
-        <div class="header-right">
-          <span id="headerUser"></span>
-          <span id="headerExpire"></span>
-          <span id="headerConnections"></span>
-          <button id="refreshBtn" type="button" title="Refrescar lista">🔄</button>
-          <button id="castButton" type="button" title="Chromecast" hidden>📺</button>
-          <button id="logoutBtn" type="button" title="Salir">⏻</button>
-        </div>
-      </header>
-
-      <div class="main-container">
-        <aside class="categories-column">
-          <div class="search-container">
-            <input
-              id="searchInput"
-              type="search"
-              placeholder="Buscar canal"
-              autocomplete="off"
-              enterkeyhint="search"
-            />
-          </div>
-          <div id="categoriesContainer" class="categories-list"></div>
-        </aside>
-
-        <section class="channels-column">
-          <h2 id="channelColumnTitle">Canales</h2>
-          <div id="channelsContainer" class="channels-list"></div>
-        </section>
-
-        <section class="player-column">
-          <div class="video-wrapper">
-            <video
-              id="videoPlayer"
-              playsinline
-              webkit-playsinline
-              x-webkit-airplay="allow"
-            ></video>
-            <div id="spinner" class="spinner-overlay">
-              <div class="spinner"></div>
-            </div>
-            <div id="bufferIcon"></div>
-            <div id="videoControls" class="video-controls">
-              <div class="controls-left">
-                <button id="playBtn" type="button" class="control-btn">▶️</button>
-                <button id="pauseBtn" type="button" class="control-btn">⏸</button>
-                <button id="muteBtn" type="button" class="control-btn">🔇</button>
-                <input
-                  id="volumeSlider"
-                  class="volume-slider"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                />
-                <span id="currentTime" class="time-label">LIVE</span>
-              </div>
-              <div class="controls-right">
-                <span id="currentChannelName" class="current-channel-name">Ningún canal</span>
-                <button id="pipBtn" type="button" class="control-btn">▢</button>
-                <button id="airplayBtn" type="button" class="control-btn">📡</button>
-                <button id="fullscreenBtn" type="button" class="control-btn">⛶</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="epg-container">
-            <div class="epg-header">
-              <span>AHORA</span>
-              <span>DESPUÉS</span>
-            </div>
-            <div class="epg-info">
-              <div class="epg-now" id="epgNow">--:--</div>
-              <div class="epg-next" id="epgNext">--:--</div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div id="mobileMenu" class="mobile-menu-container">
-        <h2 id="channelColumnTitleMobile">Canales</h2>
-        <div id="categoriesContainerMobile" class="categories-list-mobile"></div>
-        <div id="channelsContainerMobile" class="channels-list-mobile"></div>
-      </div>
-      <button id="menuToggle" type="button" class="menu-toggle" aria-label="Menú">≡</button>
     </div>
 
     <div id="appToast" class="app-toast" hidden></div>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script>
-      window.__onGCastApiAvailable = function (isAvailable) {
-        document.dispatchEvent(
-          new CustomEvent("cast-ready", { detail: !!isAvailable })
-        );
-      };
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="core.js"></script>
-  </body>
+</body>
 </html>
