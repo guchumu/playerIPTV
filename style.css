@@ -114,6 +114,21 @@ html, body {
 }
 #logoutBtn { background: #ef4444; }
 #castButton { background: #0ea5e9; }
+.buffer-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+.buffer-control select {
+  background: #020617;
+  color: #f9fafb;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+}
 
 /********** LAYOUT PRINCIPAL **********/
 .main-container {

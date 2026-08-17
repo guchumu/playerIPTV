@@ -15,6 +15,8 @@ const EPG_URL = "epg_proxy.php";
 let currentServer = "";
 let hls = null;
 let mpegtsPlayer = null;
+const BUFFER_KEY = "streambox_buffer";
+const DEFAULT_BUFFER_SECONDS = 15;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -57,8 +59,51 @@ function detectDevice() {
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
 }
 
-function showSpinner(show) {
-  if (spinner) spinner.style.display = show ? "flex" : "none";
+function getBufferSeconds() {
+  const n = parseInt(localStorage.getItem(BUFFER_KEY) || String(DEFAULT_BUFFER_SECONDS), 10);
+  if (!n || n < 5) return DEFAULT_BUFFER_SECONDS;
+  return Math.min(90, n);
+}
+
+function setBufferSeconds(value) {
+  const n = Math.min(90, Math.max(5, parseInt(value, 10) || DEFAULT_BUFFER_SECONDS));
+  localStorage.setItem(BUFFER_KEY, String(n));
+  return n;
+}
+
+function stopPlayback() {
+  try {
+    if (hls) {
+      hls.stopLoad();
+      hls.detachMedia();
+      hls.destroy();
+    }
+  } catch (e) {}
+  hls = null;
+
+  try {
+    if (mpegtsPlayer) {
+      mpegtsPlayer.pause();
+      mpegtsPlayer.unload();
+      mpegtsPlayer.detachMediaElement();
+      mpegtsPlayer.destroy();
+    }
+  } catch (e) {}
+  mpegtsPlayer = null;
+
+  if (!video) return;
+  try {
+    video.pause();
+  } catch (e) {}
+  video.onerror = null;
+  video.removeAttribute("src");
+  video.removeAttribute("data-active-url");
+  try {
+    video.srcObject = null;
+  } catch (e) {}
+  try {
+    video.load();
+  } catch (e) {}
 }
 
 function showToast(message, ms) {
@@ -621,6 +666,7 @@ function getDebugReport() {
     "categorias: " + (d.categories || 0),
     "extinf sin url: " + (d.skipped || 0),
     "parse ms: " + (d.ms || 0),
+    "buffer: " + getBufferSeconds() + "s",
     "muestras url raras:",
     d.skippedSamples && d.skippedSamples.length ? d.skippedSamples.join("\n") : "  (ninguna)",
     "canales por categoria:",
@@ -722,27 +768,19 @@ function renderChannels(channels) {
 function playChannel(channel) {
   if (!video) return;
   showSpinner(true);
+  stopPlayback();
   updateActivity(channel);
 
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
   const originalUrl = channel.url;
-  const isTs = originalUrl.includes(".ts");
-  const isM3u8 = originalUrl.includes(".m3u8");
-
-  if (hls) {
-    hls.destroy();
-    hls = null;
-  }
-  if (mpegtsPlayer) {
-    mpegtsPlayer.destroy();
-    mpegtsPlayer = null;
-  }
-  video.onerror = null;
+  const isTs = /\.ts(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".ts");
+  const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
+  const bufferSec = getBufferSeconds();
 
   const tryAutoPlay = () => {
     const playPromise = video.play();
     if (playPromise !== undefined) {
-      playPromise.then(() => showSpinner(false)).catch((e) => showSpinner(false));
+      playPromise.then(() => showSpinner(false)).catch(() => showSpinner(false));
     } else {
       showSpinner(false);
     }
@@ -753,7 +791,17 @@ function playChannel(channel) {
   if (isTs && mseSupported) {
     const proxiedTsUrl = currentDomain + "stream.php?url=" + encodeURIComponent(originalUrl);
     video.setAttribute("data-active-url", proxiedTsUrl);
-    mpegtsPlayer = mpegts.createPlayer({ type: "mse", isLive: true, url: proxiedTsUrl });
+    mpegtsPlayer = mpegts.createPlayer(
+      { type: "mse", isLive: true, url: proxiedTsUrl },
+      {
+        enableWorker: true,
+        enableStashBuffer: true,
+        stashInitialSize: Math.max(384 * 1024, bufferSec * 48 * 1024),
+        liveBufferLatencyChasing: true,
+        liveBufferLatencyMaxLatency: Math.max(3, Math.min(bufferSec, 20)),
+        liveBufferLatencyMinRemain: 1,
+      }
+    );
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
     const p = mpegtsPlayer.play();
@@ -764,7 +812,7 @@ function playChannel(channel) {
     }
     mpegtsPlayer.on(mpegts.Events.ERROR, () => showSpinner(false));
   } else if (isTs && !mseSupported) {
-    const iosUrl = originalUrl.replace(".ts", ".m3u8");
+    const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
@@ -772,7 +820,15 @@ function playChannel(channel) {
   } else if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
     if (window.Hls && Hls.isSupported()) {
-      hls = new Hls({ maxBufferLength: 90 });
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        maxBufferLength: bufferSec,
+        maxMaxBufferLength: bufferSec * 2,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: Math.max(5, Math.ceil(bufferSec / 2)),
+        backBufferLength: 0,
+      });
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, tryAutoPlay);
@@ -795,9 +851,7 @@ function doLogout() {
   sendActivity("stop");
   stopActivityMonitoring();
   localStorage.removeItem("xtream_user");
-  if (hls) hls.destroy();
-  if (mpegtsPlayer) mpegtsPlayer.destroy();
-  if (video) video.src = "";
+  stopPlayback();
   currentUser = null;
   sessionToken = null;
   activeConnection = null;
@@ -821,6 +875,17 @@ if (logoutBtn) logoutBtn.addEventListener("click", doLogout);
 
 const refreshBtn = document.getElementById("refreshBtn");
 if (refreshBtn) refreshBtn.addEventListener("click", doRefresh);
+
+const bufferSelect = document.getElementById("bufferSelect");
+if (bufferSelect) {
+  bufferSelect.value = String(getBufferSeconds());
+  bufferSelect.addEventListener("change", () => {
+    const n = setBufferSeconds(bufferSelect.value);
+    showToast("Buffer: " + n + "s (al cambiar de canal)");
+  });
+}
+
+window.addEventListener("pagehide", stopPlayback);
 
 window.addEventListener("beforeunload", () => {
   if (currentUser && !currentUser.isM3U) {

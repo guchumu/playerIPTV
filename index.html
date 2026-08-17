@@ -53,6 +53,16 @@
             <div class="header-right">
                 <span id="accountExpiryLabel"></span>
                 <span id="headerUser"></span>
+                <label class="buffer-control" title="Segundos de buffer del directo">
+                    Buffer
+                    <select id="bufferSelect">
+                        <option value="8">8s</option>
+                        <option value="15" selected>15s</option>
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                        <option value="90">90s</option>
+                    </select>
+                </label>
                 <button id="refreshBtn" class="action-btn" type="button" title="Refrescar lista">🔄</button>
                 <button id="castButton" class="action-btn" type="button" title="Chromecast" style="display:none;">📺</button>
                 <button id="logoutBtn" class="action-btn" type="button" title="Salir">⏻</button>
