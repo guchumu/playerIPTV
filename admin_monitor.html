@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor de Usuarios Activos - STREAMBOX IPTV</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%); color: #ffffff; min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; }
+        .header h1 { font-size: 2.2em; margin-bottom: 10px; }
+        .header p { opacity: 0.9; }
+        .controls { padding: 25px 30px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .refresh-btn, .action-btn, .nav-btn { border: none; padding: 12px 24px; border-radius: 50px; font-size: 1em; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; color: white; }
+        .refresh-btn { background: linear-gradient(45deg, #ff6b6b, #feca57); }
+        .nav-btn { background: #4f46e5; }
+        .block-btn { background: linear-gradient(45deg, #dc3545, #ff6b6b); color: white; }
+        .unblock-btn { background: linear-gradient(45deg, #28a745, #20c997); color: white; }
+        .action-btn:disabled, .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { padding: 20px 30px; font-size: 1.1em; font-weight: 600; text-align: center; border-radius: 15px; margin: 0 30px 20px; }
+        .status.online { background: rgba(40, 167, 69, 0.2); border: 2px solid #28a745; color: #28a745; }
+        .status.empty { background: rgba(108, 117, 125, 0.2); border: 2px solid #6c757d; color: #6c757d; }
+        .status.error { background: rgba(220, 53, 69, 0.2); border: 2px solid #dc3545; color: #dc3545; }
+        .users-table { width: calc(100% - 60px); border-collapse: collapse; margin: 0 30px 30px; }
+        .users-table th { background: #2c3e50; padding: 16px; text-align: left; }
+        .users-table td { padding: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+        .username { font-weight: 700; color: #4ecdc4; }
+        .channel { color: #feca57; }
+        .time { color: #95a5a6; font-size: 0.95em; }
+        .online-indicator { display: inline-block; width: 12px; height: 12px; background: #28a745; border-radius: 50%; margin-right: 10px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 30px; }
+        .stat-card { background: rgba(255, 255, 255, 0.05); padding: 25px; border-radius: 15px; text-align: center; }
+        .stat-number { font-size: 2.5em; font-weight: 800; color: #4ecdc4; margin-bottom: 10px; }
+        .blocked { opacity: 0.6; background: rgba(220, 53, 69, 0.1) !important; }
+        .no-data { text-align: center; padding: 40px; opacity: 0.8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Monitor de Usuarios Activos</h1>
+            <p>STREAMBOX IPTV — requiere sesión de administrador</p>
+        </div>
+
+        <div class="controls">
+            <a class="nav-btn" href="admin/index.php">Ir al panel</a>
+            <button class="refresh-btn" id="refreshBtn">Refrescar</button>
+            <button class="action-btn block-btn" id="blockAllBtn">Bloquear todos</button>
+            <span id="lastUpdate" style="opacity: 0.8;"></span>
+        </div>
+
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat-card">
+                <div class="stat-number" id="onlineCount">0</div>
+                <div>Usuarios Online</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalChannels">0</div>
+                <div>Canales Activos</div>
+            </div>
+        </div>
+
+        <div id="status" class="status empty">Cargando usuarios activos...</div>
+
+        <table class="users-table" id="usersTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Usuario</th>
+                    <th>Canal</th>
+                    <th>Inicio</th>
+                    <th>Última actividad</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="usersTbody"></tbody>
+        </table>
+
+        <div id="noData" class="no-data" style="display: none;">
+            <div>No hay usuarios conectados en este momento</div>
+        </div>
+    </div>
+
+    <script>
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
+        function formatDate(value) {
+            if (!value) return 'N/A';
+            const date = new Date(value.replace(' ', 'T'));
+            if (isNaN(date.getTime())) return escapeHtml(value);
+            return date.toLocaleString('es-ES');
+        }
+
+        async function loadActivity() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const statusEl = document.getElementById('status');
+            refreshBtn.disabled = true;
+            statusEl.textContent = 'Cargando usuarios activos...';
+
+            try {
+                const response = await fetch('get_activity.php', { credentials: 'same-origin' });
+                if (response.status === 403) {
+                    statusEl.className = 'status error';
+                    statusEl.innerHTML = 'No autorizado. <a href="admin/login.php" style="color:#fff">Inicia sesión en el panel</a>.';
+                    return;
+                }
+                const data = await response.json();
+                document.getElementById('lastUpdate').textContent =
+                    'Última actualización: ' + new Date().toLocaleTimeString();
+
+                const users = (data.success && data.active_users) ? data.active_users : [];
+                const table = document.getElementById('usersTable');
+                const tbody = document.getElementById('usersTbody');
+                const stats = document.getElementById('stats');
+                const noData = document.getElementById('noData');
+                tbody.innerHTML = '';
+
+                if (users.length > 0) {
+                    document.getElementById('onlineCount').textContent = users.length;
+                    document.getElementById('totalChannels').textContent = new Set(users.map(u => u.channel_name)).size;
+                    stats.style.display = 'grid';
+
+                    users.forEach((user) => {
+                        const row = tbody.insertRow();
+                        const isBlocked = Number(user.blocked) === 1;
+                        if (isBlocked) row.className = 'blocked';
+                        const name = escapeHtml(user.username || 'N/A');
+                        const channel = escapeHtml(user.channel_name || 'Sin canal');
+                        const actionLabel = isBlocked ? 'Desbloquear' : 'Bloquear';
+                        const actionClass = isBlocked ? 'unblock-btn' : 'block-btn';
+                        row.innerHTML =
+                            '<td><span class="online-indicator"></span><strong class="username">' + name + '</strong>' +
+                            (isBlocked ? ' <span style="color:#dc3545">BLOQUEADO</span>' : '') + '</td>' +
+                            '<td class="channel">' + channel + '</td>' +
+                            '<td class="time">' + formatDate(user.start_time) + '</td>' +
+                            '<td class="time">' + formatDate(user.last_update) + '</td>' +
+                            '<td><button class="action-btn ' + actionClass + '" data-user="' + encodeURIComponent(user.username || '') + '" data-block="' + (isBlocked ? '0' : '1') + '">' + actionLabel + '</button></td>';
+                    });
+
+                    table.style.display = 'table';
+                    noData.style.display = 'none';
+                    statusEl.className = 'status online';
+                    statusEl.textContent = users.length + ' usuario(s) online';
+                } else {
+                    stats.style.display = 'none';
+                    table.style.display = 'none';
+                    noData.style.display = 'block';
+                    statusEl.className = 'status empty';
+                    statusEl.textContent = 'No hay usuarios online';
+                }
+            } catch (error) {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Error: ' + error.message;
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        }
+
+        async function toggleUser(username, block) {
+            const label = block ? '¿Bloquear' : '¿Desbloquear';
+            if (!confirm(label + ' a ' + username + '?')) return;
+            const endpoint = block ? 'block_user.php' : 'unblock_user.php';
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username }),
+            });
+            const data = await response.json();
+            if (!data.success) {
+                alert(data.message || 'Error');
+            }
+            loadActivity();
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', loadActivity);
+        document.getElementById('blockAllBtn').addEventListener('click', async () => {
+            if (!confirm('¿Bloquear TODOS los usuarios online?')) return;
+            const response = await fetch('block_user.php', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: 'ALL' }),
+            });
+            const data = await response.json();
+            alert(data.message || 'Error');
+            loadActivity();
+        });
+        document.getElementById('usersTbody').addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-user]');
+            if (!btn) return;
+            toggleUser(decodeURIComponent(btn.dataset.user), btn.dataset.block === '1');
+        });
+
+        setInterval(loadActivity, 10000);
+        loadActivity();
+    </script>
+</body>
+</html>

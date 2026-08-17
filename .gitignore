@@ -1,0 +1,15 @@
+.DS_Store
+node_modules/
+native/node_modules/
+native/android/app/build/
+native/android/.gradle/
+native/ios/App/Pods/
+native/ios/App/build/
+*.apk
+*.aab
+*.ipa
+*.dSYM
+*.xcuserstate
+xcuserdata/
+.idea/
+local.properties

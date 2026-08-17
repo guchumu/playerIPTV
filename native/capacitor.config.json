@@ -1,0 +1,24 @@
+{
+  "appId": "com.guchumu.playeriptv",
+  "appName": "StreamBox IPTV",
+  "webDir": "www",
+  "backgroundColor": "#020617",
+  "server": {
+    "url": "https://masquecero.net/player/",
+    "cleartext": true,
+    "allowNavigation": [
+      "masquecero.net",
+      "*.masquecero.net"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#020617",
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "preferredContentMode": "mobile",
+    "allowsLinkPreview": false
+  }
+}

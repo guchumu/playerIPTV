@@ -1,0 +1,854 @@
+/* RESET BÁSICO */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  background: radial-gradient(circle at top, #1f2933 0%, #111827 55%, #020617 100%);
+  color: #f9fafb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+/********** PANTALLAS **********/
+.screen {
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+
+.screen.active {
+  display: flex;
+}
+
+/********** LOGIN **********/
+#loginScreen {
+  align-items: center;
+  justify-content: center;
+}
+
+.login-container {
+  background: rgba(15, 23, 42, 0.95);
+  padding: 2.5rem 3rem;
+  border-radius: 18px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+  min-width: 320px;
+  max-width: 92vw;
+}
+
+.login-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  margin: 0 auto 1rem;
+}
+
+.login-container h1 {
+  font-size: 1.8rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+#loginForm input {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #f9fafb;
+}
+
+#loginForm button {
+  width: 100%;
+  padding: 0.7rem;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0.2rem;
+}
+
+#loginForm button:hover {
+  filter: brightness(1.08);
+}
+
+.error {
+  margin-top: 0.5rem;
+  color: #f97373;
+  font-size: 0.85rem;
+}
+
+/********** APP PRINCIPAL **********/
+#mainScreen {
+  flex-direction: column;
+  height: 100%;
+  height: 100dvh;
+}
+
+/* Header compacto */
+.compact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.8rem;
+  padding-top: max(0.4rem, env(safe-area-inset-top));
+  padding-left: max(0.8rem, env(safe-area-inset-left));
+  padding-right: max(0.8rem, env(safe-area-inset-right));
+  background: linear-gradient(90deg, #020617, #111827);
+  font-size: 0.85rem;
+}
+
+.header-left h1 {
+  font-size: 1.1rem;
+}
+
+.header-right {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.header-right span {
+  opacity: 0.8;
+}
+
+#refreshBtn {
+  background: #4caf50;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+#refreshBtn:disabled {
+  background: #6b7280;
+  cursor: not-allowed;
+}
+
+#logoutBtn,
+#castButton {
+  background: #ef4444;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+#castButton {
+  background: #0ea5e9;
+}
+
+/********** LAYOUT PRINCIPAL **********/
+.main-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 12% 33% 55%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Columna categorías */
+.categories-column {
+  border-right: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0.5rem;
+  background: radial-gradient(circle at left, #020617 0%, #020617 40%, #0b1120 100%);
+}
+
+.search-container {
+  margin-bottom: 0.5rem;
+}
+
+#searchInput {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #f9fafb;
+  font-size: 0.8rem;
+}
+
+.categories-list {
+  margin-top: 0.4rem;
+  overflow-y: auto;
+  max-height: calc(100% - 40px);
+}
+
+.category-btn {
+  width: 100%;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  color: #e5e7eb;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.category-btn.active {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: rgba(191, 219, 254, 0.5);
+}
+
+.category-btn.cursor {
+  outline: 2px solid #fbbf24;
+}
+
+/* Columna canales */
+.channels-column {
+  border-right: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0.5rem 0.6rem;
+  background: linear-gradient(135deg, #020617 0%, #020617 60%, #020617 100%);
+  overflow: hidden;
+}
+
+.channels-column h2 {
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.channels-list {
+  overflow-y: auto;
+  height: calc(100% - 22px);
+}
+
+/* Tarjetas de canal simplificadas */
+.channel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  margin-bottom: 4px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.channel-item.playing {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5);
+}
+
+.channel-item.cursor {
+  outline: 2px solid #fbbf24;
+}
+
+/* Ocultar logos si quieres más limpio; se puede reactivar */
+.channel-item img {
+  display: none;
+}
+
+/* Info canal: solo nombre visible, EPG oculto */
+.channel-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.channel-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channel-epg {
+  display: none; /* oculta icono rojo + hora */
+}
+
+.fav-btn {
+  background: transparent;
+  border: none;
+  color: #facc15;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.fav-btn.active {
+  color: #fbbf24;
+}
+
+/********** COLUMNA PLAYER **********/
+.player-column {
+  position: relative;
+  padding: 0.5rem 0.7rem 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: radial-gradient(circle at right, #020617 0%, #020617 40%, #020617 100%);
+  z-index: 5;
+}
+
+.video-wrapper {
+  position: relative;
+  flex: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+}
+
+#videoPlayer {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background-color: #000;
+}
+
+/********** SPINNER **********/
+.spinner-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(circle, rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.95));
+  z-index: 20;
+}
+
+.spinner {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 6px solid rgba(148, 163, 184, 0.25);
+  border-top-color: #6366f1;
+  animation: spin 0.8s linear infinite;
+}
+
+/********** ICONO BUFFER (barra progreso) **********/
+#bufferIcon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 260px;
+  height: 120px;
+  z-index: 25;
+  pointer-events: none;
+  text-align: center;
+  color: #e5e7eb;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  display: none;
+}
+
+.buffer-title {
+  font-size: 1rem;
+  margin-bottom: 12px;
+  letter-spacing: 0.08em;
+  animation: pulse 1.5s infinite;
+}
+
+.buffer-bar {
+  width: 100%;
+  height: 20px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8);
+  margin-bottom: 10px;
+}
+
+.buffer-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  border-radius: 999px;
+  transition: width 0.25s ease-out;
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.7);
+}
+
+.buffer-percent {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #22c55e;
+}
+
+/********** CONTROLES VIDEO **********/
+.video-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6%;
+  padding: 0.25rem 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  background: linear-gradient(
+    to top,
+    rgba(15, 23, 42, 0.9),
+    rgba(15, 23, 42, 0.4),
+    transparent
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.video-controls.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.controls-left,
+.controls-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.control-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 999px;
+  border: none;
+  background: radial-gradient(circle, #1f2937, #020617);
+  color: #e5e7eb;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.volume-slider {
+  width: 70px;
+}
+
+.time-label {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.current-channel-name {
+  font-size: 0.9rem;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/********** EPG **********/
+.epg-container {
+  padding: 0.3rem 0.4rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.epg-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  opacity: 0.8;
+  margin-bottom: 0.2rem;
+}
+
+.epg-info {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8rem;
+}
+
+.epg-now,
+.epg-next {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-right button.cursor {
+  outline: 2px solid #fbbf24;
+}
+
+#appToast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(15, 23, 42, 0.95);
+  color: #f9fafb;
+  padding: 0.7rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 4000;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#appToast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.accordion-item {
+  margin-bottom: 6px;
+}
+
+.accordion-header {
+  padding: 12px;
+  min-height: 44px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.accordion-header.active {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+}
+
+.categories-list-mobile,
+.channels-list-mobile {
+  margin-top: 0.6rem;
+}
+
+/********** MENÚ MÓVIL **********/
+.mobile-menu-container {
+  display: none;
+}
+
+.menu-toggle {
+  display: none;
+}
+
+/********** ANIMACIONES **********/
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/********** TOUCH: no depender de hover **********/
+@media (hover: none) {
+  #loginForm button:hover {
+    filter: none;
+  }
+
+  .video-controls {
+    padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
+  }
+}
+
+/********** PC / DESKTOP ANCHO **********/
+@media (min-width: 1440px) {
+  .main-container {
+    grid-template-columns: 14% 30% 56%;
+  }
+
+  .category-btn,
+  .channel-name {
+    font-size: 0.95rem;
+  }
+}
+
+/********** TABLET 769–1200 **********/
+@media (min-width: 769px) and (max-width: 1200px) {
+  .main-container {
+    grid-template-columns: 22% 32% 46%;
+  }
+
+  .header-right span {
+    font-size: 0.75rem;
+  }
+
+  .category-btn {
+    padding: 8px 10px;
+    font-size: 0.85rem;
+  }
+
+  .channel-item {
+    padding: 9px 10px;
+  }
+}
+
+/********** FIRE STICK / ANDROID TV (10-foot) **********/
+body.is-tv {
+  font-size: 20px;
+}
+
+body.is-tv #loginScreen,
+body.is-tv #mainScreen {
+  padding: 24px 36px;
+  padding-top: 36px;
+  padding-bottom: 36px;
+}
+
+body.is-tv .login-container {
+  min-width: 480px;
+  padding: 3rem 3.5rem;
+}
+
+body.is-tv .login-container h1,
+body.is-tv #loginForm input,
+body.is-tv #loginForm button {
+  font-size: 1.35rem;
+}
+
+body.is-tv #loginForm input,
+body.is-tv #loginForm button {
+  min-height: 56px;
+  padding: 0.9rem 1rem;
+}
+
+body.is-tv .compact-header {
+  padding: 0.9rem 1.4rem;
+  font-size: 1.05rem;
+}
+
+body.is-tv .header-left h1 {
+  font-size: 1.4rem;
+}
+
+body.is-tv .header-right button {
+  min-width: 56px;
+  min-height: 56px;
+  font-size: 1.4rem;
+  border-radius: 10px;
+}
+
+body.is-tv .main-container {
+  grid-template-columns: 20% 28% 52%;
+  gap: 8px;
+}
+
+body.is-tv .category-btn,
+body.is-tv .channel-item {
+  min-height: 56px;
+  padding: 12px 16px;
+  font-size: 1.15rem;
+  margin-bottom: 8px;
+}
+
+body.is-tv .category-btn.cursor,
+body.is-tv .channel-item.cursor,
+body.is-tv .header-right button.cursor {
+  outline: 4px solid #fbbf24;
+  outline-offset: 2px;
+}
+
+body.is-tv .control-btn {
+  width: 56px;
+  height: 56px;
+  min-width: 56px;
+  min-height: 56px;
+  font-size: 1.3rem;
+}
+
+body.is-tv .video-controls {
+  opacity: 1;
+  pointer-events: auto;
+  bottom: 8%;
+  padding: 0.8rem 1.2rem;
+}
+
+body.is-tv .epg-container {
+  font-size: 1.05rem;
+  padding: 0.7rem 0.9rem;
+}
+
+body.is-tv .menu-toggle,
+body.is-tv .mobile-menu-container {
+  display: none !important;
+}
+
+body.is-tv .volume-slider {
+  width: 120px;
+}
+
+/********** MÓVIL ≤768 **********/
+@media (max-width: 768px) {
+  body {
+    overflow: auto;
+  }
+
+  #loginScreen {
+    padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .login-container {
+    min-width: 0;
+    width: 100%;
+    padding: 1.6rem 1.2rem;
+  }
+
+  #mainScreen {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .compact-header {
+    flex-wrap: wrap;
+    padding: 0.5rem;
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    height: auto;
+  }
+
+  .header-right span {
+    display: none;
+  }
+
+  .main-container {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-container > .categories-column,
+  .main-container > .channels-column {
+    display: none;
+  }
+
+  .player-column {
+    min-height: 220px;
+    height: 46dvh;
+    order: -1;
+    padding: 0.4rem;
+  }
+
+  .epg-container {
+    font-size: 0.85rem;
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+
+  .video-controls {
+    bottom: 2%;
+    flex-wrap: wrap;
+  }
+
+  .current-channel-name {
+    max-width: 40vw;
+  }
+
+  .mobile-menu-container {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 85%;
+    max-width: 400px;
+    height: 100dvh;
+    background: rgba(0, 0, 0, 0.98);
+    z-index: 2000;
+    transition: left 0.3s ease;
+    overflow-y: auto;
+    padding: 1rem;
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    border-right: 3px solid #6366f1;
+  }
+
+  .mobile-menu-container.show {
+    left: 0;
+  }
+
+  .menu-toggle {
+    display: flex;
+    position: fixed;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    right: calc(16px + env(safe-area-inset-right));
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+    border: none;
+    color: white;
+    font-size: 2rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 1500;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .channel-item,
+  .accordion-header {
+    font-size: 1rem;
+    min-height: 48px;
+  }
+
+  .fav-btn {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 1.2rem;
+  }
+}
+
+/********** MÓVIL LANDSCAPE **********/
+@media (max-width: 768px) and (orientation: landscape) {
+  .compact-header {
+    padding: 0.25rem 0.5rem;
+    padding-left: max(0.5rem, env(safe-area-inset-left));
+  }
+
+  .header-left h1 {
+    font-size: 0.95rem;
+  }
+
+  .player-column {
+    height: calc(100dvh - 44px);
+    min-height: 0;
+  }
+
+  .epg-container {
+    display: none;
+  }
+
+  .menu-toggle {
+    width: 48px;
+    height: 48px;
+    font-size: 1.6rem;
+  }
+}
+
+/********** iOS Safari **********/
+body.is-ios #videoPlayer {
+  object-fit: contain;
+}
+
+@supports (padding: max(0px, env(safe-area-inset-top))) {
+  #appToast {
+    bottom: max(28px, calc(12px + env(safe-area-inset-bottom)));
+  }
+}
+
