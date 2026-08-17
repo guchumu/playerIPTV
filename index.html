@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="icon" href="logo.png">
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=20260817d" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -19,6 +19,7 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
+            <p class="build-tag">v20260817d</p>
 
             <div class="remote-upload-box">
                 <p>Carga tu lista desde el móvil en:</p>
@@ -44,6 +45,10 @@
                 <button type="submit" id="loginSubmitBtn">Cargar Contenido</button>
                 <div id="loginError" class="error"></div>
             </form>
+            <div id="globalSpinner" class="global-spinner" hidden aria-live="polite">
+                <div class="spinner"></div>
+                <p id="globalSpinnerText">Cargando...</p>
+            </div>
         </div>
     </div>
 
@@ -85,7 +90,7 @@
                     <div id="spinner" class="spinner-overlay"><div class="spinner"></div></div>
                 </div>
 
-                <div class="epg-container">
+                <div class="epg-container" hidden>
                     <div class="epg-header"><span>AHORA</span><span>DESPUÉS</span></div>
                     <div class="epg-info">
                         <div id="epgNow" class="epg-now">--:--</div>
@@ -114,6 +119,6 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="core.js"></script>
+    <script src="core.js?v=20260817d"></script>
 </body>
 </html>

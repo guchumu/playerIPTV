@@ -36,7 +36,14 @@ html, body {
   object-fit: contain;
   margin: 0 auto 1rem;
 }
-.login-container h1 { font-size: 1.8rem; margin-bottom: 1.5rem; text-align: center; }
+.login-container h1 { font-size: 1.8rem; margin-bottom: 0.35rem; text-align: center; }
+.build-tag {
+  text-align: center;
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-bottom: 1.2rem;
+  font-family: monospace;
+}
 
 .remote-upload-box {
   background: rgba(99, 102, 241, 0.1);
@@ -115,6 +122,24 @@ html, body {
 }
 .ios-install-panel .app-dl { display: inline-block; width: auto; padding: 0.6rem 1rem; }
 .error { margin-top: 0.5rem; color: #f97373; font-size: 0.85rem; text-align: center; }
+.global-spinner {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: rgba(2, 6, 23, 0.88);
+}
+.global-spinner.is-visible {
+  display: flex;
+}
+.global-spinner p {
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
 #loginForm input:focus, #loginForm button:focus {
   outline: 3px solid #fbbf24;
   background: #1e293b;
@@ -338,6 +363,9 @@ html, body {
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.9);
   flex-shrink: 0;
+}
+.epg-container[hidden] {
+  display: none !important;
 }
 .epg-header { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.8; margin-bottom: 0.2rem; }
 .epg-info { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.8rem; }

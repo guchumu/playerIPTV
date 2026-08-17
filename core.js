@@ -10,8 +10,6 @@ if (!CSS.escape) {
   };
 }
 
-const EPG_URL = "epg_proxy.php";
-
 let currentServer = "";
 let hls = null;
 let mpegtsPlayer = null;
@@ -33,6 +31,8 @@ let activeConnection = null;
 
 const video = document.getElementById("videoPlayer");
 const spinner = document.getElementById("spinner");
+const globalSpinner = document.getElementById("globalSpinner");
+const globalSpinnerText = document.getElementById("globalSpinnerText");
 const channelsContainer = document.getElementById("channelsContainer");
 const categoriesContainer = document.getElementById("categoriesContainer");
 const channelColumnTitle = document.getElementById("channelColumnTitle");
@@ -44,6 +44,21 @@ let debugZeroCount = 0;
 let debugZeroTimer = null;
 let debugTitleTaps = 0;
 let debugTitleTimer = null;
+let currentFocus = { col: 1, row: 0 };
+
+function showSpinner(show, message) {
+  if (globalSpinner) {
+    globalSpinner.classList.toggle("is-visible", !!show);
+    globalSpinner.hidden = !show;
+    if (globalSpinnerText && message) globalSpinnerText.textContent = message;
+  }
+  if (spinner) spinner.style.display = show ? "flex" : "none";
+}
+
+function setLoginStatus(message) {
+  const loginError = document.getElementById("loginError");
+  if (loginError) loginError.textContent = message || "";
+}
 
 function detectDevice() {
   const ua = navigator.userAgent || "";
@@ -202,9 +217,8 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 
 /********** MOTOR CENTRAL DE LOGIN **********/
 async function performLoginAction(serverUrl, username, password, m3uUrl) {
-  const loginError = document.getElementById("loginError");
-  if (loginError) loginError.textContent = "Descargando lista... Por favor espera.";
-  showSpinner(true);
+  setLoginStatus("Descargando lista... Por favor espera.");
+  showSpinner(true, "Conectando...");
 
   serverUrl = (serverUrl || "").trim();
   username = (username || "").trim();
@@ -240,9 +254,11 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
       localStorage.setItem("xtream_user", JSON.stringify(currentUser));
 
+      showSpinner(true, "Procesando canales...");
       parseM3U(m3uContent);
       if (!channelsData.length) throw new Error("La lista no contiene canales");
       finishLogin(currentUser);
+      renderCategories();
       checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -250,6 +266,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 
     if (hasXtream) {
       currentServer = serverUrl;
+      showSpinner(true, "Validando acceso...");
       const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
       let data = null;
@@ -267,24 +284,27 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         );
       }
 
-      if (Number(data.user_info.auth) === 1) {
-        currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
-        localStorage.setItem("xtream_user", JSON.stringify(currentUser));
-
-        if (loginError) loginError.textContent = "Descargando canales...";
-        await loadM3UFromXtream();
-        finishLogin(currentUser);
-        if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
-        showSpinner(false);
-        return true;
+      if (Number(data.user_info.auth) !== 1) {
+        throw new Error("Credenciales inválidas.");
       }
-      throw new Error("Credenciales inválidas.");
+
+      currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
+      localStorage.setItem("xtream_user", JSON.stringify(currentUser));
+
+      finishLogin(currentUser);
+      setLoginStatus("Descargando canales...");
+      showSpinner(true, "Descargando canales...");
+      await loadM3UFromXtream();
+      renderCategories();
+      if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
+      showSpinner(false);
+      return true;
     }
 
     throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
   } catch (error) {
     showSpinner(false);
-    if (loginError) loginError.textContent = error.message || "Error al iniciar sesión.";
+    setLoginStatus(error.message || "Error al iniciar sesión.");
     startRemotePolling();
     return false;
   }
@@ -366,9 +386,6 @@ function finishLogin(user) {
 
   generateSessionToken();
   startActivityMonitoring();
-  setTimeout(() => {
-    loadXML_EPG();
-  }, 800);
 }
 
 function showAccountExpiry(info) {
@@ -518,54 +535,7 @@ function parseXMLDate(str) {
 }
 
 async function loadXML_EPG() {
-  try {
-    const response = await fetch(EPG_URL);
-    const text = await response.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, "text/xml");
-    epgIndex = {};
-    epgAliases = {};
-
-    xml.querySelectorAll("channel").forEach((ch) => {
-      const id = ch.getAttribute("id") || "";
-      const names = Array.from(ch.querySelectorAll("display-name")).map((n) => n.textContent);
-      [id].concat(names).forEach((alias) => {
-        const key = normalizeEpgKey(alias);
-        if (key) epgAliases[key] = id;
-      });
-    });
-
-    const programmes = xml.querySelectorAll("programme");
-    globalEPGData = [];
-    programmes.forEach((prog) => {
-      const channelId = prog.getAttribute("channel") || "";
-      const item = {
-        channelId: channelId,
-        start: prog.getAttribute("start"),
-        stop: prog.getAttribute("stop"),
-        title: prog.querySelector("title") ? prog.querySelector("title").textContent : "Sin título",
-        startTs: parseXMLDate(prog.getAttribute("start")).getTime(),
-        stopTs: parseXMLDate(prog.getAttribute("stop")).getTime(),
-      };
-      if (!epgIndex[channelId]) epgIndex[channelId] = [];
-      epgIndex[channelId].push(item);
-      const key = normalizeEpgKey(channelId);
-      if (key && !epgAliases[key]) epgAliases[key] = channelId;
-      globalEPGData.push(item);
-    });
-
-    Object.keys(epgIndex).forEach((id) => {
-      epgIndex[id].sort((a, b) => a.startTs - b.startTs);
-    });
-
-    refreshVisibleChannelEPG();
-    if (currentlyPlayingId) {
-      const playing = channelsData.find((ch) => ch.id === currentlyPlayingId);
-      if (playing) fetchEPG(playing);
-    }
-    clearInterval(loadXML_EPG._timer);
-    loadXML_EPG._timer = setInterval(refreshVisibleChannelEPG, 60 * 1000);
-  } catch (e) {}
+  return;
 }
 
 function resolveEpgChannelId(channel) {
@@ -611,23 +581,7 @@ function formatEpgLine(prog) {
 }
 
 function fetchEPG(channel) {
-  if (!epgNowEl) return;
-  if (!globalEPGData.length) {
-    epgNowEl.textContent = "Cargando guía...";
-    if (epgNextEl) epgNextEl.textContent = "--:--";
-    return;
-  }
-  const info = getNowNext(channel);
-  if (info.now) {
-    epgNowEl.textContent = "AHORA: " + formatEpgLine(info.now);
-    if (epgNextEl) epgNextEl.textContent = info.next ? "DESPUÉS: " + formatEpgLine(info.next) : "--:--";
-  } else if (info.next) {
-    epgNowEl.textContent = "PRÓXIMO: " + formatEpgLine(info.next);
-    if (epgNextEl) epgNextEl.textContent = "--:--";
-  } else {
-    epgNowEl.textContent = "Sin información en la guía";
-    if (epgNextEl) epgNextEl.textContent = "--:--";
-  }
+  return;
 }
 
 function refreshVisibleChannelEPG() {
@@ -729,7 +683,6 @@ function parseM3U(content) {
     user: currentUser ? currentUser.username : "",
     mode: currentUser && currentUser.isM3U ? "m3u" : "xtream",
   };
-  renderCategories();
 }
 
 function getDebugReport() {
@@ -814,7 +767,7 @@ function selectCategory(categoryName) {
 
   renderChannels(channelsToShow);
   if (channelColumnTitle) channelColumnTitle.textContent = categoryName;
-  currentFocus.col = 0;
+  if (currentFocus) currentFocus.col = 0;
 }
 
 function renderChannels(channels) {
@@ -830,12 +783,7 @@ function renderChannels(channels) {
     const nameEl = document.createElement("div");
     nameEl.className = "channel-name";
     nameEl.textContent = channel.name;
-    const epgEl = document.createElement("div");
-    epgEl.className = "channel-epg";
-    const epg = getNowNext(channel);
-    epgEl.textContent = epg.now ? formatEpgLine(epg.now) : epg.next ? formatEpgLine(epg.next) : "";
     info.appendChild(nameEl);
-    info.appendChild(epgEl);
     channelDiv.appendChild(info);
 
     channelDiv.addEventListener("click", () => {
@@ -849,7 +797,6 @@ function renderChannels(channels) {
         });
 
         playChannel(channel);
-        fetchEPG(channel);
       }
     });
 
@@ -994,7 +941,6 @@ window.addEventListener("beforeunload", () => {
 });
 
 /********** NAVEGACIÓN SMART TV (MANDO COMPLETO) **********/
-let currentFocus = { col: 1, row: 0 };
 let loginFocusIndex = -1;
 const loginElements = ["serverUrl", "username", "password", "m3uUrl", "loginSubmitBtn"];
 
