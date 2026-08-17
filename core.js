@@ -149,8 +149,20 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
   if (loginError) loginError.textContent = "Descargando lista... Por favor espera.";
   showSpinner(true);
 
+  serverUrl = (serverUrl || "").trim();
+  username = (username || "").trim();
+  password = (password || "").trim();
+  m3uUrl = (m3uUrl || "").trim();
+
+  // Si hay usuario y clave, es Xtream. La M3U solo se usa cuando NO hay Xtream.
+  // (Antes, un m3uUrl residual o vacío mal leído saltaba el login Xtream.)
+  const hasXtream = !!(username && password);
+  if (hasXtream && !serverUrl) {
+    serverUrl = "http://masquecero.net";
+  }
+
   try {
-    if (m3uUrl) {
+    if (!hasXtream && m3uUrl) {
       try {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
@@ -179,7 +191,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       return true;
     }
 
-    if (serverUrl && username && password) {
+    if (hasXtream) {
       currentServer = serverUrl;
       const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
@@ -190,11 +202,15 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         data = null;
       }
 
-      if (isProxyFailure(response, data, rawText) || (!data && !response.ok)) {
-        throw new Error(xtreamLoginFailureMessage(response, data, rawText));
+      if (!data || !data.user_info) {
+        throw new Error(
+          isProxyFailure(response, data, rawText)
+            ? xtreamLoginFailureMessage(response, data, rawText)
+            : "No se pudo leer la respuesta del servidor Xtream"
+        );
       }
 
-      if (data && data.user_info && Number(data.user_info.auth) === 1) {
+      if (Number(data.user_info.auth) === 1) {
         currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
         localStorage.setItem("xtream_user", JSON.stringify(currentUser));
 
@@ -203,12 +219,11 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
         showSpinner(false);
         return true;
-      } else {
-        throw new Error(xtreamLoginFailureMessage(response, data, rawText));
       }
-    } else {
-      throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
+      throw new Error("Credenciales inválidas.");
     }
+
+    throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
   } catch (error) {
     showSpinner(false);
     if (loginError) loginError.textContent = error.message || "Error al iniciar sesión.";
@@ -517,7 +532,7 @@ async function loadM3UFromXtream() {
 }
 
 function parseM3U(content) {
-  const lines = content.split("\n");
+  const lines = String(content || "").split(/\r\n|\n|\r/);
   const channels = [];
   const categories = {};
   let currentChannel = null;

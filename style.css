@@ -331,11 +331,13 @@ body.is-tv .device-id { font-size: 2.4rem; }
 
 /********** MÓVILES (Horizontal) **********/
 @media (max-width: 768px) and (orientation: landscape) {
-  .main-container { display: block; height: calc(100dvh - 40px); overflow-y: auto; }
-  .categories-column, .channels-column { display: none; }
-  .player-column { padding: 0; display: flex; flex-direction: column; align-items: center; height: auto; overflow: visible; }
-  .video-wrapper { border-radius: 0; height: 80vh; width: auto; max-width: 100vw; aspect-ratio: 16 / 9; box-shadow: none; margin: 5vh auto 0 auto; }
-  .epg-container, .external-player-btn { width: 90%; max-width: 600px; margin: 10px auto; }
+  .main-container { display: flex; flex-direction: row; height: calc(100dvh - 40px); overflow: hidden; }
+  .categories-column, .channels-column { display: flex; }
+  .categories-column { width: 22%; min-width: 120px; }
+  .channels-column { width: 28%; min-width: 160px; }
+  .player-column { flex: 1; padding: 0.3rem; overflow: hidden; }
+  .video-wrapper { border-radius: 8px; height: auto; width: 100%; aspect-ratio: 16 / 9; margin: 0; }
+  .epg-container, .external-player-btn { width: 100%; margin: 6px 0; }
   .login-container { padding: 1rem; margin-top: 20px; }
 }
 
