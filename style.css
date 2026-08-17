@@ -774,56 +774,137 @@ body.is-tv .channel-item.cursor { outline: 4px solid #fbbf24; outline-offset: 2p
 body.is-tv .epg-container { font-size: 1.05rem; padding: 0.7rem 0.9rem; }
 body.is-tv .device-id { font-size: 2.4rem; }
 
-/********** MÓVILES: vídeo arriba, categorías y canales debajo **********/
+/********** MÓVILES: vídeo arriba, chips, lista de canales **********/
 @media (max-width: 768px) {
-  body { overflow: auto; }
+  html, body {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
   #loginScreen {
-    padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+    overflow-y: auto;
+    padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   }
   .login-container { width: 100%; padding: 1.6rem 1.2rem; }
+
+  #mainScreen {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .compact-header {
+    flex-shrink: 0;
+    padding-top: max(0.4rem, env(safe-area-inset-top));
+    padding-left: max(0.8rem, env(safe-area-inset-left));
+    padding-right: max(0.8rem, env(safe-area-inset-right));
+  }
+
+  /* flex:1 + min-height:0, no calc(100dvh - 40px): el header con notch
+     mide más de 40px y ese cálculo estiraba el contenedor por encima
+     de la pantalla. height:100% en las tres columnas (regla compartida)
+     hacía que las categorías ocuparan todo el alto y se superpusieran
+     a los canales. */
   .main-container {
     display: flex;
     flex-direction: column;
-    height: calc(100dvh - 40px);
-    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+  }
+  .player-column,
+  .categories-column,
+  .channels-column {
+    width: 100%;
+    max-height: none;
   }
   .player-column {
     order: 1;
-    padding: 0;
-    display: block;
+    flex: 0 0 auto;
     height: auto;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
     overflow: visible;
-    flex-shrink: 0;
   }
   .categories-column {
     order: 2;
-    display: flex;
+    flex: 0 0 auto;
     height: auto;
+    min-height: 0;
+    overflow: hidden;
     border-right: none;
-    padding: 10px;
+    padding: 8px 10px;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
     border-bottom: 1px solid rgba(255,255,255,0.1);
   }
   .channels-column {
     order: 3;
-    display: flex;
-    flex: 1;
-    min-height: 220px;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
     border-right: none;
-    padding: 10px;
+    padding: 8px 10px 0;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
     overflow: hidden;
   }
   .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
-  .epg-container { margin: 10px; }
-  .epg-timeline-box { margin: 0 10px 10px; }
-  .playback-status { margin: 10px 10px 0; }
+  .epg-container { margin: 8px 10px; flex-shrink: 0; }
+  .epg-timeline-box { margin: 0 10px 8px; flex-shrink: 0; }
+  .playback-status { margin: 8px 10px 0; flex-shrink: 0; }
   .track-control { font-size: 0.65rem; }
   .track-control select { max-width: 84px; }
-  .categories-list { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 5px; gap: 8px; }
-  .category-btn { width: auto; margin-bottom: 0; flex-shrink: 0; min-height: 44px; }
+  .categories-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding-bottom: 0;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .category-btn {
+    width: auto;
+    margin-bottom: 0;
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
+  }
   .channels-column h2 { display: none; }
-  .channels-list { height: 100%; overflow-y: auto; }
+  .channels-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
   .channel-item { min-height: 48px; }
   .header-right span { display: none; }
+}
+
+/* iPhone X apaisado mide 812×375: no entra en max-width:768px y caería
+   en el grid de tablet. Se mantiene vídeo usable sin tocar TV ni desktop. */
+@media (orientation: landscape) and (max-height: 500px) and (hover: none) {
+  body:not(.is-tv) .video-wrapper {
+    max-height: min(56dvh, calc(100dvh - 7rem));
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+  body:not(.is-tv) .epg-timeline-box { display: none; }
+  body:not(.is-tv) .compact-header {
+    padding-left: max(0.8rem, env(safe-area-inset-left));
+    padding-right: max(0.8rem, env(safe-area-inset-right));
+  }
 }
 
 /********** iOS Safari **********/
