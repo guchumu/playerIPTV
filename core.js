@@ -119,6 +119,7 @@ function stopPlayback() {
   // Vaciar el <video> dispara un evento de error propio; sin esta marca el
   // reconector lo confundiría con una caída del stream.
   teardownInProgress = true;
+  prebufferActive = false;
   clearPrebuffer();
   clearTimeout(teardownTimer);
   teardownTimer = setTimeout(() => {
@@ -871,7 +872,7 @@ function parseM3U(content) {
 }
 
 /********** REGISTRO DE EVENTOS DEL CANAL **********/
-const MAX_LOG_ENTRIES = 30;
+const MAX_LOG_ENTRIES = 40;
 let playbackLog = [];
 let channelStartedAt = 0;
 
@@ -940,34 +941,48 @@ function describeMediaError() {
  * del reproductor. Abre una conexión, así que solo se lanza cuando el canal
  * ya ha fallado del todo o cuando se pide a mano.
  */
+let probeRunning = false;
+let lastProbeAt = 0;
+
 async function probeStream() {
   const url = currentChannelRef ? currentChannelRef.url : "";
   if (!url) {
     logPlayback("diagnostico", "no hay canal que comprobar");
     return;
   }
+  // Cada consulta abre una conexión con el proveedor y el usuario tiene un
+  // número limitado. Ni en paralelo ni en ráfaga.
+  if (probeRunning) return;
+  if (Date.now() - lastProbeAt < 15000) {
+    logPlayback("diagnostico", "hay que esperar 15s entre consultas");
+    return;
+  }
+
+  probeRunning = true;
+  lastProbeAt = Date.now();
+  const button = document.getElementById("debugProbeBtn");
+  if (button) button.disabled = true;
 
   const base = window.location.origin + window.location.pathname.replace("index.html", "");
   const target = base + "stream.php?url=" + encodeURIComponent(url);
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const cut = setTimeout(() => controller && controller.abort(), 8000);
 
-  logPlayback("diagnostico", "consultando el servidor...");
   try {
     const res = await fetch(target, {
       cache: "no-store",
       signal: controller ? controller.signal : undefined,
     });
     const type = res.headers.get("content-type") || "sin tipo";
-    logPlayback("diagnostico", "HTTP " + res.status + " " + (res.statusText || "") + " · " + type);
+    const head = "HTTP " + res.status + " " + (res.statusText || "") + " · " + type;
 
     // Un stream sano devuelve binario; si contesta texto, casi siempre es el
     // mensaje de error del proveedor y merece la pena leerlo.
     if (!res.ok || /text|json|html|xml/i.test(type)) {
       const body = await res.text();
-      logPlayback("diagnostico", "respuesta: " + body.slice(0, 300).replace(/\s+/g, " ").trim());
+      logPlayback("diagnostico", head + " · respuesta: " + body.slice(0, 300).replace(/\s+/g, " ").trim());
     } else {
-      logPlayback("diagnostico", "el servidor envía datos, el fallo es del reproductor o del formato");
+      logPlayback("diagnostico", head + " · el servidor envía datos, el fallo es del reproductor");
     }
   } catch (e) {
     logPlayback("diagnostico", "sin respuesta: " + (e && e.name === "AbortError" ? "tiempo agotado" : e && e.message));
@@ -978,6 +993,8 @@ async function probeStream() {
         controller.abort();
       } catch (e) {}
     }
+    probeRunning = false;
+    if (button) button.disabled = false;
   }
 }
 
@@ -1031,6 +1048,7 @@ function getPlaybackStats() {
     } catch (e) {}
   }
 
+  lines.push("  prebuffer: " + (prebufferResult || "no aplicado"));
   lines.push("  cortes en este canal: " + stallCount);
   lines.push("  reintentos: " + playbackRetries);
   lines.push("  buffer configurado: " + getBufferSeconds() + "s");
@@ -1291,26 +1309,15 @@ function clearPlaybackRetry() {
  */
 /********** PREBÚFER: acumular antes de mostrar imagen **********/
 let prebufferTimer = null;
+let prebufferActive = false;
+let prebufferResult = "";
 
 function getPrebufferTarget() {
   return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
 }
 
-// Cuánto medio hay acumulado. Antes de arrancar, currentTime aún no está
-// dentro del rango, así que se mide el tramo entero.
-function getBufferedSpan() {
-  if (!video || !video.buffered || !video.buffered.length) return 0;
-  try {
-    const last = video.buffered.length - 1;
-    const from = Math.max(video.buffered.start(last), video.currentTime || 0);
-    return Math.max(0, video.buffered.end(last) - from);
-  } catch (e) {
-    return 0;
-  }
-}
-
-// Con MSE el tiempo del stream no empieza en cero, así que reproducir sin
-// colocarse dentro del tramo cargado deja la imagen congelada.
+// Con MSE el tiempo del stream no siempre empieza en cero, así que reproducir
+// sin colocarse dentro del tramo cargado deja la imagen congelada.
 function ensureInsideBuffer() {
   if (!video || !video.buffered || !video.buffered.length) return;
   try {
@@ -1325,31 +1332,65 @@ function clearPrebuffer() {
   prebufferTimer = null;
 }
 
+function cancelPrebuffer(reason) {
+  if (!prebufferActive) return;
+  prebufferActive = false;
+  clearPrebuffer();
+  showVideoSpinner(false);
+  if (reason) logPlayback("prebuffer", reason);
+}
+
 /**
- * Espera a tener unos segundos cargados antes de empezar. En directo los datos
- * llegan a velocidad real, así que esta espera es literalmente el colchón que
- * después evita los cortes, y el retraso con el que se ve el canal.
+ * Arranca, pausa enseguida y deja que se acumule. Mientras el vídeo está
+ * parado el directo sigue avanzando y lo descargado se apila por delante: ese
+ * hueco es exactamente el colchón que después absorbe los cortes.
+ *
+ * Se hace pausando en vez de retrasando el play() porque los motores solo
+ * llenan de verdad una vez la reproducción ha arrancado.
  */
-function waitForPrebuffer(channel, onReady) {
+function beginPrebufferFill(channel) {
   clearPrebuffer();
   const target = getPrebufferTarget();
-  // Si el servidor manda justo a tiempo real, llenar N segundos cuesta N
-  // segundos de reloj; el margen extra cubre el arranque de la conexión.
-  const deadline = Date.now() + target * 1500 + 6000;
+  if (!video || target <= 0) {
+    showVideoSpinner(false);
+    return;
+  }
+
+  prebufferActive = true;
+  prebufferResult = "llenando...";
+  try {
+    video.pause();
+  } catch (e) {}
+
+  const deadline = Date.now() + target * 1000 + 15000;
+
+  const finish = (reason) => {
+    prebufferActive = false;
+    clearPrebuffer();
+    prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
+    logPlayback("prebuffer", prebufferResult);
+    showVideoSpinner(false);
+    const p = video.play();
+    if (p) p.catch(() => {});
+  };
 
   const tick = () => {
-    if (!currentChannelRef || currentChannelRef.id !== channel.id) return;
-
-    const have = getBufferedSpan();
-    const expired = Date.now() > deadline;
-    if (have >= target || expired) {
-      clearPrebuffer();
-      logPlayback("prebuffer", have.toFixed(1) + "s de " + target + "s" + (expired && have < target ? " (tiempo agotado, se arranca igual)" : ""));
-      onReady();
+    if (!prebufferActive) return;
+    if (!currentChannelRef || currentChannelRef.id !== channel.id) {
+      prebufferActive = false;
       return;
     }
 
-    showVideoSpinner(true, "Búfer " + have.toFixed(1) + " / " + target + " s");
+    const ahead = getBufferAhead();
+    if (ahead >= target) return finish("completo");
+    if (Date.now() > deadline) return finish("tiempo agotado");
+
+    if (!video.paused) {
+      try {
+        video.pause();
+      } catch (e) {}
+    }
+    showVideoSpinner(true, "Búfer " + ahead.toFixed(1) + " / " + target + " s");
     prebufferTimer = setTimeout(tick, 250);
   };
 
@@ -1403,6 +1444,7 @@ function playChannel(channel) {
   // estorba al buscar por qué ha fallado este.
   resetPlaybackLog();
   startLogged = false;
+  prebufferResult = "";
   logPlayback("canal", channel.name + " · " + (channel.category || "sin categoría"));
   clearPlaybackRetry();
   rememberLastChannel(channel);
@@ -1424,20 +1466,27 @@ function startPlayback(channel) {
   const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
   const bufferSec = getBufferSeconds();
 
+  // Solo las ramas con MSE controlan su propio buffer; en el reproductor del
+  // sistema pausar no garantiza que siga llenando.
+  let prebufferEnabled = false;
+
   const tryAutoPlay = () => {
     ensureInsideBuffer();
+    const onStarted = () => {
+      if (prebufferEnabled) beginPrebufferFill(channel);
+      else showVideoSpinner(false);
+    };
+
     const playPromise = video.play();
     if (playPromise !== undefined) {
-      playPromise
-        .then(() => showVideoSpinner(false))
-        .catch((err) => {
-          showVideoSpinner(false);
-          // Al reanudar el último canal no hay gesto previo del usuario y el
-          // navegador bloquea el arranque automático.
-          if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
-        });
+      playPromise.then(onStarted).catch((err) => {
+        showVideoSpinner(false);
+        // Al reanudar el último canal no hay gesto previo del usuario y el
+        // navegador bloquea el arranque automático.
+        if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
+      });
     } else {
-      showVideoSpinner(false);
+      onStarted();
     }
   };
 
@@ -1462,9 +1511,10 @@ function startPlayback(channel) {
         liveBufferLatencyChasing: false,
       }
     );
+    prebufferEnabled = true;
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
-    waitForPrebuffer(channel, tryAutoPlay);
+    tryAutoPlay();
     mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
       const info = errorInfo && (errorInfo.msg || errorInfo.code) ? " · " + (errorInfo.code || "") + " " + (errorInfo.msg || "") : "";
       logPlayback("error mpegts", errorType + " / " + errorDetail + info);
@@ -1496,10 +1546,11 @@ function startPlayback(channel) {
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
       logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(originalUrl));
+      prebufferEnabled = true;
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         refreshTrackSelectors();
         logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
-        waitForPrebuffer(channel, tryAutoPlay);
+        tryAutoPlay();
       });
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTrackSelectors);
@@ -1584,6 +1635,8 @@ if (video) {
     } catch (e) {}
   });
   video.addEventListener("play", () => {
+    // Si es el usuario quien le da al play durante el llenado, manda él.
+    cancelPrebuffer("cancelado por el usuario");
     if (!hls) return;
     try {
       hls.config.maxBufferLength = getBufferSeconds();
