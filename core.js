@@ -2044,9 +2044,9 @@ function buildChannelRow(channel) {
 }
 
 function channelRowHeight() {
-  if (document.body.classList.contains("is-tv")) return 64;
-  if (document.body.classList.contains("ui-large")) return 56;
-  return 52;
+  if (document.body.classList.contains("is-tv")) return 80;
+  if (document.body.classList.contains("ui-large")) return 72;
+  return 64;
 }
 
 function bindVirtualScroll() {
