@@ -429,6 +429,10 @@ body.is-tv .splash-hint-tv { display: inline; }
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* En móvil y tablet el número no aporta (el zap es con mando). En TV se deja. */
+@media (max-width: 1200px) {
+  body:not(.is-tv) .channel-chno { display: none; }
+}
 .fav-btn {
   flex-shrink: 0;
   width: 36px;
