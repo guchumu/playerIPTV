@@ -22,7 +22,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-    <link rel="stylesheet" href="style.css?v=20260818g" />
+    <link rel="stylesheet" href="style.css?v=20260818h" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -42,7 +42,7 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260818g</p>
+            <p class="build-tag">v20260818h</p>
 
             <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
 
@@ -109,9 +109,6 @@
                 </label>
                 <button id="displayBtn" class="action-btn" type="button" title="Tamaño y contraste" aria-label="Tamaño y contraste">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.93 13.5h4.14L12 7.98 9.93 13.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.07 14.5-.9-2.5H8.17l.9 2.5H6.5L9.4 7h1.2l2.9 9.5h-2.57zm7.57 0h-1.75L14.5 7h1.76l2.24 9.5z"/></svg>
-                </button>
-                <button id="aspectBtn" class="action-btn" type="button" title="Ajuste de imagen" aria-label="Ajuste de imagen">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12h-2v3h-3v2h5v-5zM7 9h3V7H5v5h2V9zm14-6H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z"/></svg>
                 </button>
                 <button id="pipBtn" class="action-btn" type="button" title="Picture-in-Picture" aria-label="Picture-in-Picture" hidden>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>
@@ -205,6 +202,8 @@
         <span class="zap-hint">Canal</span>
     </div>
 
+    <div id="appToast" hidden></div>
+
     <div id="debugOverlay" class="debug-overlay" hidden>
         <div class="debug-panel">
             <div class="debug-header" id="debugHeader">
@@ -224,6 +223,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260818g"></script>
+    <script src="core.js?v=20260818h"></script>
 </body>
 </html>

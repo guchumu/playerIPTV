@@ -304,7 +304,7 @@ body.is-tv .splash-hint-tv { display: inline; }
 }
 #logoutBtn { background: #ef4444; }
 #castButton { background: #0ea5e9; }
-#aspectBtn, #pipBtn, #airplayBtn { background: #334155; }
+#pipBtn, #airplayBtn { background: #334155; }
 .buffer-control {
   display: flex;
   align-items: center;
@@ -517,6 +517,12 @@ body.is-tv .splash-hint-tv { display: inline; }
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   flex-shrink: 0;
 }
+#videoPlayer {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
 .spinner-overlay {
   position: absolute;
   inset: 0;
@@ -662,9 +668,10 @@ body.is-tv .status-bar { width: 110px; height: 7px; }
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   padding-bottom: 4px;
   scrollbar-width: thin;
+  align-items: stretch;
 }
 .epg-slot {
   flex: 0 0 auto;
@@ -676,10 +683,38 @@ body.is-tv .status-bar { width: 110px; height: 7px; }
   padding: 6px 8px;
   position: relative;
   overflow: hidden;
+  cursor: pointer;
 }
 .epg-slot.is-now {
   border-color: #6366f1;
-  background: rgba(79, 70, 229, 0.22);
+  background: rgba(79, 70, 229, 0.28);
+  min-width: 168px;
+  max-width: 380px;
+  padding: 10px 12px;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.45);
+  overflow: visible;
+}
+.epg-slot.is-now .epg-slot-time { font-size: 0.78rem; }
+.epg-slot.is-now .epg-slot-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+.epg-slot.is-open {
+  min-width: 180px;
+  max-width: 380px;
+  padding: 10px 12px;
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(226, 232, 240, 0.45);
+  z-index: 1;
+  overflow: visible;
+}
+.epg-slot.is-open .epg-slot-title {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 .epg-slot.is-past {
   opacity: 0.45;
@@ -958,9 +993,31 @@ body.is-tv .header-right button {
   font-size: 1.4rem;
   border-radius: 10px;
 }
-body.is-tv .main-container { grid-template-columns: 15% 26% 59%; }
-body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 44px; height: 44px; }
-body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
+body.is-tv .main-container {
+  grid-template-columns: minmax(220px, 22%) 0 1fr;
+  transition: grid-template-columns 0.22s ease;
+}
+body.is-tv .channels-column {
+  min-width: 0;
+  width: 0;
+  padding: 0;
+  border: none;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+body.is-tv .categories-column,
+body.is-tv .player-column { min-width: 0; }
+body.is-tv.tv-channels-open .main-container {
+  grid-template-columns: minmax(110px, 12%) minmax(180px, 22%) 1fr;
+}
+body.is-tv.tv-channels-open .channels-column {
+  width: auto;
+  padding: 0.5rem 0.6rem 0 0.6rem;
+  border-right: 1px solid rgba(148, 163, 184, 0.25);
+  visibility: visible;
+  pointer-events: auto;
+}
 body.is-tv .category-btn,
 body.is-tv .channel-item {
   min-height: 64px;
@@ -969,8 +1026,14 @@ body.is-tv .channel-item {
   font-size: 1.15rem;
   margin-bottom: 0;
 }
+body.is-tv.tv-channels-open .category-btn {
+  font-size: 1.02rem;
+  padding: 10px 10px;
+}
 body.is-tv .category-btn.cursor,
 body.is-tv .channel-item.cursor { outline: 4px solid #fbbf24; outline-offset: 2px; }
+body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 44px; height: 44px; }
+body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
 body.is-tv .channel-search,
 body.is-tv .sort-btn { min-height: 48px; font-size: 1.05rem; }
 body.is-tv .device-id { font-size: 2.4rem; }
@@ -1056,6 +1119,8 @@ body.is-tv .device-id { font-size: 2.4rem; }
   .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
   .epg-timeline-box { margin: 0 10px 8px; flex-shrink: 0; max-height: 96px; }
   .epg-slot { min-width: 72px; max-width: 160px; font-size: 0.7rem; padding: 4px 6px; }
+  .epg-slot.is-now,
+  .epg-slot.is-open { min-width: 120px; max-width: 240px; padding: 8px 10px; }
   .playback-status { margin: 8px 10px 0; flex-shrink: 0; }
   .track-control { font-size: 0.65rem; }
   .track-control select { max-width: 84px; }

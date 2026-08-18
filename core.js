@@ -118,6 +118,48 @@ function detectDevice() {
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
+  if (!isTV) document.body.classList.remove("tv-channels-open");
+}
+
+detectDevice();
+
+function isTvLayout() {
+  return document.body.classList.contains("is-tv");
+}
+
+function setTvChannelsOpen(open) {
+  if (!isTvLayout()) {
+    document.body.classList.remove("tv-channels-open");
+    return;
+  }
+  const was = document.body.classList.contains("tv-channels-open");
+  document.body.classList.toggle("tv-channels-open", !!open);
+  if (open && !was) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => paintVirtualWindow(true));
+    });
+  }
+}
+
+function focusTvCategoryColumn() {
+  const categories = document.querySelectorAll(".category-btn");
+  const activeIndex = Array.from(categories).findIndex((c) => c.classList.contains("active"));
+  currentFocus.col = 0;
+  currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
+  setTvChannelsOpen(false);
+}
+
+function enterTvChannelsColumn() {
+  setTvChannelsOpen(true);
+  currentFocus.col = 1;
+  currentFocus.row = 0;
+}
+
+// Prefijos de proveedor: solo se quitan en pantalla, no en datos ni búsqueda.
+function displayName(str) {
+  return String(str || "")
+    .replace(/^ES:\s*/i, "")
+    .replace(/^EU\|ES\s*/i, "");
 }
 
 function getBufferSeconds() {
@@ -1847,7 +1889,9 @@ function sortMode() {
 
 function applySort(channels) {
   if (sortMode() !== "az") return channels.slice();
-  return channels.slice().sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+  return channels.slice().sort((a, b) =>
+    displayName(a.name).localeCompare(displayName(b.name), "es", { sensitivity: "base" })
+  );
 }
 
 function normalizeSearch(value) {
@@ -1880,13 +1924,17 @@ function renderCategoryButtons(keepSelection) {
     btn.className = "category-btn";
     if (catName === FAV_NAME || catName === HIST_NAME) btn.classList.add("is-special");
     btn.dataset.category = catName;
-    btn.textContent = catName;
+    btn.textContent = displayName(catName);
     btn.title = catName;
     btn.addEventListener("click", () => {
       const search = document.getElementById("channelSearch");
       if (search) search.value = "";
       searchQuery = "";
       selectCategory(catName);
+      if (isTvLayout()) {
+        enterTvChannelsColumn();
+        updateCursorVisuals();
+      }
     });
     categoriesContainer.appendChild(btn);
   });
@@ -1920,7 +1968,7 @@ function selectCategory(categoryName) {
   });
 
   renderChannels(channelsForCategory(categoryName));
-  if (channelColumnTitle) channelColumnTitle.textContent = categoryName;
+  if (channelColumnTitle) channelColumnTitle.textContent = displayName(categoryName);
   if (currentFocus) currentFocus.col = 0;
 }
 
@@ -1934,7 +1982,7 @@ function channelInitials(name) {
 function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
-  fallback.textContent = channelInitials(channel.name);
+  fallback.textContent = channelInitials(displayName(channel.name));
   if (!channel.logo) return fallback;
 
   const img = document.createElement("img");
@@ -1968,12 +2016,14 @@ function buildChannelRow(channel) {
   info.className = "channel-info";
   const nameEl = document.createElement("div");
   nameEl.className = "channel-name";
-  nameEl.textContent = channel.name;
+  nameEl.textContent = displayName(channel.name);
+  nameEl.title = channel.name;
   info.appendChild(nameEl);
   if (searchQuery && channel.category) {
     const catEl = document.createElement("div");
     catEl.className = "channel-epg";
-    catEl.textContent = channel.category;
+    catEl.textContent = displayName(channel.category);
+    catEl.title = channel.category;
     info.appendChild(catEl);
   }
   channelDiv.appendChild(info);
@@ -2056,7 +2106,9 @@ function runChannelSearch(query) {
   const hits = channelsData.filter(
     (ch) =>
       normalizeSearch(ch.name).indexOf(needle) >= 0 ||
+      normalizeSearch(displayName(ch.name)).indexOf(needle) >= 0 ||
       normalizeSearch(ch.category).indexOf(needle) >= 0 ||
+      normalizeSearch(displayName(ch.category)).indexOf(needle) >= 0 ||
       String(ch.chno) === searchQuery
   );
   document.querySelectorAll(".category-btn").forEach((b) => b.classList.remove("active"));
@@ -2779,8 +2831,12 @@ function restoreLastChannel() {
     const items = Array.from(document.querySelectorAll(".channel-item"));
     const idx = items.indexOf(el);
     if (idx >= 0) {
-      currentFocus.col = 1;
-      currentFocus.row = idx;
+      if (isTvLayout()) {
+        focusTvCategoryColumn();
+      } else {
+        currentFocus.col = 1;
+        currentFocus.row = idx;
+      }
       updateCursorVisuals();
     }
     return true;
@@ -2848,38 +2904,8 @@ function seekBy(seconds) {
   }
 }
 
-/********** AJUSTE DE IMAGEN **********/
-const FIT_KEY = "streambox_fit";
-const FIT_MODES = [
-  { value: "contain", label: "Ajustar (sin recortar)" },
-  { value: "cover", label: "Rellenar (recorta)" },
-  { value: "fill", label: "Estirar" },
-];
-
-function getFitIndex() {
-  const stored = localStorage.getItem(FIT_KEY);
-  const i = FIT_MODES.findIndex((m) => m.value === stored);
-  return i < 0 ? 0 : i;
-}
-
-function applyFit(index) {
-  const mode = FIT_MODES[index % FIT_MODES.length];
-  if (video) video.style.objectFit = mode.value;
-  localStorage.setItem(FIT_KEY, mode.value);
-  return mode;
-}
-
 const displayBtn = document.getElementById("displayBtn");
 if (displayBtn) displayBtn.addEventListener("click", cycleUiMode);
-
-const aspectBtn = document.getElementById("aspectBtn");
-if (aspectBtn) {
-  aspectBtn.addEventListener("click", () => {
-    const next = (getFitIndex() + 1) % FIT_MODES.length;
-    showToast(applyFit(next).label);
-  });
-}
-applyFit(getFitIndex());
 
 /********** PISTAS DE AUDIO Y SUBTÍTULOS **********/
 const audioTrackWrap = document.getElementById("audioTrackWrap");
@@ -2960,14 +2986,26 @@ if (pipBtn && document.pictureInPictureEnabled) {
 }
 
 const airplayBtn = document.getElementById("airplayBtn");
-if (airplayBtn && video && window.WebKitPlaybackTargetAvailabilityEvent) {
-  video.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
-    airplayBtn.hidden = e.availability !== "available";
-  });
+if (airplayBtn && video) {
+  const canAirPlay =
+    typeof video.webkitShowPlaybackTargetPicker === "function" || !!window.WebKitPlaybackTargetAvailabilityEvent;
+  if (document.body.classList.contains("is-ios") && canAirPlay) airplayBtn.hidden = false;
+  if (window.WebKitPlaybackTargetAvailabilityEvent) {
+    video.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
+      if (document.body.classList.contains("is-ios")) {
+        airplayBtn.hidden = false;
+        return;
+      }
+      airplayBtn.hidden = e.availability !== "available";
+    });
+  }
   airplayBtn.addEventListener("click", () => {
     try {
-      video.webkitShowPlaybackTargetPicker();
-    } catch (err) {}
+      if (typeof video.webkitShowPlaybackTargetPicker === "function") video.webkitShowPlaybackTargetPicker();
+      else showToast("AirPlay no está disponible en este navegador");
+    } catch (err) {
+      showToast("AirPlay no está disponible en este navegador");
+    }
   });
 }
 
@@ -2991,6 +3029,10 @@ function setupCast() {
   }
 }
 
+if (castButton && document.body.classList.contains("is-ios")) {
+  castButton.hidden = false;
+}
+
 window.__onGCastApiAvailable = function (isAvailable) {
   if (isAvailable) setupCast();
 };
@@ -3005,7 +3047,11 @@ const castPoll = setInterval(() => {
 
 function castCurrentChannel() {
   if (!setupCast()) {
-    showToast("Chromecast no disponible en este navegador");
+    showToast(
+      document.body.classList.contains("is-ios")
+        ? "Chromecast no está disponible en Safari de iPhone; usa AirPlay o Chrome"
+        : "Chromecast no disponible en este navegador"
+    );
     return;
   }
   const url = video ? video.getAttribute("data-active-url") : "";
@@ -3038,6 +3084,8 @@ function castCurrentChannel() {
 if (castButton) castButton.addEventListener("click", castCurrentChannel);
 
 /********** PARRILLA EPG BAJO EL VÍDEO **********/
+let epgOpenStartTs = 0;
+
 function renderEpgTimeline() {
   const box = document.getElementById("epgTimeline");
   const title = document.getElementById("epgTimelineTitle");
@@ -3052,7 +3100,8 @@ function renderEpgTimeline() {
   };
 
   const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
-  if (title) title.textContent = channel ? "Guía · " + channel.name : "Guía del canal";
+  if (title) title.textContent = channel ? "Guía · " + displayName(channel.name) : "Guía del canal";
+  if (title && channel) title.title = channel.name;
 
   if (!channel) return setEmpty("Elige un canal para ver su guía.");
   if (!hasEPG()) return setEmpty("Cargando guía...");
@@ -3068,6 +3117,7 @@ function renderEpgTimeline() {
   list.forEach((p) => {
     const slot = document.createElement("div");
     slot.className = "epg-slot";
+    slot.dataset.start = String(p.startTs);
 
     const minutes = Math.max(10, Math.round((p.stopTs - p.startTs) / 60000));
     slot.style.width = Math.min(280, Math.max(90, minutes * 3)) + "px";
@@ -3085,14 +3135,36 @@ function renderEpgTimeline() {
     slot.appendChild(time);
     slot.appendChild(name);
 
-    if (p.startTs <= now && now < p.stopTs) {
+    const isNow = p.startTs <= now && now < p.stopTs;
+    if (isNow) {
       slot.classList.add("is-now");
+      slot.style.width = Math.min(380, Math.max(168, minutes * 3.6)) + "px";
       const progress = document.createElement("div");
       progress.className = "epg-slot-progress";
       progress.style.width = Math.round(((now - p.startTs) / (p.stopTs - p.startTs)) * 100) + "%";
       slot.appendChild(progress);
       nowSlot = slot;
+    } else if (epgOpenStartTs && p.startTs === epgOpenStartTs) {
+      slot.classList.add("is-open");
+      slot.style.width = Math.min(380, Math.max(180, minutes * 3.4)) + "px";
     }
+
+    slot.addEventListener("click", () => {
+      if (slot.classList.contains("is-now")) {
+        box.querySelectorAll(".epg-slot.is-open").forEach((el) => el.classList.remove("is-open"));
+        epgOpenStartTs = 0;
+        return;
+      }
+      const wasOpen = slot.classList.contains("is-open");
+      box.querySelectorAll(".epg-slot.is-open").forEach((el) => el.classList.remove("is-open"));
+      if (wasOpen) {
+        epgOpenStartTs = 0;
+      } else {
+        slot.classList.add("is-open");
+        epgOpenStartTs = p.startTs;
+        slot.style.width = Math.min(380, Math.max(180, minutes * 3.4)) + "px";
+      }
+    });
 
     box.appendChild(slot);
   });
@@ -3373,6 +3445,7 @@ function isTypingTarget(target) {
 // que se está viendo, para poder seguir zapeando con el mando.
 function focusChannelList() {
   currentFocus.col = 1;
+  if (isTvLayout()) setTvChannelsOpen(true);
   const items = Array.from(document.querySelectorAll(".channel-item"));
   const playing = items.findIndex((el) => el.classList.contains("playing"));
   const last = items.findIndex((el) => el.classList.contains("last"));
@@ -3414,6 +3487,12 @@ document.addEventListener("keydown", (e) => {
       e.preventDefault();
       exitFullscreen();
       focusChannelList();
+      return;
+    }
+    if (isTvLayout() && onPlayer && document.body.classList.contains("tv-channels-open")) {
+      e.preventDefault();
+      focusTvCategoryColumn();
+      updateCursorVisuals();
       return;
     }
     setDebugOpen(false);
@@ -3461,7 +3540,12 @@ document.addEventListener("keydown", (e) => {
     }
     if (e.key === "ArrowLeft") {
       if (!fullscreen && currentFocus.col === 2) {
-        currentFocus.col = 1;
+        if (isTvLayout() && !document.body.classList.contains("tv-channels-open")) {
+          focusTvCategoryColumn();
+        } else {
+          currentFocus.col = 1;
+          if (isTvLayout()) setTvChannelsOpen(true);
+        }
         updateCursorVisuals();
         return;
       }
@@ -3500,17 +3584,23 @@ document.addEventListener("keydown", (e) => {
   const channels = document.querySelectorAll(".channel-item");
 
   if (e.key === "ArrowRight") {
-    if (currentFocus.col === 0 && channels.length > 0) {
-      currentFocus.col = 1;
-      currentFocus.row = 0;
+    if (currentFocus.col === 0) {
+      if (isTvLayout()) enterTvChannelsColumn();
+      else if (channels.length > 0) {
+        currentFocus.col = 1;
+        currentFocus.row = 0;
+      }
     } else if (currentFocus.col === 1) {
       currentFocus.col = 2;
     }
   } else if (e.key === "ArrowLeft") {
     if (currentFocus.col === 1 && categories.length > 0) {
-      currentFocus.col = 0;
-      const activeIndex = Array.from(categories).findIndex((c) => c.classList.contains("active"));
-      currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
+      if (isTvLayout()) focusTvCategoryColumn();
+      else {
+        currentFocus.col = 0;
+        const activeIndex = Array.from(categories).findIndex((c) => c.classList.contains("active"));
+        currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
+      }
     }
   } else if (e.key === "ArrowDown") {
     if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) currentFocus.row++;
@@ -3520,8 +3610,11 @@ document.addEventListener("keydown", (e) => {
     else if (currentFocus.col === 1 && currentFocus.row > 0) currentFocus.row--;
   } else if (e.key === "Enter") {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
-      currentFocus.col = 1;
-      currentFocus.row = 0;
+      if (isTvLayout()) enterTvChannelsColumn();
+      else {
+        currentFocus.col = 1;
+        currentFocus.row = 0;
+      }
     } else if (currentFocus.col === 1 && channels[currentFocus.row]) {
       channels[currentFocus.row].click();
     }
@@ -3546,6 +3639,7 @@ function updateCursorVisuals() {
 
     if (currentFocus.col === 0) {
       selectCategory(target.dataset.category);
+      if (isTvLayout()) setTvChannelsOpen(false);
     }
   }
 }
