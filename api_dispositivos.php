@@ -12,9 +12,10 @@ if ($id === '' || !preg_match('/^[A-Z0-9-]{4,16}$/', $id)) {
 $archivo = __DIR__ . '/cuentas/' . $id . '.json';
 
 if (is_file($archivo)) {
+    // La asignación se deja en disco: cerrar sesión no debe obligar a volver a
+    // subir la lista. Una carga nueva (upload.php) sobrescribe el mismo fichero.
     $datos = file_get_contents($archivo);
     echo $datos;
-    @unlink($archivo);
 } else {
     echo json_encode(array('status' => 'esperando'));
 }

@@ -145,6 +145,34 @@ html.is-native-tv .splash-hint-tv { display: inline; }
 .install-btn:hover {
   background: #15803d;
 }
+.reload-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  background: #0ea5e9;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 48px;
+}
+.reload-btn:hover { background: #0284c7; }
+.reload-btn:focus,
+.reload-btn:focus-visible,
+.reload-btn.login-focus {
+  outline: 4px solid #fbbf24;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.45);
+}
+.reload-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
 .remote-upload-box {
   background: rgba(99, 102, 241, 0.1);
   border: 1px dashed #6366f1;
@@ -1007,7 +1035,7 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
-:is(body.is-tv, html.is-native-tv) { font-size: 20px; }
+:is(body.is-tv, html.is-native-tv) { font-size: 16px; }
 :is(body.is-tv, html.is-native-tv) #loginScreen {
   overflow: hidden;
   padding: 1.1rem 1.4rem;
@@ -1057,6 +1085,12 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   line-height: 1.45;
 }
 :is(body.is-tv, html.is-native-tv) .install-btn { min-height: 48px; margin-bottom: 0; font-size: 0.95rem; }
+:is(body.is-tv, html.is-native-tv) .reload-btn {
+  min-height: 52px;
+  font-size: 1.05rem;
+  margin-top: 14px;
+}
+:is(body.is-tv, html.is-native-tv) .reload-hint { font-size: 0.85rem; }
 :is(body.is-tv, html.is-native-tv) .remote-upload-box {
   padding: 1rem 1.1rem;
   flex: 0 0 auto;
@@ -1094,16 +1128,64 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
     width: min(560px, calc(100vw - 40px));
   }
 }
-body.is-tv .compact-header { padding: 0.9rem 1.4rem; font-size: 1.05rem; }
-body.is-tv .header-left h1 { font-size: 1.4rem; }
-body.is-tv .header-right button {
-  min-width: 56px;
-  min-height: 56px;
-  font-size: 1.4rem;
-  border-radius: 10px;
+body.is-tv .compact-header,
+html.is-native-tv .compact-header {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  min-height: 0;
+}
+body.is-tv .header-left h1,
+html.is-native-tv .header-left h1 { font-size: 1.05rem; }
+body.is-tv .header-right,
+html.is-native-tv .header-right { gap: 0.4rem; }
+body.is-tv .header-right span,
+html.is-native-tv .header-right span { font-size: 0.78rem; }
+body.is-tv #accountExpiryLabel,
+html.is-native-tv #accountExpiryLabel { margin-right: 4px; }
+body.is-tv .buffer-control,
+body.is-tv #displayBtn,
+body.is-tv #pipBtn,
+body.is-tv #airplayBtn,
+body.is-tv #castButton,
+body.is-tv .track-control,
+html.is-native-tv .buffer-control,
+html.is-native-tv #displayBtn,
+html.is-native-tv #pipBtn,
+html.is-native-tv #airplayBtn,
+html.is-native-tv #castButton,
+html.is-native-tv .track-control {
+  display: none !important;
+}
+body.is-tv .header-right button,
+html.is-native-tv .header-right button {
+  min-width: 48px;
+  min-height: 48px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  font-size: 1rem;
+  border-radius: 8px;
+}
+body.is-tv .header-right button svg,
+html.is-native-tv .header-right button svg {
+  width: 22px;
+  height: 22px;
+}
+body.is-tv #refreshBtn:focus,
+body.is-tv #logoutBtn:focus,
+body.is-tv #refreshBtn.cursor,
+body.is-tv #logoutBtn.cursor,
+html.is-native-tv #refreshBtn:focus,
+html.is-native-tv #logoutBtn:focus,
+html.is-native-tv #refreshBtn.cursor,
+html.is-native-tv #logoutBtn.cursor {
+  outline: 4px solid #fbbf24;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.45), 0 0 16px rgba(251, 191, 36, 0.55);
+  z-index: 2;
 }
 body.is-tv .main-container {
-  grid-template-columns: minmax(220px, 22%) 0 1fr;
+  grid-template-columns: minmax(250px, 24%) 0 1fr;
   transition: grid-template-columns 0.22s ease;
 }
 body.is-tv .channels-column {
@@ -1118,40 +1200,51 @@ body.is-tv .channels-column {
 body.is-tv .categories-column,
 body.is-tv .player-column { min-width: 0; }
 body.is-tv.tv-channels-open .main-container {
-  grid-template-columns: minmax(110px, 12%) minmax(180px, 22%) 1fr;
+  grid-template-columns: minmax(168px, 17%) minmax(240px, 24%) 1fr;
 }
 body.is-tv.tv-channels-open .channels-column {
   width: auto;
-  padding: 0.5rem 0.6rem 0 0.6rem;
+  padding: 0.4rem 0.5rem 0 0.5rem;
   border-right: 1px solid rgba(148, 163, 184, 0.25);
   visibility: visible;
   pointer-events: auto;
 }
 body.is-tv .category-btn,
 body.is-tv .channel-item {
-  padding: 12px 16px;
-  font-size: 1.15rem;
-  margin-bottom: 0;
+  padding: 6px 10px;
+  font-size: 0.86rem;
+  margin-bottom: 2px;
 }
 body.is-tv .category-btn {
-  min-height: 64px;
-  height: 64px;
+  min-height: 0;
+  height: auto;
+  white-space: normal;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 body.is-tv .channel-item {
-  min-height: 80px;
-  height: 80px;
+  min-height: 52px;
+  height: 52px;
 }
-body.is-tv .channel-name { font-size: 1.05rem; }
+body.is-tv .channel-name { font-size: 0.86rem; }
 body.is-tv.tv-channels-open .category-btn {
-  font-size: 1.02rem;
-  padding: 10px 10px;
+  font-size: 0.78rem;
+  padding: 5px 8px;
 }
 body.is-tv .category-btn.cursor,
-body.is-tv .channel-item.cursor { outline: 4px solid #fbbf24; outline-offset: 2px; }
-body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 44px; height: 44px; }
+body.is-tv .channel-item.cursor { outline: 3px solid #fbbf24; outline-offset: 1px; }
+body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 32px; height: 32px; }
 body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
 body.is-tv .channel-search,
-body.is-tv .sort-btn { min-height: 48px; font-size: 1.05rem; }
+body.is-tv .sort-btn { min-height: 36px; font-size: 0.8rem; }
+body.is-tv .channels-column h2 { font-size: 0.82rem; }
 
 /********** MÓVILES: vídeo arriba, chips, lista de canales **********/
 @media (max-width: 768px) {

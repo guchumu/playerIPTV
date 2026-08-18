@@ -16,6 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'username' => isset($_POST['username']) ? $_POST['username'] : '',
         'password' => isset($_POST['password']) ? $_POST['password'] : '',
         'm3uUrl' => isset($_POST['m3uUrl']) ? $_POST['m3uUrl'] : '',
+        'ts' => (int) round(microtime(true) * 1000),
+        'status' => 'listo',
     );
 
     if (!is_dir(__DIR__ . '/cuentas')) {

@@ -17,6 +17,9 @@ let hls = null;
 let mpegtsPlayer = null;
 let nativePlaybackActive = false;
 const BUFFER_KEY = "streambox_buffer";
+const LAST_LIST_KEY = "streambox_last_list";
+const LOGOUT_AT_KEY = "streambox_logout_at";
+const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
 // Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
 // que un ajuste alto sigue valiendo como techo pero no como espera.
@@ -151,6 +154,7 @@ function detectDevice() {
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
   document.documentElement.classList.toggle("is-native-tv", nativeTv === true || (isTV && (markedTv || isNativeApp())));
   if (!isTV) document.body.classList.remove("tv-channels-open");
+  applyTvChrome();
 }
 
 async function refreshNativeTvFlag() {
@@ -166,6 +170,7 @@ async function refreshNativeTvFlag() {
       exo: true,
     });
     detectDevice();
+    applyUiMode();
   } catch (e) {}
 }
 
@@ -173,6 +178,58 @@ detectDevice();
 
 function isTvLayout() {
   return document.body.classList.contains("is-tv");
+}
+
+function getTvHeaderActions() {
+  return [document.getElementById("refreshBtn"), document.getElementById("logoutBtn")].filter(Boolean);
+}
+
+function applyTvChrome() {
+  const tv = isTvLayout();
+  const hideIds = ["displayBtn", "pipBtn", "airplayBtn", "castButton", "bufferSelect", "channelSearch", "sortBtn", "stopBtn", "goLiveBtn"];
+  hideIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.tabIndex = tv ? -1 : 0;
+  });
+  const bufferLabel = document.querySelector(".buffer-control");
+  if (bufferLabel) bufferLabel.setAttribute("aria-hidden", tv ? "true" : "false");
+  getTvHeaderActions().forEach((btn) => {
+    btn.tabIndex = 0;
+  });
+  document.querySelectorAll(".category-btn").forEach((btn) => {
+    btn.tabIndex = tv ? -1 : 0;
+  });
+}
+
+function rememberLastList(payload) {
+  if (!payload) return;
+  try {
+    localStorage.setItem(LAST_LIST_KEY, typeof payload === "string" ? payload : JSON.stringify(payload));
+  } catch (e) {}
+}
+
+function peekLastList() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_LIST_KEY) || "null");
+  } catch (e) {
+    return null;
+  }
+}
+
+function getLogoutAt() {
+  try {
+    return parseInt(sessionStorage.getItem(LOGOUT_AT_KEY) || "0", 10) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function assignmentIsStale(data) {
+  const logoutAt = getLogoutAt();
+  if (!logoutAt) return false;
+  const ts = data && data.ts != null ? Number(data.ts) : 0;
+  return !ts || ts <= logoutAt;
 }
 
 function setTvChannelsOpen(open) {
@@ -195,6 +252,25 @@ function focusTvCategoryColumn() {
   currentFocus.col = 0;
   currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
   setTvChannelsOpen(false);
+  const active = document.activeElement;
+  if (active && getTvHeaderActions().indexOf(active) >= 0) active.blur();
+}
+
+function focusTvHeader(index) {
+  const actions = getTvHeaderActions();
+  if (!actions.length) return;
+  const i = Math.max(0, Math.min(actions.length - 1, index == null ? 0 : index));
+  currentFocus.col = TV_HEADER_COL;
+  currentFocus.row = i;
+  setTvChannelsOpen(false);
+  const btn = actions[i];
+  if (btn && typeof btn.focus === "function") {
+    try {
+      btn.focus({ preventScroll: true });
+    } catch (e) {
+      btn.focus();
+    }
+  }
 }
 
 function enterTvChannelsColumn() {
@@ -406,6 +482,7 @@ async function saveSession(user) {
   }
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify(copy));
+    rememberLastList(copy);
   } catch (e) {}
 }
 
@@ -495,6 +572,10 @@ async function signedStreamHref(url) {
 }
 
 function applyUiMode() {
+  if (isTvLayout()) {
+    document.body.classList.remove("ui-large", "ui-contrast");
+    return;
+  }
   const mode = localStorage.getItem(UI_KEY) || "normal";
   document.body.classList.toggle("ui-large", mode === "large" || mode === "contrast");
   document.body.classList.toggle("ui-contrast", mode === "contrast");
@@ -709,7 +790,7 @@ function startRemotePolling() {
   stopRemotePolling();
   const myGen = remotePollGen;
 
-  pollingInterval = setInterval(async () => {
+  async function tick() {
     if (myGen !== remotePollGen) return;
     if (remoteLoginBusy) return;
     if (liveSession && channelsData.length && !logoutRequested) {
@@ -721,17 +802,20 @@ function startRemotePolling() {
       const data = await res.json();
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
-      if (data && data.status !== "esperando" && (data.serverUrl || data.m3uUrl)) {
-        remoteLoginBusy = true;
-        stopRemotePolling();
-        try {
-          await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl);
-        } finally {
-          remoteLoginBusy = false;
-        }
+      if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
+      if (assignmentIsStale(data)) return;
+      remoteLoginBusy = true;
+      try {
+        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl);
+      } finally {
+        remoteLoginBusy = false;
+        if (liveSession) stopRemotePolling();
       }
     } catch (e) {}
-  }, 5000);
+  }
+
+  tick();
+  pollingInterval = setInterval(tick, 5000);
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -1037,6 +1121,10 @@ window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   refreshNativeTvFlag();
   applyUiMode();
+  try {
+    const session = localStorage.getItem(SESSION_KEY);
+    if (session && !localStorage.getItem(LAST_LIST_KEY)) localStorage.setItem(LAST_LIST_KEY, session);
+  } catch (e) {}
   initSplash();
   initChannelTools();
   initAdSlot();
@@ -1071,6 +1159,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
 window.addEventListener("resize", () => {
   detectDevice();
+  applyUiMode();
   paintVirtualWindow(true);
 });
 
@@ -1116,6 +1205,10 @@ function finishLogin(user) {
 
   generateSessionToken();
   startActivityMonitoring();
+  if (isTvLayout()) {
+    focusTvCategoryColumn();
+    updateCursorVisuals();
+  }
 
   // La guía llega después de la lista: nunca debe retrasar la entrada al player.
   setTimeout(() => {
@@ -2084,6 +2177,7 @@ function renderCategoryButtons(keepSelection) {
     btn.dataset.category = catName;
     btn.textContent = displayCategoryName(catName);
     btn.title = catName;
+    btn.tabIndex = isTvLayout() ? -1 : 0;
     btn.addEventListener("click", () => {
       const search = document.getElementById("channelSearch");
       if (search) search.value = "";
@@ -2192,6 +2286,7 @@ function buildChannelRow(channel) {
   favBtn.dataset.id = channel.id;
   favBtn.title = "Favorito";
   favBtn.setAttribute("aria-label", "Marcar favorito");
+  if (isTvLayout()) favBtn.tabIndex = -1;
   favBtn.innerHTML = STAR_SVG;
   favBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -2212,7 +2307,7 @@ function buildChannelRow(channel) {
 }
 
 function channelRowHeight() {
-  if (document.body.classList.contains("is-tv")) return 80;
+  if (document.body.classList.contains("is-tv")) return 52;
   if (document.body.classList.contains("ui-large")) return 72;
   return 64;
 }
@@ -3582,6 +3677,11 @@ initPlayerGestures();
 function doLogout() {
   logoutRequested = true;
   liveSession = false;
+  remoteLoginBusy = false;
+  loginCancelled = false;
+  try {
+    sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
+  } catch (e) {}
   sendActivity("stop");
   stopActivityMonitoring();
   stopRemotePolling();
@@ -3592,6 +3692,7 @@ function doLogout() {
   currentChannelRef = null;
   currentlyPlayingId = null;
   localStorage.removeItem("xtream_user");
+  document.documentElement.classList.remove("has-session");
   stopPlayback();
   showVideoSpinner(false);
   currentUser = null;
@@ -3600,8 +3701,44 @@ function doLogout() {
   channelsData = [];
   categoriesData = {};
   channelById = new Map();
+  setLoginStatus(
+    peekLastList()
+      ? "Sesión cerrada. Pulsa Recargar para volver a entrar, o escanea el QR si quieres otra lista."
+      : "Sesión cerrada. Escanea el QR para cargar la lista."
+  );
   showScreen("login");
   startRemotePolling();
+}
+
+async function forceReloadApp() {
+  setLoginStatus("Recargando…");
+  showSpinner(true, "Recargando…");
+  try {
+    sessionStorage.removeItem(LOGOUT_AT_KEY);
+  } catch (e) {}
+  try {
+    const last = localStorage.getItem(LAST_LIST_KEY);
+    if (last) localStorage.setItem(SESSION_KEY, last);
+  } catch (e) {}
+  try {
+    if (navigator.serviceWorker) {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage("limpiar-cache");
+      }
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (e) {}
+  try {
+    if (window.caches && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) {}
+  const url = new URL(window.location.href);
+  url.searchParams.set("r", String(Date.now()));
+  url.searchParams.set("v", "20260819a");
+  window.location.replace(url.toString());
 }
 
 async function doRefresh() {
@@ -3623,6 +3760,19 @@ if (logoutBtn) logoutBtn.addEventListener("click", doLogout);
 
 const refreshBtn = document.getElementById("refreshBtn");
 if (refreshBtn) refreshBtn.addEventListener("click", doRefresh);
+
+const forceReloadBtn = document.getElementById("forceReloadBtn");
+if (forceReloadBtn) forceReloadBtn.addEventListener("click", forceReloadApp);
+
+getTvHeaderActions().forEach((btn, i) => {
+  btn.addEventListener("focus", () => {
+    if (!isTvLayout() || isLoginScreenActive()) return;
+    if (currentFocus.col === TV_HEADER_COL && currentFocus.row === i) return;
+    currentFocus.col = TV_HEADER_COL;
+    currentFocus.row = i;
+    updateCursorVisuals();
+  });
+});
 
 const spinnerSkip = document.getElementById("spinnerSkip");
 if (spinnerSkip) {
@@ -3688,7 +3838,16 @@ function isLoginScreenActive() {
 }
 
 function initTvLoginFocus() {
-  // La entrada es solo el QR: no hay campos que recorrer con el mando.
+  const reload = document.getElementById("forceReloadBtn");
+  if (!reload) return;
+  reload.classList.add("login-focus");
+  if (isTvLayout()) {
+    try {
+      reload.focus({ preventScroll: true });
+    } catch (e) {
+      reload.focus();
+    }
+  }
 }
 
 // Al salir de pantalla completa el cursor vuelve a la lista, sobre el canal
@@ -3740,6 +3899,12 @@ document.addEventListener("keydown", (e) => {
       focusChannelList();
       return;
     }
+    if (isTvLayout() && onPlayer && currentFocus.col === TV_HEADER_COL) {
+      e.preventDefault();
+      focusTvCategoryColumn();
+      updateCursorVisuals();
+      return;
+    }
     if (isTvLayout() && onPlayer && document.body.classList.contains("tv-channels-open")) {
       e.preventDefault();
       focusTvCategoryColumn();
@@ -3758,7 +3923,19 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  if (isLoginScreenActive()) return;
+  if (isLoginScreenActive()) {
+    const reload = document.getElementById("forceReloadBtn");
+    if (reload && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+      e.preventDefault();
+      reload.classList.add("login-focus");
+      try {
+        reload.focus({ preventScroll: true });
+      } catch (err) {
+        reload.focus();
+      }
+    }
+    return;
+  }
 
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "OK", "Select"];
   if (!validKeys.includes(e.key) && !isConfirmKey(e)) return;
@@ -3809,10 +3986,27 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  if (e.key !== "Enter" && !isConfirmKey(e)) e.preventDefault();
+  if (isTvLayout()) e.preventDefault();
+  else if (e.key !== "Enter" && !isConfirmKey(e)) e.preventDefault();
 
   const categories = document.querySelectorAll(".category-btn");
   const channels = document.querySelectorAll(".channel-item");
+  const headerActions = getTvHeaderActions();
+
+  if (currentFocus.col === TV_HEADER_COL && isTvLayout()) {
+    if (e.key === "ArrowRight" && currentFocus.row < headerActions.length - 1) currentFocus.row++;
+    else if (e.key === "ArrowLeft" && currentFocus.row > 0) currentFocus.row--;
+    else if (e.key === "ArrowDown") {
+      focusTvCategoryColumn();
+      updateCursorVisuals();
+      return;
+    } else if (isConfirmKey(e) && headerActions[currentFocus.row]) {
+      headerActions[currentFocus.row].click();
+      return;
+    }
+    updateCursorVisuals();
+    return;
+  }
 
   if (e.key === "ArrowRight") {
     if (currentFocus.col === 0) {
@@ -3838,7 +4032,11 @@ document.addEventListener("keydown", (e) => {
     else if (currentFocus.col === 1 && currentFocus.row < channels.length - 1) currentFocus.row++;
   } else if (e.key === "ArrowUp") {
     if (currentFocus.col === 0 && currentFocus.row > 0) currentFocus.row--;
-    else if (currentFocus.col === 1 && currentFocus.row > 0) currentFocus.row--;
+    else if (currentFocus.col === 0 && currentFocus.row <= 0 && isTvLayout()) {
+      focusTvHeader(0);
+      updateCursorVisuals();
+      return;
+    } else if (currentFocus.col === 1 && currentFocus.row > 0) currentFocus.row--;
   } else if (isConfirmKey(e)) {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
       if (isTvLayout()) enterTvChannelsColumn();
@@ -3855,7 +4053,24 @@ document.addEventListener("keydown", (e) => {
 
 function updateCursorVisuals() {
   document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
+  getTvHeaderActions().forEach((el) => el.classList.remove("cursor"));
   let target = null;
+  if (currentFocus.col === TV_HEADER_COL) {
+    const actions = getTvHeaderActions();
+    target = actions[currentFocus.row] || actions[0];
+    if (target) {
+      target.classList.add("cursor");
+      if (document.activeElement !== target) {
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          target.focus();
+        }
+      }
+    }
+    if (video) video.style.outline = "none";
+    return;
+  }
   if (currentFocus.col === 0) {
     target = document.querySelectorAll(".category-btn")[currentFocus.row];
   } else if (currentFocus.col === 1) {
@@ -3863,7 +4078,9 @@ function updateCursorVisuals() {
   } else if (currentFocus.col === 2) {
     video.style.outline = "3px solid #fbbf24";
   }
-  if (currentFocus.col !== 2) video.style.outline = "none";
+  if (currentFocus.col !== 2 && video) video.style.outline = "none";
+  const headerActive = document.activeElement;
+  if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
   if (target) {
     target.classList.add("cursor");
     target.scrollIntoView({ block: "nearest", behavior: "smooth" });
