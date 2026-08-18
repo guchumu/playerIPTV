@@ -22,7 +22,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-    <link rel="stylesheet" href="style.css?v=20260818b" />
+    <link rel="stylesheet" href="style.css?v=20260818c" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -42,7 +42,7 @@
         <div class="login-container">
             <img src="logo.png" alt="" class="login-logo" />
             <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260818b</p>
+            <p class="build-tag">v20260818c</p>
 
             <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
 
@@ -134,7 +134,13 @@
             </aside>
 
             <section class="channels-column">
-                <h2 id="channelColumnTitle">Canales</h2>
+                <div class="channels-toolbar">
+                    <h2 id="channelColumnTitle">Canales</h2>
+                    <div class="channels-tools">
+                        <input type="search" id="channelSearch" class="channel-search" placeholder="Buscar canal…" autocomplete="off" enterkeyhint="search" />
+                        <button type="button" id="sortBtn" class="sort-btn" title="Orden de la lista" aria-label="Ordenar canales">A-Z</button>
+                    </div>
+                </div>
                 <div id="channelsContainer" class="channels-list"></div>
             </section>
 
@@ -185,7 +191,10 @@
         </div>
     </div>
 
-    <div id="appToast" class="app-toast" hidden></div>
+    <div id="zapOverlay" class="zap-overlay" hidden>
+        <span id="zapNumber">—</span>
+        <span class="zap-hint">Canal</span>
+    </div>
 
     <div id="debugOverlay" class="debug-overlay" hidden>
         <div class="debug-panel">
@@ -206,6 +215,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260818b"></script>
+    <script src="core.js?v=20260818c"></script>
 </body>
 </html>

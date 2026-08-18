@@ -370,7 +370,41 @@ body.is-tv .splash-hint-tv { display: inline; }
   padding: 0.5rem 0.6rem 0 0.6rem;
   background: #020617;
 }
-.channels-column h2 { font-size: 0.9rem; margin-bottom: 0.5rem; flex-shrink: 0; }
+.channels-toolbar { flex-shrink: 0; margin-bottom: 0.45rem; }
+.channels-column h2 { font-size: 0.9rem; margin-bottom: 0.35rem; }
+.channels-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.channel-search {
+  flex: 1;
+  min-width: 0;
+  background: #020617;
+  color: #f9fafb;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  min-height: 36px;
+}
+.channel-search:focus { outline: 2px solid #6366f1; border-color: #6366f1; }
+.sort-btn {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sort-btn.is-az { background: #312e81; border-color: #6366f1; color: #e0e7ff; }
 .channels-list { flex: 1; overflow-y: auto; padding-bottom: 20px; }
 .channel-item {
   display: flex;
@@ -386,6 +420,29 @@ body.is-tv .splash-hint-tv { display: inline; }
 }
 .channel-item.playing { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5); }
 .channel-item.last:not(.playing) { box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.55); }
+.channel-chno {
+  flex-shrink: 0;
+  width: 2.1rem;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.fav-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 6px;
+}
+.fav-btn svg { width: 100%; height: 100%; fill: currentColor; }
+.fav-btn.is-on { color: #fbbf24; }
+.fav-btn:focus-visible { outline: 2px solid #fbbf24; }
+.category-btn.is-special { color: #fde68a; }
 .channel-logo {
   width: 34px;
   height: 34px;
@@ -802,6 +859,32 @@ body.is-tv .status-bar { width: 110px; height: 7px; }
   transform: translateX(-50%) translateY(0);
 }
 
+.zap-overlay {
+  position: fixed;
+  top: 18%;
+  right: 8%;
+  z-index: 5000;
+  min-width: 140px;
+  padding: 1rem 1.4rem 0.85rem;
+  background: rgba(2, 6, 23, 0.92);
+  border: 1px solid rgba(99, 102, 241, 0.55);
+  border-radius: 12px;
+  text-align: right;
+  pointer-events: none;
+}
+.zap-overlay[hidden] { display: none; }
+#zapNumber {
+  display: block;
+  font-size: 3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+.zap-hint { display: block; margin-top: 0.35rem; font-size: 0.75rem; color: #94a3b8; }
+body.is-tv .zap-overlay { min-width: 200px; }
+body.is-tv #zapNumber { font-size: 4.2rem; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /********** PC / DESKTOP ANCHO **********/
@@ -848,7 +931,8 @@ body.is-tv .channel-item {
 }
 body.is-tv .category-btn.cursor,
 body.is-tv .channel-item.cursor { outline: 4px solid #fbbf24; outline-offset: 2px; }
-body.is-tv .epg-container { font-size: 1.05rem; padding: 0.7rem 0.9rem; }
+body.is-tv .channel-search,
+body.is-tv .sort-btn { min-height: 48px; font-size: 1.05rem; }
 body.is-tv .device-id { font-size: 2.4rem; }
 
 /********** MÓVILES: vídeo arriba, chips, lista de canales **********/
@@ -955,6 +1039,7 @@ body.is-tv .device-id { font-size: 2.4rem; }
     white-space: nowrap;
   }
   .channels-column h2 { display: none; }
+  .channels-toolbar { margin-bottom: 8px; }
   .channels-list {
     flex: 1 1 auto;
     min-height: 0;
