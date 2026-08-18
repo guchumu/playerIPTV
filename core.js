@@ -645,6 +645,7 @@ function initSplash() {
   }
   splash.addEventListener("click", () => dismissSplash());
   window.setTimeout(() => dismissSplash(), SPLASH_MS);
+  prefetchEPG();
 }
 
 /********** DEVICE ID & CARGA REMOTA **********/
@@ -1220,10 +1221,7 @@ function finishLogin(user) {
     updateCursorVisuals();
   }
 
-  // La guía llega después de la lista: nunca debe retrasar la entrada al player.
-  setTimeout(() => {
-    loadEPG();
-  }, 1500);
+  prefetchEPG();
 }
 
 function showAccountExpiry(info) {
@@ -1362,56 +1360,68 @@ function normalizeEpgKey(value) {
     .trim();
 }
 
+let epgFetchInFlight = null;
+
+function prefetchEPG() {
+  if (hasEPG() && Date.now() - epgLoadedAt < 10 * 60 * 1000) return epgFetchInFlight;
+  return loadEPG();
+}
+
 /**
  * Pide la guía ya digerida a epg_api.php. El XMLTV completo se parsea en el
  * servidor: hacerlo aquí congelaba la interfaz durante segundos.
  */
 async function loadEPG() {
-  try {
-    const res = await fetch(EPG_URL, { cache: "no-store" });
-    if (!res.ok) {
-      epgLastStatus = "HTTP " + res.status + (res.status === 404 ? " (falta epg_api.php en el servidor)" : "");
+  if (epgFetchInFlight) return epgFetchInFlight;
+  epgFetchInFlight = (async () => {
+    try {
+      const res = await fetch(EPG_URL, { cache: "no-store" });
+      if (!res.ok) {
+        epgLastStatus = "HTTP " + res.status + (res.status === 404 ? " (falta epg_api.php en el servidor)" : "");
+        scheduleEpgRetry();
+        return false;
+      }
+
+      const data = await res.json();
+      const ids = data && data.c ? Object.keys(data.c) : [];
+      if (!ids.length) {
+        epgLastStatus = "vacía, el servidor aún la está generando";
+        scheduleEpgRetry();
+        return false;
+      }
+
+      const index = {};
+      ids.forEach((id) => {
+        const list = data.c[id];
+        if (!list || !list.length) return;
+        index[id] = list.map((p) => ({
+          startTs: p[0] * 1000,
+          stopTs: p[1] * 1000,
+          title: p[2] || "Sin título",
+        }));
+      });
+
+      epgIndex = index;
+      epgAliases = data.a || {};
+      epgResolvedIds = {};
+      epgLoadedAt = Date.now();
+      epgRetryIndex = 0;
+      epgLastStatus = ids.length + " canales";
+
+      refreshVisibleChannelEPG();
+      refreshPlayerEPG();
+      renderEpgTimeline();
+      scheduleEpgTimers();
+      return true;
+    } catch (e) {
+      epgLastStatus = "error de red o JSON inválido";
       scheduleEpgRetry();
       return false;
+    } finally {
+      epgFetchInFlight = null;
     }
-
-    const data = await res.json();
-    const ids = data && data.c ? Object.keys(data.c) : [];
-    if (!ids.length) {
-      // La primera visita deja al servidor generando la caché; se reintenta.
-      epgLastStatus = "vacía, el servidor aún la está generando";
-      scheduleEpgRetry();
-      return false;
-    }
-
-    const index = {};
-    ids.forEach((id) => {
-      const list = data.c[id];
-      if (!list || !list.length) return;
-      index[id] = list.map((p) => ({
-        startTs: p[0] * 1000,
-        stopTs: p[1] * 1000,
-        title: p[2] || "Sin título",
-      }));
-    });
-
-    epgIndex = index;
-    epgAliases = data.a || {};
-    epgResolvedIds = {};
-    epgLoadedAt = Date.now();
-    epgRetryIndex = 0;
-    epgLastStatus = ids.length + " canales";
-
-    refreshVisibleChannelEPG();
-    refreshPlayerEPG();
-    renderEpgTimeline();
-    scheduleEpgTimers();
-    return true;
-  } catch (e) {
-    epgLastStatus = "error de red o JSON inválido";
-    scheduleEpgRetry();
-    return false;
-  }
+  })();
+  return epgFetchInFlight;
 }
 
 /**
@@ -2079,7 +2089,7 @@ const FAV_NAME = "Favoritos";
 const HIST_NAME = "Recientes";
 const HIST_MAX = 30;
 const STAR_SVG =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>';
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>';
 
 let searchQuery = "";
 let renderToken = 0;
@@ -3836,7 +3846,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260819b");
+  url.searchParams.set("v", "20260819c");
   window.location.replace(url.toString());
 }
 

@@ -267,6 +267,35 @@ function epg_build_payload($xmlFile)
     );
 }
 
+function epg_flush_client()
+{
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+        return;
+    }
+    if (function_exists('litespeed_finish_request')) {
+        @litespeed_finish_request();
+        return;
+    }
+    @ob_end_flush();
+    @flush();
+}
+
+function epg_rebuild($xmlFile, $jsonFile)
+{
+    $now = time();
+    $xmlFresh = is_file($xmlFile) && ($now - filemtime($xmlFile)) < EPG_XML_TTL;
+    if (!$xmlFresh) {
+        epg_download_xml($xmlFile);
+    }
+    $payload = is_file($xmlFile) ? epg_build_payload($xmlFile) : null;
+    if ($payload === null || $payload === false) {
+        return false;
+    }
+    @file_put_contents($jsonFile, $payload);
+    return $payload;
+}
+
 $cacheDir = epg_cache_dir();
 $jsonFile = $cacheDir . '/epg_nownext.json';
 $xmlFile = $cacheDir . '/epg_source.xml';
@@ -313,8 +342,9 @@ if (isset($_GET['diag'])) {
     exit;
 }
 
-$jsonFresh = !$forceRebuild && is_file($jsonFile) && ($now - filemtime($jsonFile)) < EPG_JSON_TTL;
-if ($jsonFresh && filesize($jsonFile) > 2) {
+$hasJson = is_file($jsonFile) && filesize($jsonFile) > 2;
+$jsonFresh = !$forceRebuild && $hasJson && ($now - filemtime($jsonFile)) < EPG_JSON_TTL;
+if ($jsonFresh) {
     readfile($jsonFile);
     exit;
 }
@@ -325,7 +355,7 @@ $lock = @fopen($lockFile, 'c');
 $gotLock = $lock && @flock($lock, LOCK_EX | LOCK_NB);
 
 if (!$gotLock) {
-    if (is_file($jsonFile) && filesize($jsonFile) > 2) {
+    if ($hasJson) {
         readfile($jsonFile);
     } else {
         echo epg_empty_payload();
@@ -336,23 +366,26 @@ if (!$gotLock) {
     exit;
 }
 
-$xmlFresh = is_file($xmlFile) && ($now - filemtime($xmlFile)) < EPG_XML_TTL;
-if (!$xmlFresh) {
-    epg_download_xml($xmlFile);
-}
-
-$payload = is_file($xmlFile) ? epg_build_payload($xmlFile) : null;
-
-if ($payload === null || $payload === false) {
-    // Parseo fallido: mejor devolver la caché vieja que dejar al player sin guía.
-    if (is_file($jsonFile) && filesize($jsonFile) > 2) {
+// El cron espera el rebuild. El player no: sirve la caché (aunque sea de ayer)
+// y regenera en segundo plano. El primero del día dispara la descarga.
+if (!$forceRebuild) {
+    if ($hasJson) {
         readfile($jsonFile);
     } else {
         echo epg_empty_payload();
     }
-} else {
-    @file_put_contents($jsonFile, $payload);
-    echo $payload;
+    epg_flush_client();
+}
+
+$payload = epg_rebuild($xmlFile, $jsonFile);
+if ($forceRebuild) {
+    if ($payload) {
+        echo $payload;
+    } elseif ($hasJson) {
+        readfile($jsonFile);
+    } else {
+        echo epg_empty_payload();
+    }
 }
 
 @flock($lock, LOCK_UN);
