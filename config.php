@@ -1,22 +1,44 @@
 <?php
 /**
- * StreamBox IPTV — configuración única.
- * El resto de PHP debe incluir este archivo.
+ * StreamBox IPTV — configuración.
+ *
+ * Las claves reales van en config.local.php (no se versiona). Este archivo
+ * solo pone valores por defecto para que el player arranque.
  */
+if (is_file(__DIR__ . '/config.local.php')) {
+    require_once __DIR__ . '/config.local.php';
+}
 
-define('DB_HOST', 'localhost');
-define('DB_USER', 'iptv_player');
-define('DB_PASS', 'contrasena');
-define('DB_NAME', 'iptv_player');
+if (!defined('DB_HOST')) {
+    define('DB_HOST', 'localhost');
+}
+if (!defined('DB_USER')) {
+    define('DB_USER', 'iptv_player');
+}
+if (!defined('DB_PASS')) {
+    define('DB_PASS', 'contrasena');
+}
+if (!defined('DB_NAME')) {
+    define('DB_NAME', 'iptv_player');
+}
 
-define('XTREAM_SERVER', 'http://masquecero.net');
+if (!defined('XTREAM_SERVER')) {
+    define('XTREAM_SERVER', 'http://masquecero.net');
+}
 
-define('ADMIN_USER', 'admin');
-// SHA-256 de la contraseña de admin. Cámbiala y actualiza el hash.
-define('ADMIN_PASS_SHA256', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9');
+if (!defined('ADMIN_USER')) {
+    define('ADMIN_USER', 'admin');
+}
+if (!defined('ADMIN_PASS_SHA256')) {
+    define('ADMIN_PASS_SHA256', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9');
+}
 
-define('EPG_SOURCE', 'https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml');
-define('EPG_CACHE_TTL', 3600);
+if (!defined('EPG_SOURCE')) {
+    define('EPG_SOURCE', 'https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml');
+}
+if (!defined('EPG_CACHE_TTL')) {
+    define('EPG_CACHE_TTL', 3600);
+}
 
 function player_allowed_hosts()
 {

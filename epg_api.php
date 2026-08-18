@@ -14,6 +14,7 @@
  *   a: { nombreNormalizado: idCanal }
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/player_lib.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -272,6 +273,20 @@ $xmlFile = $cacheDir . '/epg_source.xml';
 $lockFile = $cacheDir . '/epg_build.lock';
 $now = time();
 
+// php epg_api.php   o   epg_api.php?cron=1&key=...
+// Así la guía está lista antes de que entre el primero.
+$isCli = (php_sapi_name() === 'cli');
+$cronKey = isset($_GET['key']) ? (string) $_GET['key'] : '';
+if ($isCli && isset($argv[1])) {
+    $cronKey = (string) $argv[1];
+}
+$forceRebuild = $isCli || (!empty($_GET['cron']) && $cronKey !== '' && hash_equals(player_cron_key(), $cronKey));
+if (!empty($_GET['cron']) && !$forceRebuild) {
+    http_response_code(403);
+    echo json_encode(array('ok' => false, 'error' => 'clave cron incorrecta'));
+    exit;
+}
+
 // epg_api.php?diag=1 — para ver desde el navegador por qué no hay guía.
 if (isset($_GET['diag'])) {
     $diag = array(
@@ -298,7 +313,7 @@ if (isset($_GET['diag'])) {
     exit;
 }
 
-$jsonFresh = is_file($jsonFile) && ($now - filemtime($jsonFile)) < EPG_JSON_TTL;
+$jsonFresh = !$forceRebuild && is_file($jsonFile) && ($now - filemtime($jsonFile)) < EPG_JSON_TTL;
 if ($jsonFresh && filesize($jsonFile) > 2) {
     readfile($jsonFile);
     exit;

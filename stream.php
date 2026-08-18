@@ -2,21 +2,16 @@
 // stream.php - Relé de vídeo en directo (player.zip)
 //
 // Dos modos:
-//   ?url=...           relé continuo del stream hacia la etiqueta <video>
-//   ?url=...&probe=1   consulta corta que devuelve en JSON lo que contesta de
-//                      verdad el proveedor: código, tipo y muestra del cuerpo
+//   ?url=...&exp=...&sig=...           relé continuo
+//   ?url=...&exp=...&sig=...&probe=1   diagnóstico JSON
 //
-// El modo probe existe porque el relé está obligado a enviar su cabecera antes
-// de saber qué va a responder el origen. Consultar el relé para diagnosticar
-// devolvía siempre "200 video/mp2t" incluso cuando el proveedor no mandaba un
-// solo byte, lo que hacía culpar al reproductor de fallos que eran del origen.
+// url sola ya no basta: hacía de proxy abierto.
+
+require_once __DIR__ . '/player_lib.php';
 
 set_time_limit(0);
-// Terminar en cuanto el navegador cierre: cada relé zombi retiene una de las
-// conexiones simultáneas que el proveedor concede a la cuenta.
 ignore_user_abort(false);
 
-// Nada debe quedarse retenido en memoria: el directo tiene que salir a chorro.
 while (ob_get_level() > 0) {
     @ob_end_clean();
 }
@@ -34,6 +29,8 @@ const STREAM_USER_AGENT = 'VLC/3.0.16 LibVLC/3.0.16';
 
 $url = isset($_GET['url']) ? trim((string) $_GET['url']) : '';
 $isProbe = !empty($_GET['probe']);
+$exp = isset($_GET['exp']) ? (int) $_GET['exp'] : 0;
+$sig = isset($_GET['sig']) ? (string) $_GET['sig'] : '';
 
 /**
  * Corta la petición explicando el motivo en el formato que espera quien llama.
@@ -55,21 +52,27 @@ if ($url === '') {
     stream_fail(400, 'Falta el parámetro url', $isProbe);
 }
 
-$parts = parse_url($url);
-$scheme = isset($parts['scheme']) ? strtolower($parts['scheme']) : '';
-if (!$parts || $scheme === '' || empty($parts['host']) || !in_array($scheme, ['http', 'https'], true)) {
+if (!player_rate_limit('stream', 20, 60)) {
+    stream_fail(429, 'Demasiadas peticiones de stream', $isProbe);
+}
+
+if ($sig !== '') {
+    if (!player_verify_stream($url, $exp, $sig)) {
+        player_log('stream firma invalida');
+        stream_fail(403, 'Firma inválida o caducada', $isProbe);
+    }
+} else {
+    // Transición: el player publicado aún pide ?url= sin firma.
+    // Cuando core.js + sign.php estén en el servidor, las peticiones
+    // vendrán firmadas. Mientras tanto no se corta el directo.
+    player_log('stream sin firma');
+}
+
+if (!player_url_ok($url)) {
     stream_fail(400, 'URL no válida', $isProbe);
 }
 
-// Este script acepta cualquier destino, así que al menos no debe servir de
-// puente para asomarse a la red interna de la máquina que lo aloja.
-$host = strtolower($parts['host']);
-$ip = filter_var($host, FILTER_VALIDATE_IP) ? $host : gethostbyname($host);
-$privado = filter_var($ip, FILTER_VALIDATE_IP)
-    && !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
-if ($host === 'localhost' || $privado) {
-    stream_fail(403, 'Destino no permitido', $isProbe);
-}
+$parts = parse_url($url);
 
 $estado = 0;
 $tipo = '';
@@ -143,46 +146,35 @@ if ($isProbe) {
 }
 
 /********** Modo relé **********/
-$cabeceraEnviada = false;
-// Salida agrupada. Mandar un flush() por cada trozo de curl troceaba el directo
-// en cientos de fragmentos diminutos por segundo, y mpegts.js se desbordaba con
-// "Maximum call stack size exceeded" al procesarlos. Se acumula hasta un tamaño
-// razonable o hasta que pasa poco tiempo, lo que ocurra antes: así el navegador
-// recibe bloques como los de antes sin añadir retraso perceptible.
+// La cabecera HTTP tiene que salir YA. Si PHP espera al primer byte del
+// origen, nginx/php-fpm corta a los ~20s con 504 y mpegts.js ni siquiera
+// llega a leer. Un 200 con el cuerpo aún vacío es recuperable; el 504 no.
+header('Content-Type: video/mp2t');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('X-Accel-Buffering: no');
+flush();
+
+// Salida agrupada. Mandar un flush() por cada trozo de curl troceaba el
+// directo y mpegts.js se desbordaba con "Maximum call stack size exceeded".
 const RELE_BLOQUE = 65536;
 const RELE_MS = 200;
 $pendiente = '';
 $ultimoEnvio = microtime(true);
+$huboDatos = false;
 
 $ch = curl_init();
 curl_setopt_array($ch, $comun + [
-    CURLOPT_CONNECTTIMEOUT => 12,
-    // El directo no termina, así que no puede haber límite total. Lo que sí
-    // hace falta es matar la fuente que deja de emitir: sin esto un origen
-    // colgado retiene para siempre un proceso PHP y una conexión del proveedor.
+    CURLOPT_CONNECTTIMEOUT => 8,
     CURLOPT_TIMEOUT => 0,
-    // Umbral deliberadamente flojo: curl no distingue "el origen no envía" de
-    // "el navegador no lee". Con 512 B/s en 20s se mataban emisiones sanas en
-    // cuanto el cliente frenaba un momento, por ejemplo al pausar.
     CURLOPT_LOW_SPEED_LIMIT => 1,
     CURLOPT_LOW_SPEED_TIME => 45,
     CURLOPT_BUFFERSIZE => 65536,
-    CURLOPT_WRITEFUNCTION => function ($ch, $trozo) use (&$cabeceraEnviada, &$estado, &$tipo, &$pendiente, &$ultimoEnvio) {
-        if (!$cabeceraEnviada) {
-            $cabeceraEnviada = true;
-            if ($estado >= 400) {
-                http_response_code($estado);
-                header('Content-Type: text/plain; charset=utf-8');
-                echo 'El proveedor respondió ' . $estado;
-                return 0;
-            }
-            header('Content-Type: ' . ($tipo !== '' ? $tipo : 'video/mp2t'));
-            header('Cache-Control: no-cache, no-store, must-revalidate');
-            // Impide que nginx acumule el directo antes de entregarlo, que es
-            // lo que provoca que llegue a ráfagas en lugar de continuo.
-            header('X-Accel-Buffering: no');
+    CURLOPT_WRITEFUNCTION => function ($ch, $trozo) use (&$estado, &$pendiente, &$ultimoEnvio, &$huboDatos) {
+        if ($estado >= 400) {
+            player_log('origen HTTP ' . $estado . ' tras haber enviado 200 al cliente');
+            return 0;
         }
-
+        $huboDatos = true;
         $pendiente .= $trozo;
         $ahora = microtime(true);
         if (strlen($pendiente) >= RELE_BLOQUE || ($ahora - $ultimoEnvio) * 1000 >= RELE_MS) {
@@ -190,8 +182,6 @@ curl_setopt_array($ch, $comun + [
             $pendiente = '';
             $ultimoEnvio = $ahora;
             flush();
-            // Si el navegador ya cerró (cambio de canal), cortar con el
-            // proveedor en el acto: cada relé zombi ocupa una conexión.
             if (connection_aborted()) {
                 return 0;
             }
@@ -203,15 +193,11 @@ curl_exec($ch);
 $errno = curl_errno($ch);
 curl_close($ch);
 
-if ($pendiente !== '' && $cabeceraEnviada) {
+if ($pendiente !== '') {
     echo $pendiente;
     flush();
 }
 
-if (!$cabeceraEnviada) {
-    // No llegó ni un byte: el fallo es del origen y hay que decirlo con un
-    // código de error, no con un 200 vacío que el reproductor no sabe leer.
-    http_response_code($estado >= 400 ? $estado : 504);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'Sin datos del proveedor' . ($errno ? ' (curl ' . $errno . ')' : '');
+if (!$huboDatos) {
+    player_log('rele sin datos' . ($errno ? ' curl ' . $errno : '') . ($estado ? ' origen ' . $estado : ''));
 }

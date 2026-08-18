@@ -1,0 +1,14 @@
+<?php
+/**
+ * Copia este archivo a config.local.php y rellena. No se sube al git.
+ *
+ * define('DB_HOST', 'localhost');
+ * define('DB_USER', 'iptv_player');
+ * define('DB_PASS', 'tu_clave_mysql');
+ * define('DB_NAME', 'iptv_player');
+ * define('ADMIN_USER', 'admin');
+ * define('ADMIN_PASS_SHA256', 'hash sha256 de la clave de admin');
+ * define('STREAM_SIGN_SECRET', 'pega aqui una cadena larga aleatoria');
+ * define('EPG_CRON_KEY', 'otra cadena para el cron de la guia');
+ * define('EPG_SOURCE', 'https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml');
+ */

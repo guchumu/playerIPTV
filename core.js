@@ -217,10 +217,191 @@ const SPLASH_MS = 4200;
 function canAutoLoginFromCache() {
   try {
     const saved = JSON.parse(localStorage.getItem("xtream_user") || "null");
-    return !!(saved && ((saved.username && saved.password) || saved.m3uUrl));
+    return !!(saved && ((saved.pwEnc && saved.pwIv) || (saved.username && saved.password) || saved.m3uUrl));
   } catch (e) {
     return false;
   }
+}
+
+const VAULT_KEY = "streambox_vk";
+const SESSION_KEY = "xtream_user";
+const UI_KEY = "streambox_ui";
+const signCache = new Map();
+let playGen = 0;
+let virtualList = [];
+let virtualRange = { start: -1, end: -1 };
+
+function bytesToB64(bytes) {
+  const arr = new Uint8Array(bytes);
+  let s = "";
+  for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+  return btoa(s);
+}
+
+function b64ToBytes(str) {
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function vaultKey() {
+  if (!window.crypto || !crypto.subtle) return null;
+  let raw = localStorage.getItem(VAULT_KEY);
+  if (!raw) {
+    raw = bytesToB64(crypto.getRandomValues(new Uint8Array(32)));
+    localStorage.setItem(VAULT_KEY, raw);
+  }
+  return crypto.subtle.importKey("raw", b64ToBytes(raw), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function sealSecret(plain) {
+  if (!plain) return {};
+  const key = await vaultKey();
+  if (!key) return { password: plain };
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, new TextEncoder().encode(plain));
+  return { pwEnc: bytesToB64(ct), pwIv: bytesToB64(iv) };
+}
+
+async function openSecret(saved) {
+  if (!saved) return "";
+  if (saved.password) return saved.password;
+  if (!saved.pwEnc || !saved.pwIv) return "";
+  try {
+    const key = await vaultKey();
+    if (!key) return "";
+    const pt = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: b64ToBytes(saved.pwIv) },
+      key,
+      b64ToBytes(saved.pwEnc)
+    );
+    return new TextDecoder().decode(pt);
+  } catch (e) {
+    return "";
+  }
+}
+
+async function saveSession(user) {
+  if (!user) return;
+  const copy = {
+    username: user.username,
+    server: user.server,
+    isM3U: !!user.isM3U,
+    m3uUrl: user.m3uUrl || "",
+  };
+  if (!user.isM3U && user.password) {
+    const sealed = await sealSecret(user.password);
+    if (sealed.password) copy.password = sealed.password;
+    else {
+      copy.pwEnc = sealed.pwEnc;
+      copy.pwIv = sealed.pwIv;
+    }
+  }
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(copy));
+  } catch (e) {}
+}
+
+async function loadSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!saved) return null;
+    if (!saved.isM3U) saved.password = await openSecret(saved);
+    return saved;
+  } catch (e) {
+    return null;
+  }
+}
+
+function listCacheKey(user) {
+  if (!user) return "";
+  if (user.isM3U) return "m3u:" + (user.m3uUrl || "");
+  return "xt:" + (user.server || "") + ":" + (user.username || "");
+}
+
+function openListDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("no"));
+      return;
+    }
+    const req = indexedDB.open("streambox-lists", 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains("lists")) req.result.createObjectStore("lists");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function writeListCache(user, text) {
+  try {
+    const db = await openListDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("lists", "readwrite");
+      tx.objectStore("lists").put({ text: text, at: Date.now() }, listCacheKey(user));
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) {}
+}
+
+async function readListCache(user) {
+  try {
+    const db = await openListDb();
+    const row = await new Promise((resolve, reject) => {
+      const tx = db.transaction("lists", "readonly");
+      const req = tx.objectStore("lists").get(listCacheKey(user));
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if (!row || !row.text) return null;
+    if (Date.now() - row.at > 7 * 24 * 3600 * 1000) return null;
+    return row.text;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function signedStreamHref(url) {
+  const now = Math.floor(Date.now() / 1000);
+  const hit = signCache.get(url);
+  if (hit && hit.exp - 90 > now) return hit.href;
+  const unsigned = "stream.php?url=" + encodeURIComponent(url);
+  try {
+    const res = await fetch("sign.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (!data || !data.ok || !data.href) throw new Error((data && data.error) || "sin firma");
+    signCache.set(url, { href: data.href, exp: data.exp });
+    return data.href;
+  } catch (e) {
+    logPlayback("firma", "sign.php no disponible, se usa el relé sin firmar");
+    return unsigned;
+  }
+}
+
+function applyUiMode() {
+  const mode = localStorage.getItem(UI_KEY) || "normal";
+  document.body.classList.toggle("ui-large", mode === "large" || mode === "contrast");
+  document.body.classList.toggle("ui-contrast", mode === "contrast");
+}
+
+function cycleUiMode() {
+  const order = ["normal", "large", "contrast"];
+  const cur = localStorage.getItem(UI_KEY) || "normal";
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  localStorage.setItem(UI_KEY, next);
+  applyUiMode();
+  paintVirtualWindow(true);
+  showToast(next === "normal" ? "Texto normal" : next === "large" ? "Texto grande" : "Alto contraste");
 }
 
 function isSplashActive() {
@@ -395,10 +576,27 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       try {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
+      currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
+      const cachedM3u = await readListCache(currentUser);
+      if (cachedM3u && !detectProviderListError(cachedM3u)) {
+        parseM3U(cachedM3u);
+        if (channelsData.length) {
+          await saveSession(currentUser);
+          finishLogin(currentUser);
+          renderCategories();
+          restoreLastChannel();
+          showSpinner(true, "Actualizando lista...");
+        }
+      }
+
       const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
       const m3uContent = await response.text();
       if (loginCancelled) return false;
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
+        if (channelsData.length) {
+          showSpinner(false);
+          return true;
+        }
         throw new Error("No se pudo cargar la URL.");
       }
       if (m3uContent.trim().charAt(0) === "{" || /<!DOCTYPE|<html/i.test(m3uContent)) {
@@ -407,6 +605,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
           const err = JSON.parse(m3uContent);
           if (err && err.message) msg = err.message;
         } catch (e) {}
+        if (channelsData.length) {
+          showSpinner(false);
+          return true;
+        }
         throw new Error(msg);
       }
       const listaConError = detectProviderListError(m3uContent);
@@ -414,15 +616,15 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         throw new Error("El proveedor responde: " + listaConError);
       }
 
-      currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
-      localStorage.setItem("xtream_user", JSON.stringify(currentUser));
-
-      showSpinner(true, "Procesando canales...");
       parseM3U(m3uContent);
       if (!channelsData.length) throw new Error("La lista no contiene canales");
-      finishLogin(currentUser);
+      await saveSession(currentUser);
+      await writeListCache(currentUser, m3uContent);
+      if (!document.getElementById("mainScreen") || !document.getElementById("mainScreen").classList.contains("active")) {
+        finishLogin(currentUser);
+      }
       renderCategories();
-      restoreLastChannel();
+      if (!currentlyPlayingId) restoreLastChannel();
       checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -430,6 +632,20 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 
     if (hasXtream) {
       currentServer = serverUrl;
+      const pendingUser = { username, password, server: serverUrl, isM3U: false };
+      const cachedXt = await readListCache(pendingUser);
+      if (cachedXt && !detectProviderListError(cachedXt)) {
+        parseM3U(cachedXt);
+        if (channelsData.length) {
+          currentUser = pendingUser;
+          await saveSession(currentUser);
+          finishLogin(currentUser);
+          renderCategories();
+          restoreLastChannel();
+          showSpinner(true, "Comprobando cuenta...");
+        }
+      }
+
       showSpinner(true, "Validando acceso...");
       const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
@@ -454,14 +670,16 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       }
 
       currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
-      localStorage.setItem("xtream_user", JSON.stringify(currentUser));
+      await saveSession(currentUser);
 
-      finishLogin(currentUser);
+      if (!document.getElementById("mainScreen") || !document.getElementById("mainScreen").classList.contains("active")) {
+        finishLogin(currentUser);
+      }
       setLoginStatus("Descargando canales...");
       showSpinner(true, "Descargando canales...");
       await loadM3UFromXtream();
       renderCategories();
-      restoreLastChannel();
+      if (!currentlyPlayingId) restoreLastChannel();
       if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -471,6 +689,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
   } catch (error) {
     showSpinner(false);
     setLoginStatus(error.message || "Error al iniciar sesión.");
+    const main = document.getElementById("mainScreen");
+    if (main && main.classList.contains("active") && !channelsData.length) showScreen("login");
     startRemotePolling();
     return false;
   }
@@ -536,6 +756,7 @@ function registrarServiceWorker() {
 
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
+  applyUiMode();
   initSplash();
   initChannelTools();
   registrarServiceWorker();
@@ -543,34 +764,31 @@ window.addEventListener("DOMContentLoaded", () => {
   showDeviceId();
   startRemotePolling();
 
-  let saved = null;
-  try {
-    const raw = localStorage.getItem("xtream_user");
-    if (raw) saved = JSON.parse(raw);
-  } catch (e) {}
-  if (!saved) return;
+  loadSession().then((saved) => {
+    if (!saved) return;
+    try {
+      if (saved.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = saved.server;
+      if (saved.username && saved.username !== "Invitado M3U" && document.getElementById("username")) {
+        document.getElementById("username").value = saved.username;
+      }
+      if (saved.password && document.getElementById("password")) document.getElementById("password").value = saved.password;
+      if (saved.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = saved.m3uUrl;
+    } catch (e) {}
 
-  try {
-    if (saved.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = saved.server;
-    if (saved.username && saved.username !== "Invitado M3U" && document.getElementById("username")) {
-      document.getElementById("username").value = saved.username;
-    }
-    if (saved.password && document.getElementById("password")) document.getElementById("password").value = saved.password;
-    if (saved.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = saved.m3uUrl;
-  } catch (e) {}
+    const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
+    if (!canAutoLogin) return;
 
-  const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
-  if (!canAutoLogin) return;
-
-  // Se entra solo, pero el overlay lleva botón de cancelar: antes un fallo aquí
-  // dejaba la pantalla bloqueada en "Descargando lista..." sin salida.
-  setTimeout(() => {
-    if (loginCancelled) return;
-    performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl);
-  }, 400);
+    setTimeout(() => {
+      if (loginCancelled) return;
+      performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl);
+    }, 400);
+  });
 });
 
-window.addEventListener("resize", detectDevice);
+window.addEventListener("resize", () => {
+  detectDevice();
+  paintVirtualWindow(true);
+});
 
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
@@ -1000,6 +1218,7 @@ async function loadM3UFromXtream() {
   if (!channelsData.length) {
     throw new Error("La lista no contiene canales");
   }
+  await writeListCache(currentUser, m3uContent);
 }
 
 function isStreamUrl(line) {
@@ -1184,6 +1403,10 @@ async function probeStream() {
     showToast("El canal va bien. Diagnosticar abriría otra conexión y puede cortarlo.", 5000);
     return;
   }
+  if (playbackRetryTimer) {
+    showToast("Espera: se está reconectando el canal");
+    return;
+  }
   // Cada consulta abre una conexión con el proveedor y el usuario tiene un
   // número limitado. Ni en paralelo ni en ráfaga.
   if (probeRunning) return;
@@ -1200,10 +1423,16 @@ async function probeStream() {
   if (button) button.disabled = true;
 
   const base = window.location.origin + window.location.pathname.replace("index.html", "");
-  // El modo probe informa de lo que contesta el proveedor. Preguntar por el
-  // relé normal siempre daba 200 porque su cabecera se envía antes de conocer
-  // la respuesta del origen.
-  const target = base + "stream.php?probe=1&url=" + encodeURIComponent(url);
+  let target;
+  try {
+    const href = await signedStreamHref(url);
+    target = base + href + (href.indexOf("?") >= 0 ? "&" : "?") + "probe=1";
+  } catch (e) {
+    logPlayback("diagnostico", "no se pudo firmar la consulta");
+    probeRunning = false;
+    if (button) button.disabled = false;
+    return;
+  }
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const cut = setTimeout(() => controller && controller.abort(), 15000);
 
@@ -1461,8 +1690,8 @@ function noteDebugZero() {
   clearTimeout(debugZeroTimer);
   debugZeroTimer = setTimeout(() => {
     debugZeroCount = 0;
-  }, 1600);
-  if (debugZeroCount >= 5) {
+  }, 2500);
+  if (debugZeroCount >= 8) {
     debugZeroCount = 0;
     setDebugOpen(true);
     showToast("Modo debug");
@@ -1701,21 +1930,48 @@ function buildChannelRow(channel) {
   return channelDiv;
 }
 
-function renderChannels(channels) {
-  const token = ++renderToken;
-  if (channelsContainer) channelsContainer.innerHTML = "";
-  const sorted =
-    currentCategory === FAV_NAME || currentCategory === HIST_NAME ? channels.slice() : applySort(channels);
+function channelRowHeight() {
+  if (document.body.classList.contains("is-tv")) return 64;
+  if (document.body.classList.contains("ui-large")) return 56;
+  return 52;
+}
 
-  const paint = (from) => {
-    if (token !== renderToken || !channelsContainer) return;
-    const to = Math.min(from + 80, sorted.length);
-    const frag = document.createDocumentFragment();
-    for (let i = from; i < to; i++) frag.appendChild(buildChannelRow(sorted[i]));
-    channelsContainer.appendChild(frag);
-    if (to < sorted.length) requestAnimationFrame(() => paint(to));
-  };
-  paint(0);
+function bindVirtualScroll() {
+  if (!channelsContainer || channelsContainer.dataset.virtual === "1") return;
+  channelsContainer.dataset.virtual = "1";
+  channelsContainer.addEventListener("scroll", () => paintVirtualWindow(), { passive: true });
+}
+
+function renderChannels(channels) {
+  virtualList =
+    currentCategory === FAV_NAME || currentCategory === HIST_NAME ? channels.slice() : applySort(channels);
+  virtualRange = { start: -1, end: -1 };
+  if (!channelsContainer) return;
+  bindVirtualScroll();
+  channelsContainer.scrollTop = 0;
+  paintVirtualWindow(true);
+}
+
+function paintVirtualWindow(force) {
+  if (!channelsContainer) return;
+  const h = channelRowHeight();
+  const total = virtualList.length;
+  const view = Math.max(channelsContainer.clientHeight || 0, 180);
+  const start = Math.max(0, Math.floor(channelsContainer.scrollTop / h) - 12);
+  const end = Math.min(total, Math.ceil((channelsContainer.scrollTop + view) / h) + 12);
+  if (!force && start === virtualRange.start && end === virtualRange.end) return;
+  virtualRange = { start: start, end: end };
+
+  const frag = document.createDocumentFragment();
+  const head = document.createElement("div");
+  head.style.height = start * h + "px";
+  frag.appendChild(head);
+  for (let i = start; i < end; i++) frag.appendChild(buildChannelRow(virtualList[i]));
+  const tail = document.createElement("div");
+  tail.style.height = Math.max(0, (total - end) * h) + "px";
+  frag.appendChild(tail);
+  channelsContainer.innerHTML = "";
+  channelsContainer.appendChild(frag);
 }
 
 function runChannelSearch(query) {
@@ -1990,15 +2246,22 @@ function playbackLooksAlive() {
   return !!video && !video.paused && !video.ended && video.readyState >= 3;
 }
 
-function handlePlaybackFailure() {
-  if (teardownInProgress || !currentChannelRef) return;
-  // Un reintento ya en cola hace de freno: sin esto, una ráfaga de avisos de
-  // error encadenaría varios reinicios seguidos del mismo canal.
-  if (playbackRetryTimer) return;
-  // mpegts.js y hls.js también avisan de fallos de los que se recuperan solos.
-  // Si el vídeo sigue avanzando, reiniciar cortaría una emisión que va bien.
-  if (playbackLooksAlive()) return;
+function isMpegtsStackOverflow(errorType, errorDetail, errorInfo) {
+  const blob = [errorType, errorDetail, errorInfo && errorInfo.msg, errorInfo && errorInfo.code]
+    .filter(Boolean)
+    .join(" ");
+  return /stack size exceeded/i.test(blob);
+}
 
+function handlePlaybackFailure(opts) {
+  opts = opts || {};
+  if (teardownInProgress || !currentChannelRef) return;
+  if (playbackRetryTimer) return;
+  if (!opts.forceDestroy && playbackLooksAlive()) return;
+
+  // Un demuxer reventado sigue enganchado al <video> y se come el colchón
+  // sin pedir datos nuevos. Hay que destruirlo antes de esperar el reintento.
+  stopPlayback();
   showVideoSpinner(false);
 
   if (playbackRetries >= PLAYBACK_RETRY_DELAYS.length) {
@@ -2044,6 +2307,7 @@ function playChannel(channel) {
 
 function startPlayback(channel) {
   if (!video) return;
+  const gen = ++playGen;
   showVideoSpinner(true);
   stopPlayback();
   updateActivity(channel);
@@ -2056,11 +2320,10 @@ function startPlayback(channel) {
   const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
   const bufferSec = getEngineBufferSeconds();
 
-  // Solo las ramas con MSE controlan su propio buffer; en el reproductor del
-  // sistema pausar no garantiza que siga llenando.
   let prebufferEnabled = false;
 
   const tryAutoPlay = () => {
+    if (gen !== playGen) return;
     ensureInsideBuffer();
     const onStarted = () => {
       if (prebufferEnabled) beginPrebufferFill(channel);
@@ -2071,8 +2334,6 @@ function startPlayback(channel) {
     if (playPromise !== undefined) {
       playPromise.then(onStarted).catch((err) => {
         showVideoSpinner(false);
-        // Al reanudar el último canal no hay gesto previo del usuario y el
-        // navegador bloquea el arranque automático.
         if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
       });
     } else {
@@ -2080,56 +2341,62 @@ function startPlayback(channel) {
     }
   };
 
-  const mseSupported = window.mpegts && mpegts.getFeatureList().mseLivePlayback;
+  const begin = async () => {
+    if (gen !== playGen) return;
+    const mseSupported = window.mpegts && mpegts.getFeatureList().mseLivePlayback;
 
-  if (isTs && mseSupported) {
-    const proxiedTsUrl = currentDomain + "stream.php?url=" + encodeURIComponent(originalUrl);
-    video.setAttribute("data-active-url", proxiedTsUrl);
-    mpegtsPlayer = mpegts.createPlayer(
-      { type: "mse", isLive: true, url: proxiedTsUrl },
-      {
-        enableWorker: true,
-        enableStashBuffer: true,
-        // Este colchón es lo que absorbe los altibajos de la conexión. Bajarlo
-        // acelera el arranque pero deja la reproducción pegada al borde del
-        // directo y cortándose, así que manda la estabilidad.
-        // Es un buffer de entrada en bytes, no de reproducción: agrandarlo solo
-        // retrasa el primer fotograma. Se deja en el valor por defecto.
-        stashInitialSize: 384 * 1024,
-        // El perseguidor de latencia de mpegts.js salta al borde del directo en
-        // cuanto hay unos segundos acumulados, que es justo el colchón que
-        // evita los cortes. Se desactiva y el límite lo pone enforceLiveDelay,
-        // que solo interviene si el retraso se dispara.
-        liveBufferLatencyChasing: false,
-      }
-    );
-    prebufferEnabled = true;
-    mpegtsPlayer.attachMediaElement(video);
-    mpegtsPlayer.load();
-    tryAutoPlay();
-    mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
-      const info = errorInfo && (errorInfo.msg || errorInfo.code) ? " · " + (errorInfo.code || "") + " " + (errorInfo.msg || "") : "";
-      logPlayback("error mpegts", errorType + " / " + errorDetail + info);
-      handlePlaybackFailure();
+    if (isTs && mseSupported) {
+      const proxiedTsUrl = currentDomain + (await signedStreamHref(originalUrl));
+      if (gen !== playGen) return;
+      video.setAttribute("data-active-url", proxiedTsUrl);
+      mpegtsPlayer = mpegts.createPlayer(
+        { type: "mse", isLive: true, url: proxiedTsUrl },
+        {
+          enableWorker: true,
+          enableStashBuffer: true,
+          stashInitialSize: 384 * 1024,
+          liveBufferLatencyChasing: false,
+        }
+      );
+      prebufferEnabled = true;
+      mpegtsPlayer.attachMediaElement(video);
+      mpegtsPlayer.load();
+      tryAutoPlay();
+      mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+        const info = errorInfo && (errorInfo.msg || errorInfo.code) ? " · " + (errorInfo.code || "") + " " + (errorInfo.msg || "") : "";
+        logPlayback("error mpegts", errorType + " / " + errorDetail + info);
+        const stack = isMpegtsStackOverflow(errorType, errorDetail, errorInfo);
+        if (stack) logPlayback("demuxer", "mpegts se desbordó; se destruye el motor antes de reintentar");
+        handlePlaybackFailure({ forceDestroy: stack });
+      });
+      logPlayback("motor", "mpegts.js · buffer " + bufferSec + "s · " + maskUrl(proxiedTsUrl));
+      return;
+    }
+
+    if (gen !== playGen) return;
+    startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, bufferSec, tryAutoPlay, () => {
+      prebufferEnabled = true;
     });
-    logPlayback("motor", "mpegts.js · buffer " + bufferSec + "s · " + maskUrl(proxiedTsUrl));
-  } else if (isTs && !mseSupported) {
+  };
+
+  begin();
+}
+
+function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, bufferSec, tryAutoPlay, enablePrebuffer) {
+  if (isTs && !mseSupported) {
     const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
-    // Aquí manda el reproductor del sistema: no expone control sobre cuánto
-    // acumula, así que esperar solo retrasaría la imagen sin ganar colchón.
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
     logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · sin prebúfer · " + maskUrl(iosUrl));
-  } else if (isM3u8) {
+    return;
+  }
+  if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        // Un poco de margen sobre el objetivo: si el techo fuese exactamente el
-        // objetivo, hls.js dejaría de cargar justo antes de alcanzarlo y el
-        // prebúfer esperaría hasta agotar el tiempo.
         maxBufferLength: bufferSec + 5,
         maxMaxBufferLength: bufferSec * 2 + 10,
         liveSyncDurationCount: 3,
@@ -2138,7 +2405,7 @@ function startPlayback(channel) {
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
       logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(originalUrl));
-      prebufferEnabled = true;
+      enablePrebuffer();
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         refreshTrackSelectors();
         logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
@@ -2154,9 +2421,6 @@ function startPlayback(channel) {
         if (data.url) parts.push(maskUrl(data.url));
         logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
         if (!data.fatal) return;
-        // Los fallos de red y de medio tienen recuperación propia en hls.js.
-        // Se limita el número de intentos para no quedarse en bucle si el
-        // origen está caído; a partir de ahí se reinicia el canal entero.
         if (hlsRecoveries < 3) {
           hlsRecoveries++;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -2178,12 +2442,12 @@ function startPlayback(channel) {
       tryAutoPlay();
       logPlayback("motor", "nativo (hls.js no soportado) · " + maskUrl(originalUrl));
     }
-  } else {
-    video.setAttribute("data-active-url", originalUrl);
-    video.src = originalUrl;
-    tryAutoPlay();
-    logPlayback("motor", "nativo (formato no reconocido) · " + maskUrl(originalUrl));
+    return;
   }
+  video.setAttribute("data-active-url", originalUrl);
+  video.src = originalUrl;
+  tryAutoPlay();
+  logPlayback("motor", "nativo (formato no reconocido) · " + maskUrl(originalUrl));
 }
 
 /********** ESTADO DEL <video> **********/
@@ -2534,6 +2798,9 @@ function applyFit(index) {
   localStorage.setItem(FIT_KEY, mode.value);
   return mode;
 }
+
+const displayBtn = document.getElementById("displayBtn");
+if (displayBtn) displayBtn.addEventListener("click", cycleUiMode);
 
 const aspectBtn = document.getElementById("aspectBtn");
 if (aspectBtn) {
