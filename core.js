@@ -1547,6 +1547,8 @@ function renderChannels(channels) {
       if (currentlyPlayingId === channel.id) toggleFullscreen();
       else selectChannel(channel);
     });
+    if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
+    else if (peekLastChannelId() === channel.id) channelDiv.classList.add("last");
 
     if (channelsContainer) channelsContainer.appendChild(channelDiv);
   });
@@ -2022,6 +2024,9 @@ const stopBtn = document.getElementById("stopBtn");
 // baches, así que hay un tope; por debajo de él el colchón es bienvenido.
 const MAX_LIVE_DELAY = 90;
 const LIVE_EDGE_MARGIN = 1.5;
+// En pausa el origen sigue mandando y el colchón puede crecer sin fin: eso
+// gasta la conexión de la cuenta y, al reanudar, deja un retraso enorme.
+const MAX_PAUSED_BUFFER_SECONDS = 15 * 60;
 
 function setStatusLevel(level) {
   if (statusDot) statusDot.className = "status-dot " + level;
@@ -2039,13 +2044,18 @@ function goLive() {
 }
 
 function enforceLiveDelay() {
-  // Mientras está en pausa se deja acumular a propósito: es lo que crea el
-  // colchón. El tope solo se aplica cuando se está reproduciendo.
-  if (!video || video.paused) return;
-  if (getBufferAhead() > MAX_LIVE_DELAY) goLive();
+  if (!video) return;
+  const ahead = getBufferAhead();
+  if (video.paused) {
+    if (ahead > MAX_PAUSED_BUFFER_SECONDS) {
+      stopChannel("Colchón de 15 min: se ha parado para no seguir descargando");
+    }
+    return;
+  }
+  if (ahead > MAX_LIVE_DELAY) goLive();
 }
 
-function stopChannel() {
+function stopChannel(reason) {
   if (!currentlyPlayingId && !currentChannelRef) return;
   clearPlaybackRetry();
   currentChannelRef = null;
@@ -2054,13 +2064,16 @@ function stopChannel() {
   showVideoSpinner(false);
   sendActivity("stop");
   activeConnection = null;
-  document.querySelectorAll(".channel-item").forEach((item) => item.classList.remove("playing"));
+  document.querySelectorAll(".channel-item").forEach((item) => {
+    item.classList.remove("playing");
+    if (peekLastChannelId() === item.dataset.id) item.classList.add("last");
+  });
   if (epgNowEl) epgNowEl.textContent = "--:--";
   if (epgNextEl) epgNextEl.textContent = "--:--";
   renderEpgTimeline();
   updatePlaybackStatus();
-  logPlayback("parado", "detenido por el usuario, conexión liberada");
-  showToast("Canal detenido");
+  logPlayback("parado", reason || "detenido por el usuario, conexión liberada");
+  showToast(reason || "Canal detenido");
 }
 
 if (goLiveBtn) goLiveBtn.addEventListener("click", goLive);
@@ -2129,11 +2142,21 @@ function rememberLastChannel(channel) {
   } catch (e) {}
 }
 
+function peekLastChannelId() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAST_CHANNEL_KEY) || "null");
+    return saved && saved.id ? String(saved.id) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 function selectChannel(channel) {
   if (!channel) return;
   currentlyPlayingId = channel.id;
   document.querySelectorAll(".channel-item").forEach((item) => {
     item.classList.toggle("playing", item.dataset.id === channel.id);
+    item.classList.remove("last");
   });
   playChannel(channel);
   refreshPlayerEPG();
@@ -2141,6 +2164,9 @@ function selectChannel(channel) {
 }
 
 function restoreLastChannel() {
+  // Solo deja vista la categoría y el canal de la última sesión. Arrancar el
+  // stream aquí gastaba una conexión del proveedor (y minutos de espera) en
+  // un canal que a menudo ni siquiera se llega a ver.
   try {
     const raw = localStorage.getItem(LAST_CHANNEL_KEY);
     if (!raw) return false;
@@ -2150,10 +2176,21 @@ function restoreLastChannel() {
 
     const category = saved.cat && categoriesData[saved.cat] ? saved.cat : channel.category;
     if (category && categoriesData[category]) selectCategory(category);
-    selectChannel(channel);
 
-    const el = channelsContainer ? channelsContainer.querySelector(".channel-item.playing") : null;
-    if (el) el.scrollIntoView({ block: "nearest" });
+    const el = channelsContainer
+      ? channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(channel.id)) + '"]')
+      : null;
+    if (el) {
+      el.classList.add("last");
+      el.scrollIntoView({ block: "nearest" });
+    }
+    const items = Array.from(document.querySelectorAll(".channel-item"));
+    const idx = items.indexOf(el);
+    if (idx >= 0) {
+      currentFocus.col = 1;
+      currentFocus.row = idx;
+      updateCursorVisuals();
+    }
     return true;
   } catch (e) {
     return false;
@@ -2743,7 +2780,9 @@ function focusChannelList() {
   currentFocus.col = 1;
   const items = Array.from(document.querySelectorAll(".channel-item"));
   const playing = items.findIndex((el) => el.classList.contains("playing"));
+  const last = items.findIndex((el) => el.classList.contains("last"));
   if (playing >= 0) currentFocus.row = playing;
+  else if (last >= 0) currentFocus.row = last;
   updateCursorVisuals();
 }
 
