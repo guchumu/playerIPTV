@@ -22,7 +22,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-    <link rel="stylesheet" href="style.css?v=20260818h" />
+    <link rel="stylesheet" href="style.css?v=20260818i" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -40,40 +40,47 @@
 
     <div id="loginScreen" class="screen active">
         <div class="login-container">
-            <img src="logo.png" alt="" class="login-logo" />
-            <h1>StreamBox IPTV</h1>
-            <p class="build-tag">v20260818h</p>
-
-            <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
-
-            <div class="remote-upload-box">
-                <p>Escanea con el móvil para cargar tu lista:</p>
-                <div class="qr-wrap">
-                    <canvas id="uploadQr" class="upload-qr" width="180" height="180" aria-label="Código QR para cargar la lista"></canvas>
-                </div>
-                <p class="qr-hint">O entra a mano en:</p>
-                <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
-                <p class="qr-hint">Tu código de dispositivo (Device ID):</p>
-                <div id="deviceIdDisplay" class="device-id">Cargando...</div>
+            <div class="login-head">
+                <img src="logo.png" alt="" class="login-logo" />
+                <h1>StreamBox IPTV</h1>
+                <p class="build-tag">v20260818i</p>
             </div>
 
-            <div class="login-divider">— O ESCRÍBELA MANUALMENTE —</div>
+            <div class="login-col-side">
+                <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
 
-            <form id="loginForm" autocomplete="on">
-                <div class="input-group">
-                    <label>Acceso Xtream Codes</label>
-                    <input type="text" id="serverUrl" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" />
-                    <input type="text" id="username" name="username" placeholder="Usuario" autocomplete="username" />
-                    <input type="password" id="password" name="password" placeholder="Contraseña" autocomplete="current-password" />
+                <div class="remote-upload-box">
+                    <p>Escanea con el móvil para cargar tu lista:</p>
+                    <div class="qr-wrap">
+                        <canvas id="uploadQr" class="upload-qr" width="180" height="180" aria-label="Código QR para cargar la lista"></canvas>
+                    </div>
+                    <p class="qr-hint">O entra a mano en:</p>
+                    <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
+                    <p class="qr-hint">Tu código de dispositivo (Device ID):</p>
+                    <div id="deviceIdDisplay" class="device-id">Cargando...</div>
                 </div>
-                <div class="login-divider">— O BIEN —</div>
-                <div class="input-group">
-                    <label>Lista M3U Directa</label>
-                    <input type="text" id="m3uUrl" name="m3uUrl" placeholder="http://servidor.com:8080/get.php?..." />
-                </div>
-                <button type="submit" id="loginSubmitBtn">Cargar Contenido</button>
-                <div id="loginError" class="error"></div>
-            </form>
+            </div>
+
+            <div class="login-col-main">
+                <div class="login-divider login-or-write">— O ESCRÍBELA MANUALMENTE —</div>
+
+                <form id="loginForm" autocomplete="on">
+                    <div class="input-group">
+                        <label>Acceso Xtream Codes</label>
+                        <input type="text" id="serverUrl" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" />
+                        <input type="text" id="username" name="username" placeholder="Usuario" autocomplete="username" />
+                        <input type="password" id="password" name="password" placeholder="Contraseña" autocomplete="current-password" />
+                    </div>
+                    <div class="login-divider">— O BIEN —</div>
+                    <div class="input-group">
+                        <label>Lista M3U Directa</label>
+                        <input type="text" id="m3uUrl" name="m3uUrl" placeholder="http://servidor.com:8080/get.php?..." />
+                    </div>
+                    <button type="submit" id="loginSubmitBtn">Cargar Contenido</button>
+                    <div id="loginError" class="error"></div>
+                </form>
+                <p class="login-tv-hint">Flechas para mover · OK para escribir · Atrás para volver</p>
+            </div>
             <div id="globalSpinner" class="global-spinner" hidden aria-live="polite">
                 <div class="spinner"></div>
                 <p id="globalSpinnerText">Cargando...</p>
@@ -223,6 +230,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260818h"></script>
+    <script src="core.js?v=20260818i"></script>
 </body>
 </html>

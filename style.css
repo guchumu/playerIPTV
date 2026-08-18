@@ -113,6 +113,7 @@ body.is-tv .splash-hint-tv { display: inline; }
   margin: 0 auto 1rem;
 }
 .login-container h1 { font-size: 1.8rem; margin-bottom: 0.35rem; text-align: center; }
+.login-tv-hint { display: none; }
 .build-tag {
   text-align: center;
   font-size: 0.7rem;
@@ -260,10 +261,18 @@ body.is-tv .splash-hint-tv { display: inline; }
   cursor: pointer;
   min-height: 44px;
 }
-#loginForm input:focus, #loginForm button:focus {
+#loginForm input:focus, #loginForm button:focus,
+#loginForm input:focus-visible, #loginForm button:focus-visible {
   outline: 3px solid #fbbf24;
   background: #1e293b;
   outline-offset: 2px;
+}
+#loginForm input.login-focus,
+#loginForm button.login-focus {
+  outline: 4px solid #fbbf24;
+  outline-offset: 3px;
+  background: #1e293b;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.4);
 }
 
 /********** APP PRINCIPAL **********/
@@ -979,12 +988,114 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
 body.is-tv { font-size: 20px; }
-body.is-tv .login-container { min-width: 480px; max-width: 560px; padding: 3rem 3.5rem; }
-body.is-tv .login-container h1,
+body.is-tv #loginScreen {
+  overflow: hidden;
+  padding: 1.1rem 1.4rem;
+  align-items: center;
+  justify-content: center;
+}
+body.is-tv .login-container {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 1.5rem;
+  row-gap: 0.35rem;
+  align-items: stretch;
+  width: min(1100px, calc(100vw - 40px));
+  min-width: min(820px, calc(100vw - 40px));
+  max-width: 1100px;
+  max-height: calc(100dvh - 36px);
+  padding: 1.15rem 1.4rem 1.05rem;
+  overflow: hidden;
+}
+body.is-tv .login-head {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+body.is-tv .login-col-main {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+body.is-tv .login-col-side {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.7rem;
+}
+body.is-tv .login-logo {
+  width: 48px;
+  height: 48px;
+  margin: 0 0 0.35rem;
+}
+body.is-tv .login-container h1 {
+  font-size: 1.45rem;
+  margin-bottom: 0.1rem;
+  text-align: left;
+}
+body.is-tv .build-tag {
+  text-align: left;
+  margin-bottom: 0.2rem;
+  font-size: 0.68rem;
+}
+body.is-tv .login-or-write { display: none; }
+body.is-tv .login-divider {
+  margin: 0.35rem 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  opacity: 0.45;
+}
+body.is-tv .input-group { gap: 6px; margin-bottom: 0.55rem; }
+body.is-tv .input-group label { font-size: 0.72rem; }
 body.is-tv #loginForm input,
-body.is-tv #loginForm button { font-size: 1.35rem; }
-body.is-tv #loginForm input,
-body.is-tv #loginForm button { min-height: 56px; padding: 0.9rem 1rem; }
+body.is-tv #loginForm button {
+  font-size: 1.12rem;
+  min-height: 48px;
+  padding: 0.55rem 0.8rem;
+}
+body.is-tv .install-btn { min-height: 48px; margin-bottom: 0; font-size: 0.95rem; }
+body.is-tv .remote-upload-box {
+  padding: 0.85rem 0.9rem;
+  flex: 0 0 auto;
+}
+body.is-tv .remote-upload-box p { font-size: 0.82rem; margin: 4px 0; }
+body.is-tv .qr-wrap { margin: 6px 0; }
+body.is-tv .upload-qr {
+  width: 200px;
+  height: 200px;
+  max-width: 100%;
+  padding: 6px;
+}
+body.is-tv .upload-url { font-size: 0.82rem; margin-bottom: 6px; }
+body.is-tv .device-id {
+  font-size: 1.7rem;
+  letter-spacing: 3px;
+  padding: 8px 10px;
+}
+body.is-tv .login-tv-hint {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  letter-spacing: 0.01em;
+}
+body.is-tv .error { font-size: 0.85rem; margin-top: 0.35rem; }
+body.is-tv .global-spinner {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+@media (max-height: 800px) {
+  body.is-tv .login-logo { display: none; }
+  body.is-tv .upload-qr { width: 160px; height: 160px; }
+  body.is-tv .device-id { font-size: 1.45rem; }
+}
 body.is-tv .compact-header { padding: 0.9rem 1.4rem; font-size: 1.05rem; }
 body.is-tv .header-left h1 { font-size: 1.4rem; }
 body.is-tv .header-right button {
@@ -1036,7 +1147,6 @@ body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 44px; heigh
 body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
 body.is-tv .channel-search,
 body.is-tv .sort-btn { min-height: 48px; font-size: 1.05rem; }
-body.is-tv .device-id { font-size: 2.4rem; }
 
 /********** MÓVILES: vídeo arriba, chips, lista de canales **********/
 @media (max-width: 768px) {

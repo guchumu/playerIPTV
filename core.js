@@ -251,6 +251,7 @@ function showScreen(name) {
     main.classList.toggle("active", !showLogin);
     main.style.display = showLogin ? "none" : "flex";
   }
+  if (showLogin) initTvLoginFocus();
 }
 
 /********** INTRO **********/
@@ -460,11 +461,13 @@ function dismissSplash(instant) {
   if (html.classList.contains("splash-done")) return;
   if (!html.classList.contains("needs-splash")) {
     html.classList.add("splash-done");
+    initTvLoginFocus();
     return;
   }
   if (instant) {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
+    initTvLoginFocus();
     return;
   }
   if (html.classList.contains("splash-leaving")) return;
@@ -472,6 +475,7 @@ function dismissSplash(instant) {
   window.setTimeout(() => {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
+    initTvLoginFocus();
   }, 600);
 }
 
@@ -875,6 +879,7 @@ window.addEventListener("DOMContentLoaded", () => {
   prepararInstalacion();
   showDeviceId();
   startRemotePolling();
+  initTvLoginFocus();
 
   loadSession().then((saved) => {
     if (!saved) return;
@@ -900,6 +905,7 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("resize", () => {
   detectDevice();
   paintVirtualWindow(true);
+  if (isTvLayout() && isLoginScreenActive()) initTvLoginFocus();
 });
 
 const loginForm = document.getElementById("loginForm");
@@ -3430,15 +3436,165 @@ window.addEventListener("beforeunload", () => {
 });
 
 /********** NAVEGACIÓN SMART TV (MANDO COMPLETO) **********/
-let loginFocusIndex = -1;
 const loginElements = ["serverUrl", "username", "password", "m3uUrl", "loginSubmitBtn"];
+let loginFocusIndex = 0;
+let loginTyping = false;
 
 const BACK_KEYS = ["Escape", "Backspace", "BrowserBack", "GoBack"];
 // El botón Atrás de los mandos de Tizen y webOS llega con estos códigos.
 const BACK_KEYCODES = [10009, 461];
+const OK_KEYCODES = [13, 23];
 
 function isTypingTarget(target) {
   return !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+}
+
+function isConfirmKey(e) {
+  return (
+    e.key === "Enter" ||
+    e.key === "OK" ||
+    e.key === "Select" ||
+    e.key === "NumpadEnter" ||
+    OK_KEYCODES.includes(e.keyCode)
+  );
+}
+
+function isLoginScreenActive() {
+  const loginScreen = document.getElementById("loginScreen");
+  return !!(loginScreen && loginScreen.style.display !== "none" && loginScreen.classList.contains("active"));
+}
+
+function getLoginControl(index) {
+  const i = index == null ? loginFocusIndex : index;
+  return document.getElementById(loginElements[i]);
+}
+
+function clearLoginFocusClass() {
+  loginElements.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("login-focus");
+  });
+}
+
+function applyLoginBrowseHighlight() {
+  clearLoginFocusClass();
+  if (loginFocusIndex < 0) loginFocusIndex = 0;
+  if (loginFocusIndex > loginElements.length - 1) loginFocusIndex = loginElements.length - 1;
+  const el = getLoginControl();
+  if (!el) return;
+  el.classList.add("login-focus");
+  try {
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  } catch (err) {}
+}
+
+function enterLoginBrowseMode(index) {
+  loginTyping = false;
+  if (typeof index === "number") loginFocusIndex = index;
+  const active = document.activeElement;
+  if (active && loginElements.indexOf(active.id) >= 0) {
+    try {
+      active.blur();
+    } catch (err) {}
+  }
+  applyLoginBrowseHighlight();
+}
+
+function enterLoginTypingMode() {
+  const el = getLoginControl();
+  if (!el) return;
+  if (el.id === "loginSubmitBtn") {
+    el.click();
+    return;
+  }
+  loginTyping = true;
+  applyLoginBrowseHighlight();
+  el.focus();
+}
+
+function initTvLoginFocus() {
+  if (!isTvLayout() || !isLoginScreenActive()) return;
+  enterLoginBrowseMode(loginFocusIndex >= 0 ? loginFocusIndex : 0);
+}
+
+function handleTvLoginKey(e) {
+  const typingNow = loginTyping && isTypingTarget(e.target);
+
+  if (isConfirmKey(e)) {
+    e.preventDefault();
+    if (loginFocusIndex < 0) loginFocusIndex = 0;
+    const id = loginElements[loginFocusIndex];
+    if (id === "loginSubmitBtn") {
+      const btn = document.getElementById("loginSubmitBtn");
+      if (btn) btn.click();
+      return true;
+    }
+    if (typingNow) {
+      const next = loginFocusIndex + 1;
+      enterLoginBrowseMode(Math.min(next, loginElements.length - 1));
+      return true;
+    }
+    enterLoginTypingMode();
+    return true;
+  }
+
+  if (typingNow) return true;
+
+  if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+    e.preventDefault();
+    loginFocusIndex = Math.min(loginFocusIndex + 1, loginElements.length - 1);
+    enterLoginBrowseMode();
+    return true;
+  }
+  if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+    e.preventDefault();
+    loginFocusIndex = Math.max(loginFocusIndex - 1, 0);
+    enterLoginBrowseMode();
+    return true;
+  }
+  return false;
+}
+
+function handleDesktopLoginKey(e) {
+  if (e.key !== "Enter") e.preventDefault();
+
+  if (e.key === "ArrowDown") {
+    loginFocusIndex = Math.min(loginFocusIndex + 1, loginElements.length - 1);
+  } else if (e.key === "ArrowUp") {
+    loginFocusIndex = Math.max(loginFocusIndex - 1, 0);
+  } else if (isConfirmKey(e)) {
+    if (loginFocusIndex >= 0) {
+      const el = getLoginControl();
+      if (el) el.focus();
+      if (loginElements[loginFocusIndex] === "loginSubmitBtn") {
+        const btn = document.getElementById("loginSubmitBtn");
+        if (btn) btn.click();
+      }
+    }
+    return;
+  }
+  if (loginFocusIndex >= 0) {
+    const el = getLoginControl();
+    if (el) el.focus();
+  }
+}
+
+const loginFormEl = document.getElementById("loginForm");
+if (loginFormEl) {
+  loginFormEl.addEventListener("focusin", (e) => {
+    if (!isTvLayout() || !isLoginScreenActive()) return;
+    const idx = loginElements.indexOf(e.target && e.target.id);
+    if (idx < 0) return;
+    if (loginTyping) {
+      loginFocusIndex = idx;
+      applyLoginBrowseHighlight();
+      return;
+    }
+    loginFocusIndex = idx;
+    requestAnimationFrame(() => {
+      if (!loginTyping) enterLoginBrowseMode(loginFocusIndex);
+    });
+  });
 }
 
 // Al salir de pantalla completa el cursor vuelve a la lista, sobre el canal
@@ -3482,7 +3638,18 @@ document.addEventListener("keydown", (e) => {
 
   if (BACK_KEYS.includes(e.key) || BACK_KEYCODES.includes(e.keyCode)) {
     // Backspace dentro de un campo tiene que seguir borrando texto.
-    if (e.key === "Backspace" && isTypingTarget(e.target)) return;
+    if (e.key === "Backspace" && isTypingTarget(e.target)) {
+      if (isTvLayout() && isLoginScreenActive() && !String(e.target.value || "")) {
+        e.preventDefault();
+        enterLoginBrowseMode(loginFocusIndex);
+      }
+      return;
+    }
+    if (isTvLayout() && isLoginScreenActive() && (loginTyping || isTypingTarget(e.target))) {
+      e.preventDefault();
+      enterLoginBrowseMode(loginFocusIndex);
+      return;
+    }
     if (isFullscreen()) {
       e.preventDefault();
       exitFullscreen();
@@ -3500,20 +3667,30 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === " " || e.key === "MediaPlayPause" || e.key === "MediaPlay") {
-    if (isTypingTarget(e.target) || !video) return;
+    if (isLoginScreenActive() || isTypingTarget(e.target) || !video) return;
     e.preventDefault();
     if (video.paused) video.play();
     else video.pause();
     return;
   }
 
-  const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"];
-  if (!validKeys.includes(e.key)) return;
+  if (isLoginScreenActive()) {
+    if (isTvLayout()) {
+      handleTvLoginKey(e);
+      return;
+    }
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !isConfirmKey(e)) return;
+    handleDesktopLoginKey(e);
+    return;
+  }
+
+  const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "OK", "Select"];
+  if (!validKeys.includes(e.key) && !isConfirmKey(e)) return;
 
   const fullscreen = isFullscreen();
 
   if (fullscreen || currentFocus.col === 2) {
-    if (e.key === "Enter") {
+    if (isConfirmKey(e)) {
       e.preventDefault();
       if (fullscreen) {
         exitFullscreen();
@@ -3556,29 +3733,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  const loginScreen = document.getElementById("loginScreen");
-
-  if (loginScreen && loginScreen.style.display !== "none" && loginScreen.classList.contains("active")) {
-    if (e.key !== "Enter") e.preventDefault();
-
-    if (e.key === "ArrowDown") {
-      loginFocusIndex = Math.min(loginFocusIndex + 1, loginElements.length - 1);
-    } else if (e.key === "ArrowUp") {
-      loginFocusIndex = Math.max(loginFocusIndex - 1, 0);
-    } else if (e.key === "Enter") {
-      if (loginFocusIndex >= 0) {
-        document.getElementById(loginElements[loginFocusIndex]).focus();
-        if (loginElements[loginFocusIndex] === "loginSubmitBtn") document.getElementById("loginSubmitBtn").click();
-      }
-      return;
-    }
-    if (loginFocusIndex >= 0) {
-      document.getElementById(loginElements[loginFocusIndex]).focus();
-    }
-    return;
-  }
-
-  if (e.key !== "Enter") e.preventDefault();
+  if (e.key !== "Enter" && !isConfirmKey(e)) e.preventDefault();
 
   const categories = document.querySelectorAll(".category-btn");
   const channels = document.querySelectorAll(".channel-item");
@@ -3608,7 +3763,7 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "ArrowUp") {
     if (currentFocus.col === 0 && currentFocus.row > 0) currentFocus.row--;
     else if (currentFocus.col === 1 && currentFocus.row > 0) currentFocus.row--;
-  } else if (e.key === "Enter") {
+  } else if (isConfirmKey(e)) {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
       if (isTvLayout()) enterTvChannelsColumn();
       else {
