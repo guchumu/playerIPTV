@@ -22,4 +22,14 @@ Publica esta carpeta en un PHP + MySQL (Apache/nginx).
 
 ## Apps nativas
 
-Ver `native/README.md` (Capacitor: `com.guchumu.playeriptv`). En este commit no hay APK/IPA firmados: hay que generarlos con Android Studio / Xcode.
+Ver `native/README.md` (Capacitor: `com.guchumu.playeriptv`).
+
+Instalación en Fire Stick / Android TV / Android: **siempre** la misma URL,
+aunque el APK de dentro cambie de versión:
+
+**https://acortador.vip/player/downloads/tv.apk**
+
+IPA de iOS (mismo nombre siempre; sin certificado de Apple no se instala en un iPhone):
+
+**https://acortador.vip/player/downloads/ios.ipa**
+

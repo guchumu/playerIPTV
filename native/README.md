@@ -15,8 +15,13 @@ servidores de GitHub, que ya traen el SDK de Android:
 
 1. Entra en el repositorio en GitHub → pestaña **Actions**.
 2. Elige el flujo **APK Android TV** → botón **Run workflow**.
-3. Cuando termine (unos 5 minutos), abre la ejecución y descarga el artefacto
-   `streambox-tv-1.0.N.apk`.
+3. Cuando termine (unos 5 minutos), el archivo para instalar es **siempre**
+   el mismo, aunque la versión de dentro cambie:
+
+   **https://acortador.vip/player/downloads/tv.apk**
+
+   En Downloader del Fire Stick se escribe esa dirección. No uses
+   `streambox-tv-1.0.N.apk` ni la URL de GitHub Releases.
 
 La primera ejecución también publica un artefacto llamado
 `clave-de-firma-GUARDAR-COMO-SECRETO`. **Descárgalo y guarda su contenido** en
@@ -29,7 +34,7 @@ Para publicar una versión descargable, crea una etiqueta y el APK se adjunta
 solo a la Release:
 
 ```bash
-git tag v1.0.2 && git push origin v1.0.2
+git tag v1.0.3 && git push origin v1.0.3
 ```
 
 ## Cómo se instala (Fire Stick y móvil Android)
@@ -39,8 +44,11 @@ televisor leanback es opcional, así que también aparece en el cajón del móvi
 
 1. Permitir apps de origen desconocido (Ajustes → Seguridad).
 2. En Fire Stick, instala **Downloader** desde la tienda de Amazon.
-3. En Downloader (o en el móvil, descargando el archivo) abre
-   `acortador.vip/player/downloads/tv.apk`.
+3. En Downloader (o en el móvil, descargando el archivo) abre **siempre**
+   `https://acortador.vip/player/downloads/tv.apk`.
+
+   Esa URL no cambia al publicar otra versión. Vuelve a descargar el mismo
+   enlace; no hace falta buscar un APK nuevo con otro nombre.
 
 No hace falta Android Studio ni Java en tu ordenador: el APK lo firma GitHub
 Actions. Con un PC cerca y el televisor en modo desarrollador también sirve
@@ -87,13 +95,37 @@ app nativa abre ExoPlayer (Media3) a pantalla completa y reproduce el mismo
 `stream.php` (TS) o la URL HLS. En el navegador y en la PWA se sigue usando
 `<video>` + mpegts.js.
 
-`tools/patch_android_tv.py` copia el plugin `NativePlayer`, la Activity del
+`tools/patch_android_tv.py` copia el plugin `NativePlayer`, el plugin
+`StreamBox` (detecta leanback y lo inyecta en JS), la Activity del
 reproductor y las dependencias Media3 justo después de `npx cap add android`.
 
 ## iOS
 
-Un IPA instalable requiere certificado y perfil de Apple Developer, que no
-están en este repositorio. Con una cuenta de pago: `npx cap add ios`,
-`npx cap open ios`, Signing & Capabilities → tu Team, Product → Archive. En
-`ios/App/App/Info.plist` hay que permitir HTTP con `NSAppTransportSecurity` →
-`NSAllowsArbitraryLoads`.
+El IPA lo compilan los runners macOS de GitHub (no hace falta Xcode en el Mac):
+
+1. En el repositorio → pestaña **Actions** → flujo **IPA iOS** → **Run workflow**.
+   También vale crear una etiqueta: `git tag ios-1 && git push origin ios-1`.
+2. El artefacto se llama siempre **`ios.ipa`**. El flujo lo copia a
+   `downloads/ios.ipa` en `main` para la URL estable
+   `https://acortador.vip/player/downloads/ios.ipa`.
+3. `tools/patch_ios.py` activa `NSAllowsArbitraryLoads` (streams HTTP de Xtream)
+   justo después de `npx cap add ios`.
+
+### Firma de Apple (imprescindible para instalar en un iPhone)
+
+Sin cuenta de **Apple Developer de pago** y sin estos secretos
+(Settings → Secrets and variables → Actions) el flujo genera un `ios.ipa`
+**sin firmar**. Ese archivo **no se instala** en un iPhone normal: no es como el
+APK de Android, que sí se sideloadea con Downloader.
+
+Secretos:
+
+- `IOS_CERTIFICATE_BASE64` — certificado `.p12` en base64
+- `IOS_CERTIFICATE_PASSWORD` — contraseña del p12
+- `IOS_PROVISION_BASE64` — perfil `.mobileprovision` en base64
+- `IOS_TEAM_ID` — Team ID de la cuenta
+
+Con esos secretos el flujo hace `xcodebuild archive` + export firmado (ad-hoc,
+development o enterprise según el perfil). Para instalarlo: dispositivos
+registrados en el perfil, TestFlight, o herramientas que **re-firman**
+(AltStore, Sideloadly). El IPA sin firma de este repo no sustituye eso.

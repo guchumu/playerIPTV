@@ -51,6 +51,10 @@ let epgLastStatus = "sin intentar";
 let loginCancelled = false;
 let teardownInProgress = false;
 let teardownTimer = null;
+let liveSession = false;
+let logoutRequested = false;
+let remoteLoginBusy = false;
+let remotePollGen = 0;
 const EPG_RETRY_DELAYS = [8000, 20000, 45000, 90000, 180000, 300000];
 let channelById = new Map();
 let pollingInterval = null;
@@ -105,21 +109,64 @@ function setLoginStatus(message) {
   if (loginError) loginError.textContent = message || "";
 }
 
+function nativeTvFlag() {
+  try {
+    const n = window.StreamBoxNative;
+    if (n && typeof n.isTv !== "undefined") return !!n.isTv;
+  } catch (e) {}
+  return null;
+}
+
+function isNativeApp() {
+  try {
+    const cap = window.Capacitor;
+    if (cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : cap.isNative)) return true;
+  } catch (e) {}
+  try {
+    const n = window.StreamBoxNative;
+    if (n && (n.hasExo || n.exo)) return true;
+  } catch (e) {}
+  return false;
+}
+
 function detectDevice() {
   const ua = navigator.userAgent || "";
+  const nativeTv = nativeTvFlag();
   const isFireTV = /AFT|AmazonWebAppPlatform|Silk/i.test(ua);
   const isAndroidTV = /Android/i.test(ua) && /(TV|AOSP)/i.test(ua);
+  const markedTv = /StreamBoxTV|Leanback/i.test(ua);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const noHover = window.matchMedia("(hover: none)").matches;
   const wide = Math.max(window.innerWidth, window.screen.width) >= 960;
-  const isTV = isFireTV || isAndroidTV || (coarse && noHover && wide && window.innerHeight >= 500);
+  const heuristicTV = isFireTV || isAndroidTV || markedTv || (coarse && noHover && wide && window.innerHeight >= 500);
+  // El WebView de Android TV parece Chrome de móvil: sin StreamBoxNative.isTv
+  // la heurística por UA no basta. En el APK de teléfono isTv es false y no
+  // se fuerza el layout de televisor.
+  const isTV = nativeTv === true || (nativeTv !== false && heuristicTV);
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
   document.body.classList.toggle("is-tv", isTV);
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
+  document.documentElement.classList.toggle("is-native-tv", nativeTv === true || (isTV && (markedTv || isNativeApp())));
   if (!isTV) document.body.classList.remove("tv-channels-open");
+}
+
+async function refreshNativeTvFlag() {
+  try {
+    const cap = window.Capacitor;
+    const plugin = cap && cap.Plugins && cap.Plugins.StreamBox;
+    if (!plugin || typeof plugin.getInfo !== "function") return;
+    const info = await plugin.getInfo();
+    if (!info) return;
+    window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, info, {
+      isTv: !!info.isTv,
+      hasExo: true,
+      exo: true,
+    });
+    detectDevice();
+  } catch (e) {}
 }
 
 detectDevice();
@@ -247,6 +294,14 @@ function showToast(message, ms) {
 }
 
 function showScreen(name) {
+  const stayOnMain =
+    name === "login" &&
+    !logoutRequested &&
+    liveSession &&
+    (channelsData.length > 0 || !!(currentUser && (currentUser.m3uUrl || currentUser.username))) &&
+    (isTvLayout() || isNativeApp() || nativeTvFlag() === true);
+  if (stayOnMain) return;
+
   const login = document.getElementById("loginScreen");
   const main = document.getElementById("mainScreen");
   const showLogin = name === "login";
@@ -339,6 +394,7 @@ async function saveSession(user) {
     server: user.server,
     isM3U: !!user.isM3U,
     m3uUrl: user.m3uUrl || "",
+    listKey: listCacheKey(user),
   };
   if (!user.isM3U && user.password) {
     const sealed = await sealSecret(user.password);
@@ -503,15 +559,34 @@ function initSplash() {
 
 /********** DEVICE ID & CARGA REMOTA **********/
 function getDeviceId() {
-  let id = localStorage.getItem("device_id");
-  if (!id) {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    id = "";
-    for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
-    id = id.match(/.{1,2}/g).join("-");
-    localStorage.setItem("device_id", id);
+  const KEY = "device_id";
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      try {
+        id = sessionStorage.getItem(KEY);
+      } catch (e) {}
+    }
+    if (!id) {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      id = "";
+      for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+      id = id.match(/.{1,2}/g).join("-");
+    }
+    localStorage.setItem(KEY, id);
+    try {
+      sessionStorage.setItem(KEY, id);
+    } catch (e) {}
+    return id;
+  } catch (e) {
+    if (!getDeviceId._mem) {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let id = "";
+      for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+      getDeviceId._mem = id.match(/.{1,2}/g).join("-");
+    }
+    return getDeviceId._mem;
   }
-  return id;
 }
 
 /**
@@ -566,18 +641,94 @@ function showDeviceId() {
   return deviceId;
 }
 
-function startRemotePolling() {
-  const deviceId = showDeviceId();
+function stopRemotePolling() {
+  remotePollGen++;
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
+  }
+}
 
-  if (pollingInterval) clearInterval(pollingInterval);
+function markSessionLive() {
+  liveSession = true;
+  logoutRequested = false;
+  stopRemotePolling();
+}
+
+function snapshotChannelState() {
+  return {
+    channels: channelsData.slice(),
+    categories: categoriesData,
+    byId: channelById,
+  };
+}
+
+function restoreChannelState(snap) {
+  if (!snap || !snap.channels || !snap.channels.length) return false;
+  channelsData = snap.channels;
+  categoriesData = snap.categories || {};
+  channelById = snap.byId || new Map(snap.channels.map((ch) => [ch.id, ch]));
+  return true;
+}
+
+function applyListOrKeep(text) {
+  const snap = snapshotChannelState();
+  parseM3U(text);
+  if (channelsData.length) return true;
+  if (restoreChannelState(snap)) {
+    showToast("No se pudo actualizar la lista; se mantiene la anterior");
+    return true;
+  }
+  return false;
+}
+
+function enterChannelView(user) {
+  try {
+    finishLogin(user);
+  } catch (e) {
+    if (channelsData.length) {
+      showToast((e && e.message) || "Error al entrar");
+    } else {
+      throw e;
+    }
+  }
+  if (channelsData.length) markSessionLive();
+  try {
+    renderCategories();
+  } catch (e) {
+    showToast("Error al mostrar canales");
+  }
+  try {
+    if (!currentlyPlayingId) restoreLastChannel();
+  } catch (e) {}
+}
+
+function startRemotePolling() {
+  if (liveSession && channelsData.length && !logoutRequested) return;
+  const deviceId = showDeviceId();
+  stopRemotePolling();
+  const myGen = remotePollGen;
 
   pollingInterval = setInterval(async () => {
+    if (myGen !== remotePollGen) return;
+    if (remoteLoginBusy) return;
+    if (liveSession && channelsData.length && !logoutRequested) {
+      stopRemotePolling();
+      return;
+    }
     try {
       const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
       const data = await res.json();
+      if (myGen !== remotePollGen) return;
+      if (liveSession && channelsData.length && !logoutRequested) return;
       if (data && data.status !== "esperando" && (data.serverUrl || data.m3uUrl)) {
-        clearInterval(pollingInterval);
-        performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl);
+        remoteLoginBusy = true;
+        stopRemotePolling();
+        try {
+          await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl);
+        } finally {
+          remoteLoginBusy = false;
+        }
       }
     } catch (e) {}
   }, 5000);
@@ -630,24 +781,23 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
+      await saveSession(currentUser);
       const cachedM3u = await readListCache(currentUser);
       if (cachedM3u && !detectProviderListError(cachedM3u)) {
         parseM3U(cachedM3u);
         if (channelsData.length) {
-          await saveSession(currentUser);
-          finishLogin(currentUser);
-          renderCategories();
-          restoreLastChannel();
+          enterChannelView(currentUser);
           showSpinner(true, "Actualizando lista...");
         }
       }
 
       const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
       const m3uContent = await response.text();
-      if (loginCancelled) return false;
+      if (loginCancelled) return liveSession && channelsData.length > 0;
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         if (channelsData.length) {
           showSpinner(false);
+          markSessionLive();
           return true;
         }
         throw new Error("No se pudo cargar la URL.");
@@ -660,24 +810,26 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         } catch (e) {}
         if (channelsData.length) {
           showSpinner(false);
+          markSessionLive();
           return true;
         }
         throw new Error(msg);
       }
       const listaConError = detectProviderListError(m3uContent);
       if (listaConError) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("El proveedor responde: " + listaConError);
+          return true;
+        }
         throw new Error("El proveedor responde: " + listaConError);
       }
 
-      parseM3U(m3uContent);
-      if (!channelsData.length) throw new Error("La lista no contiene canales");
+      if (!applyListOrKeep(m3uContent)) throw new Error("La lista no contiene canales");
       await saveSession(currentUser);
       await writeListCache(currentUser, m3uContent);
-      if (!document.getElementById("mainScreen") || !document.getElementById("mainScreen").classList.contains("active")) {
-        finishLogin(currentUser);
-      }
-      renderCategories();
-      if (!currentlyPlayingId) restoreLastChannel();
+      enterChannelView(currentUser);
       checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -692,9 +844,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
         if (channelsData.length) {
           currentUser = pendingUser;
           await saveSession(currentUser);
-          finishLogin(currentUser);
-          renderCategories();
-          restoreLastChannel();
+          enterChannelView(currentUser);
           showSpinner(true, "Comprobando cuenta...");
         }
       }
@@ -702,7 +852,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       showSpinner(true, "Validando acceso...");
       const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
-      if (loginCancelled) return false;
+      if (loginCancelled) return liveSession && channelsData.length > 0;
       let data = null;
       try {
         data = JSON.parse(rawText);
@@ -724,15 +874,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 
       currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
       await saveSession(currentUser);
-
-      if (!document.getElementById("mainScreen") || !document.getElementById("mainScreen").classList.contains("active")) {
-        finishLogin(currentUser);
-      }
       setLoginStatus("Descargando canales...");
       showSpinner(true, "Descargando canales...");
       await loadM3UFromXtream();
-      renderCategories();
-      if (!currentlyPlayingId) restoreLastChannel();
+      enterChannelView(currentUser);
       if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -741,9 +886,20 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
     throw new Error("Escanea el QR para cargar la lista.");
   } catch (error) {
     showSpinner(false);
-    setLoginStatus(error.message || "Error al iniciar sesión.");
-    const main = document.getElementById("mainScreen");
-    if (main && main.classList.contains("active") && !channelsData.length) showScreen("login");
+    const msg = (error && error.message) || "Error al iniciar sesión.";
+    setLoginStatus(msg);
+    if (liveSession || channelsData.length) {
+      showToast(msg);
+      if (channelsData.length) markSessionLive();
+      const main = document.getElementById("mainScreen");
+      if (main && !main.classList.contains("active") && channelsData.length) {
+        try {
+          showScreen("main");
+        } catch (e) {}
+      }
+      return false;
+    }
+    showScreen("login");
     startRemotePolling();
     return false;
   }
@@ -801,6 +957,7 @@ function prepararInstalacion() {
 
 function registrarServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+  if (isNativeApp() || nativeTvFlag() !== null) return;
   if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") return;
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
@@ -808,7 +965,7 @@ function registrarServiceWorker() {
 }
 
 function adSlotVisibleHere() {
-  if (document.body.classList.contains("is-tv")) return true;
+  if (isTvLayout() || document.documentElement.classList.contains("is-native-tv")) return true;
   return window.matchMedia("(min-width: 1201px)").matches;
 }
 
@@ -878,6 +1035,7 @@ function initAdSlot() {
 
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
+  refreshNativeTvFlag();
   applyUiMode();
   initSplash();
   initChannelTools();
@@ -885,17 +1043,28 @@ window.addEventListener("DOMContentLoaded", () => {
   registrarServiceWorker();
   prepararInstalacion();
   showDeviceId();
-  startRemotePolling();
   initTvLoginFocus();
+  if (!canAutoLoginFromCache()) startRemotePolling();
 
   loadSession().then((saved) => {
-    if (!saved) return;
+    if (!saved) {
+      if (!pollingInterval) startRemotePolling();
+      return;
+    }
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
-    if (!canAutoLogin) return;
+    if (!canAutoLogin) {
+      if (!pollingInterval) startRemotePolling();
+      return;
+    }
 
     setTimeout(() => {
-      if (loginCancelled) return;
-      performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl);
+      if (loginCancelled) {
+        startRemotePolling();
+        return;
+      }
+      performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
+        if (!ok && !liveSession) startRemotePolling();
+      });
     }, 400);
   });
 });
@@ -1316,8 +1485,7 @@ async function loadM3UFromXtream() {
   if (providerError) {
     throw new Error("El proveedor responde: " + providerError);
   }
-  parseM3U(m3uContent);
-  if (!channelsData.length) {
+  if (!applyListOrKeep(m3uContent)) {
     throw new Error("La lista no contiene canales");
   }
   await writeListCache(currentUser, m3uContent);
@@ -3412,8 +3580,11 @@ initPlayerGestures();
 
 /********** SISTEMA DE BOTONES **********/
 function doLogout() {
+  logoutRequested = true;
+  liveSession = false;
   sendActivity("stop");
   stopActivityMonitoring();
+  stopRemotePolling();
   clearInterval(epgRefreshTimer);
   clearInterval(epgReloadTimer);
   clearTimeout(epgRetryTimer);
@@ -3426,6 +3597,9 @@ function doLogout() {
   currentUser = null;
   sessionToken = null;
   activeConnection = null;
+  channelsData = [];
+  categoriesData = {};
+  channelById = new Map();
   showScreen("login");
   startRemotePolling();
 }

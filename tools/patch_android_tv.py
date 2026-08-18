@@ -15,6 +15,10 @@ Además se inyecta ExoPlayer: el WebView de Fire Stick no decodifica bien
 MPEG-TS con mse, así que la web llama a un plugin nativo y se abre una
 Activity a pantalla completa.
 
+El WebView de Android TV usa un User-Agent de Chrome de móvil, sin "TV".
+StreamBoxPlugin detecta leanback / UI_MODE_TYPE_TELEVISION e inyecta
+window.StreamBoxNative = { isTv, hasExo } antes de core.js.
+
 Se edita el XML con ElementTree en vez de con expresiones regulares porque el
 manifest de Capacitor cambia de forma entre versiones. Es idempotente: se puede
 ejecutar varias veces sin duplicar nada.
@@ -39,6 +43,7 @@ DEPS_MEDIA3 = [
     f'    implementation "androidx.media3:media3-exoplayer:{MEDIA3}"',
     f'    implementation "androidx.media3:media3-exoplayer-hls:{MEDIA3}"',
     f'    implementation "androidx.media3:media3-ui:{MEDIA3}"',
+    '    implementation "androidx.webkit:webkit:1.9.0"',
 ]
 
 CARACTERISTICAS_OPCIONALES = [
@@ -187,7 +192,7 @@ def copiar_exoplayer(base: Path) -> list:
     main = encontrar_mainactivity(base)
     paquete = paquete_de(main, base)
     hechos = []
-    for nombre in ("NativePlayerPlugin.java", "PlayerActivity.java"):
+    for nombre in ("NativePlayerPlugin.java", "PlayerActivity.java", "StreamBoxPlugin.java"):
         origen = EXO / nombre
         if not origen.exists():
             raise SystemExit(f"error: falta {origen.relative_to(RAIZ)}")
@@ -202,6 +207,7 @@ def copiar_exoplayer(base: Path) -> list:
             "import com.getcapacitor.BridgeActivity\n\n"
             "class MainActivity : BridgeActivity() {\n"
             "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+            "        registerPlugin(StreamBoxPlugin::class.java)\n"
             "        registerPlugin(NativePlayerPlugin::class.java)\n"
             "        super.onCreate(savedInstanceState)\n"
             "    }\n"
@@ -216,13 +222,14 @@ def copiar_exoplayer(base: Path) -> list:
             "public class MainActivity extends BridgeActivity {\n"
             "    @Override\n"
             "    public void onCreate(Bundle savedInstanceState) {\n"
+            "        registerPlugin(StreamBoxPlugin.class);\n"
             "        registerPlugin(NativePlayerPlugin.class);\n"
             "        super.onCreate(savedInstanceState);\n"
             "    }\n"
             "}\n",
             encoding="utf-8",
         )
-    hechos.append(str(main.relative_to(base)) + " (plugin NativePlayer)")
+    hechos.append(str(main.relative_to(base)) + " (plugins StreamBox + NativePlayer)")
     return hechos
 
 

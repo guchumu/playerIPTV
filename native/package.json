@@ -1,6 +1,6 @@
 {
   "name": "streambox-iptv",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Capacitor wrapper for StreamBox IPTV",
   "scripts": {

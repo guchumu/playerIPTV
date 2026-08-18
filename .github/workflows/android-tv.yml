@@ -6,6 +6,10 @@ name: APK Android TV
 # Lanzarlo a mano: pestaña Actions -> "APK Android TV" -> "Run workflow".
 # El APK queda en los artefactos de la ejecución. Si se lanza con una etiqueta
 # vNNN también se publica como Release descargable.
+#
+# La URL pública NUNCA cambia de versión:
+#   https://acortador.vip/player/downloads/tv.apk
+# El versionCode interno sí sube para que Android acepte la actualización.
 
 on:
   workflow_dispatch:
@@ -23,6 +27,9 @@ jobs:
     steps:
       - name: Descargar el repositorio
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Preparar Java 17
         uses: actions/setup-java@v4
@@ -46,13 +53,20 @@ jobs:
       - name: Aplicar la configuración de Android TV
         run: python3 tools/patch_android_tv.py native/android
 
-      - name: Numerar la versión con el número de ejecución
+      - name: Numerar la versión
+        id: ver
         working-directory: native/android/app
         run: |
-          # Que cada APK tenga versionCode mayor: sin esto el televisor
-          # rechaza la actualización por considerarla una versión anterior.
+          # versionCode siempre crece (run_number). versionName usa la etiqueta
+          # v1.0.3 si existe; si no, 1.0.<run>.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            NAME="${GITHUB_REF_NAME#v}"
+          else
+            NAME="1.0.${{ github.run_number }}"
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" build.gradle
-          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"$NAME\"/" build.gradle
           grep -E "versionCode|versionName" build.gradle
 
       - name: Preparar la clave de firma
@@ -94,32 +108,55 @@ jobs:
             -Pandroid.injected.signing.key.alias="$CLAVE_ALIAS" \
             -Pandroid.injected.signing.key.password="$CLAVE_ALIAS_PASS"
 
-      - name: Renombrar y comprobar el APK
+      - name: Copiar a tv.apk (nombre estable)
         id: apk
         run: |
           set -e
           ORIGEN=native/android/app/build/outputs/apk/release/app-release.apk
-          DESTINO="streambox-tv-1.0.${{ github.run_number }}.apk"
-          cp "$ORIGEN" "$DESTINO"
-          # El mismo APK vale para Fire Stick y para el móvil: leanback es opcional.
+          mkdir -p downloads
+          # URL pública: siempre downloads/tv.apk. El nombre versionado solo
+          # sirve como artefacto interno de CI, no se lo des al usuario.
           cp "$ORIGEN" tv.apk
           cp "$ORIGEN" android.apk
-          ls -lh "$DESTINO" tv.apk android.apk
+          cp "$ORIGEN" downloads/tv.apk
+          cp "$ORIGEN" downloads/android.apk
+          DESTINO="streambox-tv-${{ steps.ver.outputs.name }}.apk"
+          cp "$ORIGEN" "$DESTINO"
+          ls -lh tv.apk downloads/tv.apk "$DESTINO"
           echo "nombre=$DESTINO" >> "$GITHUB_OUTPUT"
-          # Comprobación de que el banner, leanback y ExoPlayer han entrado.
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
-          "$AAPT" dump badging "$DESTINO" | grep -Ei "leanback|banner|package:|sdkVersion" || true
-          unzip -l "$DESTINO" | grep -Ei "exoplayer|media3|PlayerActivity" || true
+          "$AAPT" dump badging tv.apk | grep -Ei "leanback|banner|package:|sdkVersion" || true
+          unzip -l tv.apk | grep -Ei "exoplayer|media3|PlayerActivity|StreamBoxPlugin" || true
 
       - name: Publicar el APK como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.apk.outputs.nombre }}
           path: |
-            ${{ steps.apk.outputs.nombre }}
             tv.apk
             android.apk
+            downloads/tv.apk
           retention-days: 90
+
+      - name: Guardar downloads/tv.apk en main
+        continue-on-error: true
+        run: |
+          set -e
+          cp tv.apk "$RUNNER_TEMP/tv.apk"
+          git fetch origin main
+          git checkout -B apk-slot origin/main
+          mkdir -p downloads
+          cp "$RUNNER_TEMP/tv.apk" downloads/tv.apk
+          cp "$RUNNER_TEMP/tv.apk" downloads/android.apk
+          git add downloads/tv.apk downloads/android.apk
+          if git diff --cached --quiet; then
+            echo "APK idéntico, no hay commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Actualizar downloads/tv.apk (URL estable) [skip ci]"
+          git push origin HEAD:main
 
       - name: Publicar la clave nueva (guárdala como secreto KEYSTORE_BASE64)
         if: steps.firma.outputs.generada == 'si'
@@ -134,11 +171,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.apk.outputs.nombre }}
             tv.apk
             android.apk
           body: |
-            El mismo APK sirve para Fire Stick / Android TV y para el móvil Android.
-            Reproduce con ExoPlayer (no usa mpegts.js en la app nativa).
+            Instalar siempre desde la misma URL (Downloader en Fire Stick):
 
-            Instalación en Fire Stick: permitir apps de origen desconocido e instalar **Downloader**. No hace falta Android Studio.
+            **https://acortador.vip/player/downloads/tv.apk**
+
+            No uses el nombre versionado de GitHub. El APK de dentro cambia de versión; la dirección no.
+            El mismo archivo sirve para Fire Stick / Android TV y para el móvil Android (ExoPlayer).
