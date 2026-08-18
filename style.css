@@ -330,6 +330,15 @@ html.is-native-tv .splash-hint-tv { display: inline; }
   z-index: 100;
 }
 .header-left h1 { font-size: 1.1rem; }
+.tv-remote-hint {
+  display: none;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .header-right { display: flex; gap: 0.5rem; align-items: center; }
 #accountExpiryLabel { font-size: 0.8rem; margin-right: 10px; font-weight: bold; }
 .action-btn {
@@ -1035,7 +1044,7 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
-:is(body.is-tv, html.is-native-tv) { font-size: 16px; }
+:is(body.is-tv, html.is-native-tv) { font-size: 15px; }
 :is(body.is-tv, html.is-native-tv) #loginScreen {
   overflow: hidden;
   padding: 1.1rem 1.4rem;
@@ -1130,16 +1139,24 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 body.is-tv .compact-header,
 html.is-native-tv .compact-header {
-  padding: 0.3rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.22rem 0.7rem;
+  font-size: 0.8rem;
   min-height: 0;
+  gap: 0.6rem;
+}
+body.is-tv .header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  min-width: 0;
 }
 body.is-tv .header-left h1,
-html.is-native-tv .header-left h1 { font-size: 1.05rem; }
+html.is-native-tv .header-left h1 { font-size: 0.95rem; }
+body.is-tv .tv-remote-hint { display: block; }
 body.is-tv .header-right,
-html.is-native-tv .header-right { gap: 0.4rem; }
+html.is-native-tv .header-right { gap: 0.35rem; flex-shrink: 0; }
 body.is-tv .header-right span,
-html.is-native-tv .header-right span { font-size: 0.78rem; }
+html.is-native-tv .header-right span { font-size: 0.72rem; display: inline; }
 body.is-tv #accountExpiryLabel,
 html.is-native-tv #accountExpiryLabel { margin-right: 4px; }
 body.is-tv .buffer-control,
@@ -1148,28 +1165,32 @@ body.is-tv #pipBtn,
 body.is-tv #airplayBtn,
 body.is-tv #castButton,
 body.is-tv .track-control,
+body.is-tv .channels-tools,
+body.is-tv #videoPlayer::-webkit-media-controls,
 html.is-native-tv .buffer-control,
 html.is-native-tv #displayBtn,
 html.is-native-tv #pipBtn,
 html.is-native-tv #airplayBtn,
 html.is-native-tv #castButton,
-html.is-native-tv .track-control {
+html.is-native-tv .track-control,
+html.is-native-tv .channels-tools {
   display: none !important;
 }
+body.is-tv #videoPlayer { pointer-events: none; }
 body.is-tv .header-right button,
 html.is-native-tv .header-right button {
-  min-width: 48px;
-  min-height: 48px;
-  width: 48px;
-  height: 48px;
+  min-width: 40px;
+  min-height: 40px;
+  width: 40px;
+  height: 40px;
   padding: 0;
-  font-size: 1rem;
+  font-size: 0.9rem;
   border-radius: 8px;
 }
 body.is-tv .header-right button svg,
 html.is-native-tv .header-right button svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 body.is-tv #refreshBtn:focus,
 body.is-tv #logoutBtn:focus,
@@ -1179,41 +1200,51 @@ html.is-native-tv #refreshBtn:focus,
 html.is-native-tv #logoutBtn:focus,
 html.is-native-tv #refreshBtn.cursor,
 html.is-native-tv #logoutBtn.cursor {
-  outline: 4px solid #fbbf24;
-  outline-offset: 3px;
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.45), 0 0 16px rgba(251, 191, 36, 0.55);
+  outline: 3px solid #fbbf24;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.4);
   z-index: 2;
 }
-body.is-tv .main-container {
-  grid-template-columns: minmax(250px, 24%) 0 1fr;
-  transition: grid-template-columns 0.22s ease;
-}
-body.is-tv .channels-column {
-  min-width: 0;
-  width: 0;
-  padding: 0;
-  border: none;
-  overflow: hidden;
-  visibility: hidden;
-  pointer-events: none;
+/* Tres columnas fijas: categorías | lista ancha | preview pequeño. */
+body.is-tv .main-container,
+body.is-tv.tv-channels-open .main-container {
+  grid-template-columns: minmax(168px, 16%) minmax(420px, 1fr) minmax(250px, 28%);
+  transition: none;
 }
 body.is-tv .categories-column,
+body.is-tv .channels-column,
 body.is-tv .player-column { min-width: 0; }
-body.is-tv.tv-channels-open .main-container {
-  grid-template-columns: minmax(168px, 17%) minmax(240px, 24%) 1fr;
-}
-body.is-tv.tv-channels-open .channels-column {
+body.is-tv .channels-column {
   width: auto;
-  padding: 0.4rem 0.5rem 0 0.5rem;
+  padding: 0.35rem 0.55rem 0;
   border-right: 1px solid rgba(148, 163, 184, 0.25);
   visibility: visible;
   pointer-events: auto;
+  overflow: hidden;
 }
+body.is-tv .player-column {
+  padding: 0.35rem 0.55rem 0.4rem;
+  overflow: hidden;
+}
+body.is-tv .video-wrapper {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 32vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+body.is-tv .playback-status {
+  font-size: 0.72rem;
+  padding: 0.28rem 0.45rem;
+}
+body.is-tv .epg-timeline-box { max-height: 118px; }
+body.is-tv .ad-slot { display: none !important; }
 body.is-tv .category-btn,
 body.is-tv .channel-item {
-  padding: 6px 10px;
-  font-size: 0.86rem;
-  margin-bottom: 2px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  margin-bottom: 1px;
 }
 body.is-tv .category-btn {
   min-height: 0;
@@ -1230,21 +1261,36 @@ body.is-tv .category-btn {
   overflow: hidden;
 }
 body.is-tv .channel-item {
-  min-height: 52px;
-  height: 52px;
+  min-height: 44px;
+  height: 44px;
+  border-radius: 6px;
 }
-body.is-tv .channel-name { font-size: 0.86rem; }
-body.is-tv.tv-channels-open .category-btn {
-  font-size: 0.78rem;
-  padding: 5px 8px;
+body.is-tv .channel-name {
+  font-size: 0.88rem;
+  font-weight: 650;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
 }
+body.is-tv .channel-chno { width: 2.4rem; font-size: 0.72rem; color: #94a3b8; }
+body.is-tv .fav-btn { width: 28px; height: 28px; padding: 4px; }
 body.is-tv .category-btn.cursor,
-body.is-tv .channel-item.cursor { outline: 3px solid #fbbf24; outline-offset: 1px; }
-body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 32px; height: 32px; }
+body.is-tv .channel-item.cursor {
+  outline: 3px solid #fbbf24;
+  outline-offset: 0;
+  background: rgba(251, 191, 36, 0.12);
+}
+body.is-tv .channel-item.playing { box-shadow: inset 3px 0 0 #22c55e; }
+body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 28px; height: 28px; }
 body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
-body.is-tv .channel-search,
-body.is-tv .sort-btn { min-height: 36px; font-size: 0.8rem; }
-body.is-tv .channels-column h2 { font-size: 0.82rem; }
+body.is-tv .channels-column h2 { font-size: 0.78rem; margin-bottom: 0.2rem; }
+body.is-tv .channels-toolbar { margin-bottom: 0.25rem; }
+body.is-tv .tv-fav-empty {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  padding: 12px 8px;
+}
 
 /********** MÓVILES: vídeo arriba, chips, lista de canales **********/
 @media (max-width: 768px) {
@@ -1364,6 +1410,36 @@ body.is-tv .channels-column h2 { font-size: 0.82rem; }
   }
   .channel-item { min-height: 64px; height: 64px; }
   .header-right span { display: none; }
+}
+
+/* Si el WebView de la tele informa un ancho de móvil, no apilar las columnas. */
+@media (max-width: 768px) {
+  body.is-tv #mainScreen .main-container,
+  html.is-native-tv #mainScreen .main-container {
+    display: grid !important;
+    flex-direction: unset !important;
+    grid-template-columns: minmax(140px, 16%) minmax(280px, 1fr) minmax(200px, 30%) !important;
+  }
+  body.is-tv .player-column,
+  body.is-tv .categories-column,
+  body.is-tv .channels-column,
+  html.is-native-tv .player-column,
+  html.is-native-tv .categories-column,
+  html.is-native-tv .channels-column {
+    order: unset;
+    width: auto !important;
+    flex: unset;
+    max-height: none;
+  }
+  body.is-tv .categories-list {
+    display: block;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    white-space: normal;
+  }
+  body.is-tv .header-right span,
+  html.is-native-tv .header-right span { display: inline !important; }
 }
 
 /* iPhone X apaisado mide 812×375: no entra en max-width:768px y caería

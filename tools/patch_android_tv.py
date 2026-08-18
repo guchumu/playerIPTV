@@ -12,8 +12,10 @@ cosas que Capacitor no pone:
   4. La configuración de red que permite tráfico http a los orígenes IPTV.
 
 Además se inyecta ExoPlayer: el WebView de Fire Stick no decodifica bien
-MPEG-TS con mse, así que la web llama a un plugin nativo y se abre una
-Activity a pantalla completa.
+MPEG-TS con mse, así que la web llama a un plugin nativo. En TV el vídeo
+empieza en la ventana pequeña (overlay TextureView) y pasa a pantalla
+completa con el segundo OK. Si el overlay no se puede montar, se abre
+PlayerActivity como antes.
 
 El WebView de Android TV usa un User-Agent de Chrome de móvil, sin "TV".
 StreamBoxPlugin detecta leanback / UI_MODE_TYPE_TELEVISION e inyecta
@@ -155,6 +157,7 @@ def copiar_recursos(base):
         (CONFIG / "tv_banner.png", base / "src/main/res/drawable/tv_banner.png"),
         (CONFIG / "network_security_config.xml", base / "src/main/res/xml/network_security_config.xml"),
         (EXO / "activity_player.xml", base / "src/main/res/layout/activity_player.xml"),
+        (EXO / "overlay_player.xml", base / "src/main/res/layout/overlay_player.xml"),
     ]
     for origen, destino in parejas:
         if not origen.exists():

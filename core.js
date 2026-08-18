@@ -16,6 +16,7 @@ let currentServer = "";
 let hls = null;
 let mpegtsPlayer = null;
 let nativePlaybackActive = false;
+let nativeFullscreen = false;
 const BUFFER_KEY = "streambox_buffer";
 const LAST_LIST_KEY = "streambox_last_list";
 const LOGOUT_AT_KEY = "streambox_logout_at";
@@ -200,6 +201,11 @@ function applyTvChrome() {
   document.querySelectorAll(".category-btn").forEach((btn) => {
     btn.tabIndex = tv ? -1 : 0;
   });
+  if (video) {
+    if (tv) video.removeAttribute("controls");
+    else video.setAttribute("controls", "");
+  }
+  if (tv) document.body.classList.add("tv-channels-open");
 }
 
 function rememberLastList(payload) {
@@ -237,13 +243,7 @@ function setTvChannelsOpen(open) {
     document.body.classList.remove("tv-channels-open");
     return;
   }
-  const was = document.body.classList.contains("tv-channels-open");
-  document.body.classList.toggle("tv-channels-open", !!open);
-  if (open && !was) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => paintVirtualWindow(true));
-    });
-  }
+  document.body.classList.add("tv-channels-open");
 }
 
 function focusTvCategoryColumn() {
@@ -251,7 +251,6 @@ function focusTvCategoryColumn() {
   const activeIndex = Array.from(categories).findIndex((c) => c.classList.contains("active"));
   currentFocus.col = 0;
   currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
-  setTvChannelsOpen(false);
   const active = document.activeElement;
   if (active && getTvHeaderActions().indexOf(active) >= 0) active.blur();
 }
@@ -262,7 +261,6 @@ function focusTvHeader(index) {
   const i = Math.max(0, Math.min(actions.length - 1, index == null ? 0 : index));
   currentFocus.col = TV_HEADER_COL;
   currentFocus.row = i;
-  setTvChannelsOpen(false);
   const btn = actions[i];
   if (btn && typeof btn.focus === "function") {
     try {
@@ -274,9 +272,20 @@ function focusTvHeader(index) {
 }
 
 function enterTvChannelsColumn() {
-  setTvChannelsOpen(true);
   currentFocus.col = 1;
-  currentFocus.row = 0;
+  const playing = virtualList.findIndex((ch) => ch && String(ch.id) === String(currentlyPlayingId));
+  currentFocus.row = playing >= 0 ? playing : 0;
+  ensureTvChannelVisible();
+}
+
+function ensureTvChannelVisible() {
+  if (!channelsContainer || !virtualList.length) return;
+  const h = channelRowHeight();
+  const view = Math.max(channelsContainer.clientHeight || 0, h);
+  const y = currentFocus.row * h;
+  if (y < channelsContainer.scrollTop) channelsContainer.scrollTop = y;
+  else if (y + h > channelsContainer.scrollTop + view) channelsContainer.scrollTop = y + h - view;
+  paintVirtualWindow();
 }
 
 // Prefijos de proveedor: solo se quitan en pantalla, no en datos ni búsqueda.
@@ -1161,6 +1170,7 @@ window.addEventListener("resize", () => {
   detectDevice();
   applyUiMode();
   paintVirtualWindow(true);
+  layoutNativePlayer();
 });
 
 async function fetchXtream(endpoint, params, serverOverride) {
@@ -2155,7 +2165,7 @@ function normalizeSearch(value) {
 function listCategoryNames() {
   const names = Object.keys(categoriesData).sort();
   const out = [];
-  if (getFavorites().some((id) => channelById.has(id))) out.push(FAV_NAME);
+  if (isTvLayout() || getFavorites().some((id) => channelById.has(id))) out.push(FAV_NAME);
   if (getHistory().some((id) => channelById.has(id))) out.push(HIST_NAME);
   return out.concat(names);
 }
@@ -2213,7 +2223,7 @@ function updateSortButton() {
   btn.title = az ? "Orden alfabético. Pulsa para el de la lista." : "Orden de la lista. Pulsa para A-Z.";
 }
 
-function selectCategory(categoryName) {
+function selectCategory(categoryName, opts) {
   currentCategory = categoryName;
   document.querySelectorAll(".category-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.category === categoryName);
@@ -2221,7 +2231,7 @@ function selectCategory(categoryName) {
 
   renderChannels(channelsForCategory(categoryName));
   if (channelColumnTitle) channelColumnTitle.textContent = displayCategoryName(categoryName);
-  if (currentFocus) currentFocus.col = 0;
+  if (currentFocus && !(opts && opts.keepFocus)) currentFocus.col = 0;
 }
 
 function channelInitials(name) {
@@ -2295,6 +2305,11 @@ function buildChannelRow(channel) {
   channelDiv.appendChild(favBtn);
 
   channelDiv.addEventListener("click", () => {
+    if (isTvLayout()) {
+      if (currentlyPlayingId === channel.id) enterNativeFullscreen();
+      else selectChannel(channel);
+      return;
+    }
     if (currentlyPlayingId === channel.id) {
       if (nativePlayerPlugin()) playChannel(channel);
       else toggleFullscreen();
@@ -2307,7 +2322,7 @@ function buildChannelRow(channel) {
 }
 
 function channelRowHeight() {
-  if (document.body.classList.contains("is-tv")) return 52;
+  if (document.body.classList.contains("is-tv")) return 44;
   if (document.body.classList.contains("ui-large")) return 72;
   return 64;
 }
@@ -2335,19 +2350,29 @@ function paintVirtualWindow(force) {
   const view = Math.max(channelsContainer.clientHeight || 0, 180);
   const start = Math.max(0, Math.floor(channelsContainer.scrollTop / h) - 12);
   const end = Math.min(total, Math.ceil((channelsContainer.scrollTop + view) / h) + 12);
-  if (!force && start === virtualRange.start && end === virtualRange.end) return;
+  if (!force && start === virtualRange.start && end === virtualRange.end) {
+    markTvCursor();
+    return;
+  }
   virtualRange = { start: start, end: end };
 
   const frag = document.createDocumentFragment();
   const head = document.createElement("div");
   head.style.height = start * h + "px";
   frag.appendChild(head);
+  if (!total && currentCategory === FAV_NAME) {
+    const empty = document.createElement("p");
+    empty.className = "tv-fav-empty";
+    empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
+    frag.appendChild(empty);
+  }
   for (let i = start; i < end; i++) frag.appendChild(buildChannelRow(virtualList[i]));
   const tail = document.createElement("div");
   tail.style.height = Math.max(0, (total - end) * h) + "px";
   frag.appendChild(tail);
   channelsContainer.innerHTML = "";
   channelsContainer.appendChild(frag);
+  markTvCursor();
 }
 
 function runChannelSearch(query) {
@@ -2698,6 +2723,7 @@ function nativePlayerPlugin() {
 
 function nativePlayerStop() {
   nativePlaybackActive = false;
+  nativeFullscreen = false;
   const plugin = nativePlayerPlugin();
   if (!plugin || typeof plugin.stop !== "function") return;
   try {
@@ -2705,9 +2731,75 @@ function nativePlayerStop() {
   } catch (e) {}
 }
 
-async function startNativePlayback(channel) {
+function nativeEmbedRect() {
+  const wrap = document.querySelector(".video-wrapper");
+  const r = wrap ? wrap.getBoundingClientRect() : { left: 0, top: 0, width: 320, height: 180 };
+  return {
+    left: r.left,
+    top: r.top,
+    width: Math.max(120, r.width),
+    height: Math.max(68, r.height),
+    vw: window.innerWidth,
+    vh: window.innerHeight,
+  };
+}
+
+function bindNativePlayerEvents() {
+  const plugin = nativePlayerPlugin();
+  if (!plugin || plugin.__streamboxBound) return;
+  plugin.__streamboxBound = true;
+  if (typeof plugin.addListener !== "function") return;
+  plugin.addListener("nativePlayer", (ev) => {
+    if (!ev) return;
+    if (typeof ev.fullscreen === "boolean") nativeFullscreen = ev.fullscreen;
+    if (ev.stopped) {
+      nativePlaybackActive = false;
+      nativeFullscreen = false;
+    }
+  });
+}
+
+function layoutNativePlayer() {
+  if (!nativePlaybackActive || nativeFullscreen) return;
+  const plugin = nativePlayerPlugin();
+  if (!plugin || typeof plugin.layout !== "function") return;
+  plugin.layout(nativeEmbedRect()).catch(() => {});
+}
+
+function enterNativeFullscreen() {
+  if (nativePlayerPlugin() && (nativePlaybackActive || currentlyPlayingId)) {
+    const plugin = nativePlayerPlugin();
+    nativeFullscreen = true;
+    if (typeof plugin.setFullscreen === "function") {
+      plugin.setFullscreen({ fullscreen: true }).catch(() => {});
+      return;
+    }
+    if (currentChannelRef) startNativePlayback(currentChannelRef, { fullscreen: true });
+    return;
+  }
+  enterFullscreen();
+}
+
+function exitNativeFullscreen() {
+  if (nativePlayerPlugin() && nativePlaybackActive && nativeFullscreen) {
+    const plugin = nativePlayerPlugin();
+    nativeFullscreen = false;
+    if (typeof plugin.setFullscreen === "function") {
+      plugin.setFullscreen(Object.assign({ fullscreen: false }, nativeEmbedRect())).catch(() => {});
+      return true;
+    }
+  }
+  if (isFullscreen()) {
+    exitFullscreen();
+    return true;
+  }
+  return false;
+}
+
+async function startNativePlayback(channel, opts) {
   const plugin = nativePlayerPlugin();
   if (!plugin) return false;
+  bindNativePlayerEvents();
   const gen = ++playGen;
   showVideoSpinner(true, "Abriendo reproductor…");
   stopPlayback({ keepNative: true });
@@ -2727,13 +2819,22 @@ async function startNativePlayback(channel) {
   }
   if (gen !== playGen) return true;
 
+  const fullscreen = !isTvLayout() || !!(opts && opts.fullscreen);
+  nativeFullscreen = fullscreen;
   try {
-    await plugin.play({ url: playUrl, title: displayName(channel.name), mime: mime });
+    await plugin.play(
+      Object.assign(
+        { url: playUrl, title: displayName(channel.name), mime: mime, fullscreen: fullscreen },
+        nativeEmbedRect()
+      )
+    );
     nativePlaybackActive = true;
     showVideoSpinner(false);
-    logPlayback("motor", "ExoPlayer · " + maskUrl(playUrl));
+    logPlayback("motor", "ExoPlayer · " + (fullscreen ? "pantalla completa" : "ventana") + " · " + maskUrl(playUrl));
+    requestAnimationFrame(() => layoutNativePlayer());
   } catch (e) {
     nativePlaybackActive = false;
+    nativeFullscreen = false;
     showVideoSpinner(false);
     logPlayback("error exo", String((e && e.message) || e));
     showToast("No se pudo abrir el reproductor nativo");
@@ -3127,6 +3228,7 @@ function selectChannel(channel) {
   playChannel(channel);
   refreshPlayerEPG();
   renderEpgTimeline();
+  if (isTvLayout()) requestAnimationFrame(() => layoutNativePlayer());
 }
 
 function restoreLastChannel() {
@@ -3153,12 +3255,9 @@ function restoreLastChannel() {
     const items = Array.from(document.querySelectorAll(".channel-item"));
     const idx = items.indexOf(el);
     if (idx >= 0) {
-      if (isTvLayout()) {
-        focusTvCategoryColumn();
-      } else {
-        currentFocus.col = 1;
-        currentFocus.row = idx;
-      }
+      currentFocus.col = 1;
+      currentFocus.row = idx;
+      if (isTvLayout()) ensureTvChannelVisible();
       updateCursorVisuals();
     }
     return true;
@@ -3737,7 +3836,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260819a");
+  url.searchParams.set("v", "20260819b");
   window.location.replace(url.toString());
 }
 
@@ -3854,13 +3953,66 @@ function initTvLoginFocus() {
 // que se está viendo, para poder seguir zapeando con el mando.
 function focusChannelList() {
   currentFocus.col = 1;
-  if (isTvLayout()) setTvChannelsOpen(true);
-  const items = Array.from(document.querySelectorAll(".channel-item"));
-  const playing = items.findIndex((el) => el.classList.contains("playing"));
-  const last = items.findIndex((el) => el.classList.contains("last"));
+  const playing = virtualList.findIndex((ch) => ch && String(ch.id) === String(currentlyPlayingId));
+  const lastId = peekLastChannelId();
+  const last = virtualList.findIndex((ch) => ch && String(ch.id) === String(lastId));
   if (playing >= 0) currentFocus.row = playing;
   else if (last >= 0) currentFocus.row = last;
+  else currentFocus.row = Math.min(currentFocus.row || 0, Math.max(0, virtualList.length - 1));
+  ensureTvChannelVisible();
   updateCursorVisuals();
+}
+
+function markTvCursor() {
+  document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
+  if (currentFocus.col === 0) {
+    const cat = document.querySelectorAll(".category-btn")[currentFocus.row];
+    if (cat) cat.classList.add("cursor");
+    return;
+  }
+  if (currentFocus.col !== 1) return;
+  const ch = virtualList[currentFocus.row];
+  if (!ch || !channelsContainer) return;
+  const el = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+  if (el) el.classList.add("cursor");
+}
+
+function tvFocusedChannel() {
+  return currentFocus.col === 1 ? virtualList[currentFocus.row] || null : null;
+}
+
+function toggleTvFavorite() {
+  const ch = tvFocusedChannel();
+  if (!ch) return false;
+  toggleFavorite(ch);
+  showToast(isFavorite(ch.id) ? "Añadido a Favoritos" : "Quitado de Favoritos");
+  markTvCursor();
+  return true;
+}
+
+function activateTvChannel() {
+  const ch = tvFocusedChannel();
+  if (!ch) return;
+  if (currentlyPlayingId === ch.id) enterNativeFullscreen();
+  else selectChannel(ch);
+}
+
+let tvOkHoldTimer = null;
+let tvOkHoldFired = false;
+
+function clearTvOkHold() {
+  clearTimeout(tvOkHoldTimer);
+  tvOkHoldTimer = null;
+}
+
+function isYellowKey(e) {
+  return (
+    e.key === "Yellow" ||
+    e.key === "F2" ||
+    e.key === "ColorF2Yellow" ||
+    e.keyCode === 185 ||
+    e.keyCode === 405
+  );
 }
 
 document.addEventListener("keydown", (e) => {
@@ -3890,28 +4042,35 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (BACK_KEYS.includes(e.key) || BACK_KEYCODES.includes(e.keyCode)) {
-    // Backspace dentro de un campo tiene que seguir borrando texto.
     if (e.key === "Backspace" && isTypingTarget(e.target)) return;
     if (isLoginScreenActive()) return;
+    e.preventDefault();
+    if (exitNativeFullscreen()) {
+      focusChannelList();
+      return;
+    }
     if (isFullscreen()) {
-      e.preventDefault();
       exitFullscreen();
       focusChannelList();
       return;
     }
     if (isTvLayout() && onPlayer && currentFocus.col === TV_HEADER_COL) {
-      e.preventDefault();
       focusTvCategoryColumn();
       updateCursorVisuals();
       return;
     }
-    if (isTvLayout() && onPlayer && document.body.classList.contains("tv-channels-open")) {
-      e.preventDefault();
+    if (isTvLayout() && onPlayer && currentFocus.col === 1) {
       focusTvCategoryColumn();
       updateCursorVisuals();
       return;
     }
     setDebugOpen(false);
+    return;
+  }
+
+  if (isYellowKey(e) && isTvLayout() && onPlayer) {
+    e.preventDefault();
+    toggleTvFavorite();
     return;
   }
 
@@ -3940,9 +4099,24 @@ document.addEventListener("keydown", (e) => {
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "OK", "Select"];
   if (!validKeys.includes(e.key) && !isConfirmKey(e)) return;
 
-  const fullscreen = isFullscreen();
+  if (isConfirmKey(e) && isTvLayout() && currentFocus.col === 1) {
+    if (e.repeat) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    tvOkHoldFired = false;
+    clearTvOkHold();
+    tvOkHoldTimer = setTimeout(() => {
+      tvOkHoldFired = true;
+      toggleTvFavorite();
+    }, 550);
+    return;
+  }
 
-  if (fullscreen || currentFocus.col === 2) {
+  const fullscreen = isFullscreen() || nativeFullscreen;
+
+  if (!isTvLayout() && (fullscreen || currentFocus.col === 2)) {
     if (isConfirmKey(e)) {
       e.preventDefault();
       if (fullscreen) {
@@ -3970,12 +4144,7 @@ document.addEventListener("keydown", (e) => {
     }
     if (e.key === "ArrowLeft") {
       if (!fullscreen && currentFocus.col === 2) {
-        if (isTvLayout() && !document.body.classList.contains("tv-channels-open")) {
-          focusTvCategoryColumn();
-        } else {
-          currentFocus.col = 1;
-          if (isTvLayout()) setTvChannelsOpen(true);
-        }
+        currentFocus.col = 1;
         updateCursorVisuals();
         return;
       }
@@ -4015,28 +4184,45 @@ document.addEventListener("keydown", (e) => {
         currentFocus.col = 1;
         currentFocus.row = 0;
       }
-    } else if (currentFocus.col === 1) {
-      currentFocus.col = 2;
     }
   } else if (e.key === "ArrowLeft") {
     if (currentFocus.col === 1 && categories.length > 0) {
-      if (isTvLayout()) focusTvCategoryColumn();
-      else {
-        currentFocus.col = 0;
-        const activeIndex = Array.from(categories).findIndex((c) => c.classList.contains("active"));
-        currentFocus.row = activeIndex >= 0 ? activeIndex : 0;
-      }
+      focusTvCategoryColumn();
     }
   } else if (e.key === "ArrowDown") {
-    if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) currentFocus.row++;
-    else if (currentFocus.col === 1 && currentFocus.row < channels.length - 1) currentFocus.row++;
+    if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) {
+      currentFocus.row++;
+      if (isTvLayout() && categories[currentFocus.row]) {
+        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
+      }
+    } else if (currentFocus.col === 1) {
+      if (isTvLayout()) {
+        if (currentFocus.row < virtualList.length - 1) {
+          currentFocus.row++;
+          ensureTvChannelVisible();
+        }
+      } else if (currentFocus.row < channels.length - 1) currentFocus.row++;
+    }
   } else if (e.key === "ArrowUp") {
-    if (currentFocus.col === 0 && currentFocus.row > 0) currentFocus.row--;
-    else if (currentFocus.col === 0 && currentFocus.row <= 0 && isTvLayout()) {
+    if (currentFocus.col === 0 && currentFocus.row > 0) {
+      currentFocus.row--;
+      if (isTvLayout() && categories[currentFocus.row]) {
+        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
+      }
+    } else if (currentFocus.col === 0 && currentFocus.row <= 0 && isTvLayout()) {
       focusTvHeader(0);
       updateCursorVisuals();
       return;
-    } else if (currentFocus.col === 1 && currentFocus.row > 0) currentFocus.row--;
+    } else if (currentFocus.col === 1 && currentFocus.row > 0) {
+      if (isTvLayout()) {
+        currentFocus.row--;
+        ensureTvChannelVisible();
+      } else currentFocus.row--;
+    } else if (currentFocus.col === 1 && currentFocus.row <= 0 && isTvLayout()) {
+      focusTvHeader(0);
+      updateCursorVisuals();
+      return;
+    }
   } else if (isConfirmKey(e)) {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
       if (isTvLayout()) enterTvChannelsColumn();
@@ -4044,11 +4230,22 @@ document.addEventListener("keydown", (e) => {
         currentFocus.col = 1;
         currentFocus.row = 0;
       }
-    } else if (currentFocus.col === 1 && channels[currentFocus.row]) {
-      channels[currentFocus.row].click();
+    } else if (currentFocus.col === 1) {
+      if (isTvLayout()) activateTvChannel();
+      else if (channels[currentFocus.row]) channels[currentFocus.row].click();
     }
   }
   updateCursorVisuals();
+});
+
+document.addEventListener("keyup", (e) => {
+  if (!isTvLayout() || !isConfirmKey(e) || currentFocus.col !== 1) return;
+  if (isLoginScreenActive() || isSplashActive()) return;
+  e.preventDefault();
+  const held = tvOkHoldFired;
+  clearTvOkHold();
+  tvOkHoldFired = false;
+  if (!held) activateTvChannel();
 });
 
 function updateCursorVisuals() {
@@ -4074,20 +4271,20 @@ function updateCursorVisuals() {
   if (currentFocus.col === 0) {
     target = document.querySelectorAll(".category-btn")[currentFocus.row];
   } else if (currentFocus.col === 1) {
-    target = document.querySelectorAll(".channel-item")[currentFocus.row];
-  } else if (currentFocus.col === 2) {
-    video.style.outline = "3px solid #fbbf24";
+    const ch = virtualList[currentFocus.row];
+    if (ch && channelsContainer) {
+      target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+    }
+    if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
   }
-  if (currentFocus.col !== 2 && video) video.style.outline = "none";
+  if (video) video.style.outline = "none";
   const headerActive = document.activeElement;
   if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
   if (target) {
     target.classList.add("cursor");
-    target.scrollIntoView({ block: "nearest", behavior: "smooth" });
-
-    if (currentFocus.col === 0) {
+    target.scrollIntoView({ block: "nearest", behavior: "auto" });
+    if (currentFocus.col === 0 && !isTvLayout()) {
       selectCategory(target.dataset.category);
-      if (isTvLayout()) setTvChannelsOpen(false);
     }
   }
 }
