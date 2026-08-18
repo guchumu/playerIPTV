@@ -754,11 +754,81 @@ function registrarServiceWorker() {
   });
 }
 
+function adSlotVisibleHere() {
+  if (document.body.classList.contains("is-tv")) return true;
+  return window.matchMedia("(min-width: 1201px)").matches;
+}
+
+function initAdSlot() {
+  const slot = document.getElementById("adSlot");
+  const img = document.getElementById("adSlotImg");
+  const link = document.getElementById("adSlotLink");
+  if (!slot || !img || !link) return;
+  slot.hidden = true;
+  link.tabIndex = -1;
+  img.tabIndex = -1;
+  if (!adSlotVisibleHere()) return;
+
+  fetch("ads_api.php")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const ads = data && Array.isArray(data.ads) ? data.ads : [];
+      if (!ads.length) {
+        slot.hidden = true;
+        return;
+      }
+      let index = 0;
+      let timer = null;
+      const interval = Math.max(3000, parseInt(data.interval, 10) || 9000);
+
+      function show(i) {
+        const ad = ads[i];
+        if (!ad || !ad.src) return;
+        img.src = ad.src;
+        if (ad.href) {
+          link.href = ad.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        } else {
+          link.removeAttribute("href");
+          link.removeAttribute("target");
+        }
+      }
+
+      function stop() {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+
+      function start() {
+        if (timer || ads.length < 2) return;
+        timer = setInterval(() => {
+          index = (index + 1) % ads.length;
+          show(index);
+        }, interval);
+      }
+
+      show(0);
+      slot.hidden = false;
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) stop();
+        else start();
+      });
+      start();
+    })
+    .catch(() => {
+      slot.hidden = true;
+    });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   applyUiMode();
   initSplash();
   initChannelTools();
+  initAdSlot();
   registrarServiceWorker();
   prepararInstalacion();
   showDeviceId();

@@ -1,0 +1,13 @@
+# Servir solo imágenes. Nada de PHP en este directorio.
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(php|phtml|php[0-9]|phar)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "\.(php|phtml|php[0-9]|phar)$">
+        Deny from all
+    </FilesMatch>
+</IfModule>

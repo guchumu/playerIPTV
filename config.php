@@ -32,6 +32,9 @@ if (!defined('ADMIN_USER')) {
 if (!defined('ADMIN_PASS_SHA256')) {
     define('ADMIN_PASS_SHA256', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9');
 }
+if (!defined('ADS_UPLOAD_KEY')) {
+    define('ADS_UPLOAD_KEY', '');
+}
 
 if (!defined('EPG_SOURCE')) {
     define('EPG_SOURCE', 'https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml');

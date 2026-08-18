@@ -20,3 +20,7 @@ native/ios/
 xcuserdata/
 .idea/
 local.properties
+# Banners subidos por el admin: no versionar anuncios de clientes.
+ads/*
+!ads/.htaccess
+!ads/.gitkeep

@@ -65,6 +65,7 @@ foreach ($users as $user) {
         <div class="actions">
             <button onclick="showAddUserModal()" class="btn btn-primary">➕ Añadir Usuario</button>
             <a href="../admin_monitor.html" class="btn btn-secondary">📺 Monitor en vivo</a>
+            <a href="../ads_upload.php" class="btn btn-secondary">🖼️ Banners</a>
             <button onclick="location.reload()" class="btn btn-secondary">🔄 Actualizar</button>
         </div>
 

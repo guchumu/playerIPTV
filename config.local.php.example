@@ -11,4 +11,5 @@
  * define('STREAM_SIGN_SECRET', 'pega aqui una cadena larga aleatoria');
  * define('EPG_CRON_KEY', 'otra cadena para el cron de la guia');
  * define('EPG_SOURCE', 'https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml');
+ * define('ADS_UPLOAD_KEY', 'cadena larga para subir banners sin el panel');
  */
