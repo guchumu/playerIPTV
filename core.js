@@ -209,12 +209,11 @@ function showScreen(name) {
     main.classList.toggle("active", !showLogin);
     main.style.display = showLogin ? "none" : "flex";
   }
-  if (!showLogin) dismissSplash(true);
 }
 
 /********** INTRO **********/
-// Sin credenciales guardadas se muestra una portada breve. Con sesión, ni
-// un frame: el auto-login sigue como siempre y Cancelar sigue funcionando.
+const SPLASH_MS = 4200;
+
 function canAutoLoginFromCache() {
   try {
     const saved = JSON.parse(localStorage.getItem("xtream_user") || "null");
@@ -235,12 +234,11 @@ function isSplashActive() {
 
 function dismissSplash(instant) {
   const html = document.documentElement;
-  if (html.classList.contains("splash-done") || html.classList.contains("has-session")) {
-    html.classList.remove("needs-splash", "splash-leaving");
+  if (html.classList.contains("splash-done")) return;
+  if (!html.classList.contains("needs-splash")) {
     html.classList.add("splash-done");
     return;
   }
-  if (!html.classList.contains("needs-splash")) return;
   if (instant) {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
@@ -251,18 +249,14 @@ function dismissSplash(instant) {
   window.setTimeout(() => {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
-  }, 450);
+  }, 600);
 }
 
 function initSplash() {
   const html = document.documentElement;
-  if (canAutoLoginFromCache()) {
-    html.classList.add("has-session", "splash-done");
-    html.classList.remove("needs-splash", "splash-leaving");
-    return;
-  }
   html.classList.add("needs-splash");
-  html.classList.remove("has-session");
+  html.classList.remove("splash-done", "splash-leaving");
+  if (canAutoLoginFromCache()) html.classList.add("has-session");
   const splash = document.getElementById("splashScreen");
   if (!splash) {
     html.classList.add("splash-done");
@@ -270,7 +264,7 @@ function initSplash() {
     return;
   }
   splash.addEventListener("click", () => dismissSplash());
-  window.setTimeout(() => dismissSplash(), 2000);
+  window.setTimeout(() => dismissSplash(), SPLASH_MS);
 }
 
 /********** DEVICE ID & CARGA REMOTA **********/

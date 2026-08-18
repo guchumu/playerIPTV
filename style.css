@@ -16,7 +16,7 @@ html, body {
 .screen { display: none; width: 100%; height: 100%; }
 .screen.active { display: flex; }
 
-/********** INTRO (solo sin sesión guardada) **********/
+/********** INTRO **********/
 #splashScreen {
   display: none;
   position: fixed;
@@ -24,7 +24,7 @@ html, body {
   z-index: 6000;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at top, #1f2933 0%, #111827 55%, #020617 100%);
+  background: radial-gradient(circle at 50% 28%, #1e1b4b 0%, #111827 48%, #020617 100%);
   color: #f9fafb;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -33,64 +33,63 @@ html, body {
 html.needs-splash #splashScreen {
   display: flex;
   opacity: 1;
-  animation: splash-autohide 2.5s ease forwards;
 }
 html.needs-splash.splash-leaving #splashScreen {
-  animation: none;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.45s ease;
+  transition: opacity 0.6s ease;
 }
-html.has-session #splashScreen,
 html.splash-done #splashScreen {
   display: none;
 }
 .splash-inner { text-align: center; max-width: 90%; }
 .splash-logo {
   display: block;
-  width: 112px;
-  height: 112px;
+  width: 128px;
+  height: 128px;
   object-fit: contain;
   margin: 0 auto 1.2rem;
-  animation: splash-in 0.75s ease-out both;
+  filter: drop-shadow(0 0 28px rgba(99, 102, 241, 0.55));
+  animation: splash-logo 1.4s ease-out both;
 }
 .splash-title {
-  font-size: 2rem;
+  font-size: 2.15rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  animation: splash-in 0.75s ease-out 0.12s both;
+  letter-spacing: 0.04em;
+  animation: splash-in 0.9s ease-out 0.35s both;
 }
 .splash-tagline {
-  margin-top: 0.65rem;
+  margin-top: 0.7rem;
   color: #94a3b8;
-  font-size: 1.05rem;
-  animation: splash-in 0.75s ease-out 0.24s both;
+  font-size: 1.08rem;
+  animation: splash-in 0.9s ease-out 0.7s both;
 }
 .splash-hint {
-  margin-top: 2.2rem;
+  margin-top: 2.4rem;
   font-size: 0.8rem;
   color: #64748b;
-  animation: splash-hint 1.6s ease-in-out 0.7s infinite;
+  animation: splash-hint 1.8s ease-in-out 1.6s infinite;
 }
 .splash-hint-tv { display: none; }
-body.is-tv .splash-logo { width: 168px; height: 168px; }
-body.is-tv .splash-title { font-size: 2.8rem; }
+body.is-tv .splash-logo { width: 176px; height: 176px; }
+body.is-tv .splash-title { font-size: 2.9rem; }
 body.is-tv .splash-tagline { font-size: 1.35rem; }
 body.is-tv .splash-hint { font-size: 1.1rem; }
 body.is-tv .splash-hint-touch { display: none; }
 body.is-tv .splash-hint-tv { display: inline; }
 
+@keyframes splash-logo {
+  0% { opacity: 0; transform: scale(0.55); filter: drop-shadow(0 0 0 rgba(99, 102, 241, 0)); }
+  55% { opacity: 1; transform: scale(1.08); filter: drop-shadow(0 0 36px rgba(99, 102, 241, 0.7)); }
+  100% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 22px rgba(99, 102, 241, 0.45)); }
+}
 @keyframes splash-in {
-  from { opacity: 0; transform: scale(0.92) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 @keyframes splash-hint {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 0.95; }
-}
-@keyframes splash-autohide {
-  0%, 82% { opacity: 1; }
-  100% { opacity: 0; pointer-events: none; }
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }
 
 /********** LOGIN Y CARGA REMOTA **********/
