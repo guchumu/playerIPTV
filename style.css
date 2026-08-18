@@ -100,7 +100,7 @@ body.is-tv .splash-hint-tv { display: inline; }
   border-radius: 18px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
   width: 90%;
-  max-width: 450px;
+  max-width: 480px;
   margin: auto;
   position: relative;
   z-index: 2;
@@ -147,6 +147,12 @@ body.is-tv .splash-hint-tv { display: inline; }
   text-align: center;
 }
 .remote-upload-box p { font-size: 0.85rem; margin: 5px 0; color: #cbd5e1; }
+.qr-lead {
+  font-size: 1.15rem !important;
+  font-weight: 700;
+  color: #f8fafc !important;
+  margin-bottom: 0.35rem !important;
+}
 .qr-wrap {
   display: flex;
   justify-content: center;
@@ -158,8 +164,8 @@ body.is-tv .splash-hint-tv { display: inline; }
   background: #fff;
   padding: 8px;
   border-radius: 8px;
-  width: 180px;
-  height: 180px;
+  width: 220px;
+  height: 220px;
   image-rendering: pixelated;
 }
 .qr-hint { opacity: 0.75; }
@@ -995,106 +1001,60 @@ body.is-tv #loginScreen {
   justify-content: center;
 }
 body.is-tv .login-container {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  column-gap: 1.5rem;
-  row-gap: 0.35rem;
-  align-items: stretch;
-  width: min(1100px, calc(100vw - 40px));
-  min-width: min(820px, calc(100vw - 40px));
-  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(560px, calc(100vw - 40px));
+  min-width: unset;
+  max-width: 560px;
   max-height: calc(100dvh - 36px);
-  padding: 1.15rem 1.4rem 1.05rem;
+  padding: 1.3rem 1.5rem 1.2rem;
   overflow: hidden;
 }
-body.is-tv .login-head {
-  grid-column: 1;
-  grid-row: 1;
-  min-width: 0;
-}
-body.is-tv .login-col-main {
-  grid-column: 1;
-  grid-row: 2;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-}
+body.is-tv .login-head,
 body.is-tv .login-col-side {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.7rem;
+  width: 100%;
 }
 body.is-tv .login-logo {
-  width: 48px;
-  height: 48px;
-  margin: 0 0 0.35rem;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 0.45rem;
 }
 body.is-tv .login-container h1 {
-  font-size: 1.45rem;
+  font-size: 1.7rem;
   margin-bottom: 0.1rem;
-  text-align: left;
+  text-align: center;
 }
 body.is-tv .build-tag {
-  text-align: left;
-  margin-bottom: 0.2rem;
+  text-align: center;
+  margin-bottom: 0.6rem;
   font-size: 0.68rem;
-}
-body.is-tv .login-or-write { display: none; }
-body.is-tv .login-divider {
-  margin: 0.35rem 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  opacity: 0.45;
-}
-body.is-tv .input-group { gap: 6px; margin-bottom: 0.55rem; }
-body.is-tv .input-group label { font-size: 0.72rem; }
-body.is-tv #loginForm input,
-body.is-tv #loginForm button {
-  font-size: 1.12rem;
-  min-height: 48px;
-  padding: 0.55rem 0.8rem;
 }
 body.is-tv .install-btn { min-height: 48px; margin-bottom: 0; font-size: 0.95rem; }
 body.is-tv .remote-upload-box {
-  padding: 0.85rem 0.9rem;
+  padding: 1rem 1.1rem;
   flex: 0 0 auto;
 }
-body.is-tv .remote-upload-box p { font-size: 0.82rem; margin: 4px 0; }
-body.is-tv .qr-wrap { margin: 6px 0; }
+body.is-tv .qr-lead { font-size: 1.35rem !important; }
+body.is-tv .remote-upload-box p { font-size: 0.95rem; margin: 6px 0; }
+body.is-tv .qr-wrap { margin: 10px 0; }
 body.is-tv .upload-qr {
-  width: 200px;
-  height: 200px;
+  width: 260px;
+  height: 260px;
   max-width: 100%;
-  padding: 6px;
+  padding: 8px;
 }
-body.is-tv .upload-url { font-size: 0.82rem; margin-bottom: 6px; }
+body.is-tv .upload-url { font-size: 0.9rem; margin-bottom: 8px; }
 body.is-tv .device-id {
-  font-size: 1.7rem;
-  letter-spacing: 3px;
-  padding: 8px 10px;
+  font-size: 2rem;
+  letter-spacing: 4px;
+  padding: 10px 12px;
 }
-body.is-tv .login-tv-hint {
-  display: block;
-  margin-top: 0.55rem;
-  font-size: 0.78rem;
-  color: #94a3b8;
-  letter-spacing: 0.01em;
-}
-body.is-tv .error { font-size: 0.85rem; margin-top: 0.35rem; }
-body.is-tv .global-spinner {
-  grid-column: 1 / -1;
-  grid-row: 1 / -1;
-}
+body.is-tv .error { font-size: 0.9rem; margin-top: 0.6rem; }
 @media (max-height: 800px) {
   body.is-tv .login-logo { display: none; }
-  body.is-tv .upload-qr { width: 160px; height: 160px; }
-  body.is-tv .device-id { font-size: 1.45rem; }
+  body.is-tv .upload-qr { width: 200px; height: 200px; }
+  body.is-tv .device-id { font-size: 1.55rem; }
 }
 body.is-tv .compact-header { padding: 0.9rem 1.4rem; font-size: 1.05rem; }
 body.is-tv .header-left h1 { font-size: 1.4rem; }

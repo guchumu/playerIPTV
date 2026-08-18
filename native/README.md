@@ -29,21 +29,22 @@ Para publicar una versión descargable, crea una etiqueta y el APK se adjunta
 solo a la Release:
 
 ```bash
-git tag v1.0.1 && git push origin v1.0.1
+git tag v1.0.2 && git push origin v1.0.2
 ```
 
-## Cómo se instala en el televisor
+## Cómo se instala (Fire Stick y móvil Android)
 
-Android TV y Google TV no permiten instalar desde un archivo sin más. Lo
-habitual:
+El mismo APK sirve para Fire Stick / Android TV y para el teléfono. En el
+televisor leanback es opcional, así que también aparece en el cajón del móvil.
 
-1. En el televisor, Ajustes → Seguridad → permitir apps de origen desconocido.
-2. Instala la app **Downloader** desde la tienda del televisor.
-3. Sube el APK a tu servidor, por ejemplo a `downloads/` del propio player, y
-   en Downloader escribe la dirección: `acortador.vip/player/downloads/…apk`.
+1. Permitir apps de origen desconocido (Ajustes → Seguridad).
+2. En Fire Stick, instala **Downloader** desde la tienda de Amazon.
+3. En Downloader (o en el móvil, descargando el archivo) abre
+   `acortador.vip/player/downloads/tv.apk`.
 
-Con un ordenador cerca y el televisor en modo desarrollador también sirve
-`adb connect IP_DEL_TELEVISOR` y `adb install streambox-tv-….apk`.
+No hace falta Android Studio ni Java en tu ordenador: el APK lo firma GitHub
+Actions. Con un PC cerca y el televisor en modo desarrollador también sirve
+`adb install`.
 
 ## Qué hace que sea una app de TV y no de móvil
 
@@ -79,17 +80,15 @@ cd native/android && ./gradlew assembleDebug
 # salida: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## El límite que conviene saber
+## Reproducción: ExoPlayer, no el WebView
 
-La app usa el WebView del sistema, así que la reproducción depende de él. En
-Android TV y Google TV el WebView es Chrome y se actualiza desde la tienda, por
-lo que `mpegts.js` y `hls.js` funcionan igual que en el ordenador. En Fire OS
-(Fire Stick) el WebView es más antiguo y el soporte de MSE es peor: ahí la
-reproducción de streams `.ts` puede fallar aunque la app se instale bien.
+La interfaz sigue siendo la web (categorías, QR, guía). Al elegir un canal, la
+app nativa abre ExoPlayer (Media3) a pantalla completa y reproduce el mismo
+`stream.php` (TS) o la URL HLS. En el navegador y en la PWA se sigue usando
+`<video>` + mpegts.js.
 
-Si un día la reproducción por WebView se queda corta, el paso siguiente es una
-app nativa con ExoPlayer, que decodifica HLS y TS por hardware. Es bastante más
-trabajo y ya no reutilizaría la interfaz web.
+`tools/patch_android_tv.py` copia el plugin `NativePlayer`, la Activity del
+reproductor y las dependencias Media3 justo después de `npx cap add android`.
 
 ## iOS
 

@@ -1,6 +1,6 @@
 /*******************************************************
  * STREAMBOX IPTV - CORE.JS (backup que funcionaba + mejoras)
- * Login Xtream / M3U, get.php output=ts, parseM3U, mpegts/HLS
+ * Login por QR (carga remota), get.php output=ts, parseM3U, mpegts/HLS / ExoPlayer
  *******************************************************/
 
 if (!window.CSS) window.CSS = {};
@@ -15,6 +15,7 @@ const EPG_URL = "epg_api.php";
 let currentServer = "";
 let hls = null;
 let mpegtsPlayer = null;
+let nativePlaybackActive = false;
 const BUFFER_KEY = "streambox_buffer";
 const DEFAULT_BUFFER_SECONDS = 10;
 // Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
@@ -162,6 +163,10 @@ function displayName(str) {
     .replace(/^EU\|ES\s*/i, "");
 }
 
+function displayCategoryName(str) {
+  return displayName(str).replace(/^ES\s+/i, "");
+}
+
 function getBufferSeconds() {
   const raw = localStorage.getItem(BUFFER_KEY);
   const n = parseInt(raw == null ? String(DEFAULT_BUFFER_SECONDS) : raw, 10);
@@ -182,7 +187,7 @@ function getEngineBufferSeconds() {
   return Math.max(getBufferSeconds(), 10);
 }
 
-function stopPlayback() {
+function stopPlayback(opts) {
   // Vaciar el <video> dispara un evento de error propio; sin esta marca el
   // reconector lo confundiría con una caída del stream.
   teardownInProgress = true;
@@ -192,6 +197,8 @@ function stopPlayback() {
   teardownTimer = setTimeout(() => {
     teardownInProgress = false;
   }, 400);
+
+  if (!(opts && opts.keepNative)) nativePlayerStop();
 
   try {
     if (hls) {
@@ -731,7 +738,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       return true;
     }
 
-    throw new Error("Rellena los datos de Xtream o usa una URL M3U.");
+    throw new Error("Escanea el QR para cargar la lista.");
   } catch (error) {
     showSpinner(false);
     setLoginStatus(error.message || "Error al iniciar sesión.");
@@ -746,7 +753,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 function cancelLogin() {
   loginCancelled = true;
   showSpinner(false);
-  setLoginStatus("Entrada automática cancelada. Pulsa Cargar Contenido.");
+  setLoginStatus("Entrada automática cancelada. Escanea el QR para cargar la lista.");
   startRemotePolling();
 }
 
@@ -883,15 +890,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSession().then((saved) => {
     if (!saved) return;
-    try {
-      if (saved.server && document.getElementById("serverUrl")) document.getElementById("serverUrl").value = saved.server;
-      if (saved.username && saved.username !== "Invitado M3U" && document.getElementById("username")) {
-        document.getElementById("username").value = saved.username;
-      }
-      if (saved.password && document.getElementById("password")) document.getElementById("password").value = saved.password;
-      if (saved.m3uUrl && document.getElementById("m3uUrl")) document.getElementById("m3uUrl").value = saved.m3uUrl;
-    } catch (e) {}
-
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
     if (!canAutoLogin) return;
 
@@ -905,22 +903,7 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("resize", () => {
   detectDevice();
   paintVirtualWindow(true);
-  if (isTvLayout() && isLoginScreenActive()) initTvLoginFocus();
 });
-
-const loginForm = document.getElementById("loginForm");
-if (loginForm) {
-  loginForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (pollingInterval) clearInterval(pollingInterval);
-    const serverUrl = document.getElementById("serverUrl") ? document.getElementById("serverUrl").value.trim() : "";
-    const username = document.getElementById("username") ? document.getElementById("username").value.trim() : "";
-    const password = document.getElementById("password") ? document.getElementById("password").value.trim() : "";
-    const m3uUrl = document.getElementById("m3uUrl") ? document.getElementById("m3uUrl").value.trim() : "";
-    performLoginAction(serverUrl, username, password, m3uUrl);
-  });
-}
 
 async function fetchXtream(endpoint, params, serverOverride) {
   const targetServer = serverOverride || currentServer;
@@ -1069,6 +1052,7 @@ async function sendHeartbeat() {
       return;
     }
     if (data.stop_playback) {
+      nativePlayerStop();
       if (hls) {
         hls.destroy();
         hls = null;
@@ -1641,7 +1625,7 @@ function getPlaybackStats() {
     lines.push("  url origen: " + maskUrl(channel.url));
     lines.push("  url activa: " + maskUrl(video.getAttribute("data-active-url")));
   }
-  lines.push("  motor: " + (hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
+  lines.push("  motor: " + (nativePlaybackActive ? "ExoPlayer" : hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
   lines.push("  readyState: " + video.readyState + " · networkState: " + video.networkState);
   const mediaError = describeMediaError();
   if (mediaError) lines.push("  error del <video>: " + mediaError);
@@ -1930,7 +1914,7 @@ function renderCategoryButtons(keepSelection) {
     btn.className = "category-btn";
     if (catName === FAV_NAME || catName === HIST_NAME) btn.classList.add("is-special");
     btn.dataset.category = catName;
-    btn.textContent = displayName(catName);
+    btn.textContent = displayCategoryName(catName);
     btn.title = catName;
     btn.addEventListener("click", () => {
       const search = document.getElementById("channelSearch");
@@ -1974,7 +1958,7 @@ function selectCategory(categoryName) {
   });
 
   renderChannels(channelsForCategory(categoryName));
-  if (channelColumnTitle) channelColumnTitle.textContent = displayName(categoryName);
+  if (channelColumnTitle) channelColumnTitle.textContent = displayCategoryName(categoryName);
   if (currentFocus) currentFocus.col = 0;
 }
 
@@ -2028,7 +2012,7 @@ function buildChannelRow(channel) {
   if (searchQuery && channel.category) {
     const catEl = document.createElement("div");
     catEl.className = "channel-epg";
-    catEl.textContent = displayName(channel.category);
+    catEl.textContent = displayCategoryName(channel.category);
     catEl.title = channel.category;
     info.appendChild(catEl);
   }
@@ -2048,7 +2032,10 @@ function buildChannelRow(channel) {
   channelDiv.appendChild(favBtn);
 
   channelDiv.addEventListener("click", () => {
-    if (currentlyPlayingId === channel.id) toggleFullscreen();
+    if (currentlyPlayingId === channel.id) {
+      if (nativePlayerPlugin()) playChannel(channel);
+      else toggleFullscreen();
+    }
     else selectChannel(channel);
   });
   if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
@@ -2114,7 +2101,7 @@ function runChannelSearch(query) {
       normalizeSearch(ch.name).indexOf(needle) >= 0 ||
       normalizeSearch(displayName(ch.name)).indexOf(needle) >= 0 ||
       normalizeSearch(ch.category).indexOf(needle) >= 0 ||
-      normalizeSearch(displayName(ch.category)).indexOf(needle) >= 0 ||
+      normalizeSearch(displayCategoryName(ch.category)).indexOf(needle) >= 0 ||
       String(ch.chno) === searchQuery
   );
   document.querySelectorAll(".category-btn").forEach((b) => b.classList.remove("active"));
@@ -2433,7 +2420,69 @@ function playChannel(channel) {
   updatePlaybackStatus();
 }
 
+function nativePlayerPlugin() {
+  try {
+    const cap = window.Capacitor;
+    if (!cap) return null;
+    const native = typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : !!cap.isNative;
+    if (!native) return null;
+    const plugin = cap.Plugins && cap.Plugins.NativePlayer;
+    return plugin && typeof plugin.play === "function" ? plugin : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function nativePlayerStop() {
+  nativePlaybackActive = false;
+  const plugin = nativePlayerPlugin();
+  if (!plugin || typeof plugin.stop !== "function") return;
+  try {
+    plugin.stop();
+  } catch (e) {}
+}
+
+async function startNativePlayback(channel) {
+  const plugin = nativePlayerPlugin();
+  if (!plugin) return false;
+  const gen = ++playGen;
+  showVideoSpinner(true, "Abriendo reproductor…");
+  stopPlayback({ keepNative: true });
+  updateActivity(channel);
+  resetTrackSelectors();
+  hlsRecoveries = 0;
+
+  const originalUrl = channel.url;
+  const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
+  const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
+
+  let playUrl = originalUrl;
+  let mime = "application/x-mpegURL";
+  if (!isM3u8) {
+    playUrl = currentDomain + (await signedStreamHref(originalUrl));
+    mime = "video/mp2t";
+  }
+  if (gen !== playGen) return true;
+
+  try {
+    await plugin.play({ url: playUrl, title: displayName(channel.name), mime: mime });
+    nativePlaybackActive = true;
+    showVideoSpinner(false);
+    logPlayback("motor", "ExoPlayer · " + maskUrl(playUrl));
+  } catch (e) {
+    nativePlaybackActive = false;
+    showVideoSpinner(false);
+    logPlayback("error exo", String((e && e.message) || e));
+    showToast("No se pudo abrir el reproductor nativo");
+  }
+  return true;
+}
+
 function startPlayback(channel) {
+  if (nativePlayerPlugin()) {
+    startNativePlayback(channel);
+    return;
+  }
   if (!video) return;
   const gen = ++playGen;
   showVideoSpinner(true);
@@ -2764,13 +2813,17 @@ function updatePlaybackStatus() {
   checkDroppedFrames();
 
   if (statusQuality) {
-    const parts = [];
-    if (video && video.videoWidth) parts.push(video.videoWidth + "×" + video.videoHeight);
-    try {
-      const level = hls && hls.levels ? hls.levels[hls.currentLevel] : null;
-      if (level && level.bitrate) parts.push(Math.round(level.bitrate / 1000) + " kbps");
-    } catch (e) {}
-    statusQuality.textContent = parts.length ? parts.join(" · ") : "Conectando...";
+    if (nativePlaybackActive) {
+      statusQuality.textContent = "ExoPlayer";
+    } else {
+      const parts = [];
+      if (video && video.videoWidth) parts.push(video.videoWidth + "×" + video.videoHeight);
+      try {
+        const level = hls && hls.levels ? hls.levels[hls.currentLevel] : null;
+        if (level && level.bitrate) parts.push(Math.round(level.bitrate / 1000) + " kbps");
+      } catch (e) {}
+      statusQuality.textContent = parts.length ? parts.join(" · ") : "Conectando...";
+    }
   }
 
   if (statusStalls) {
@@ -3436,10 +3489,6 @@ window.addEventListener("beforeunload", () => {
 });
 
 /********** NAVEGACIÓN SMART TV (MANDO COMPLETO) **********/
-const loginElements = ["serverUrl", "username", "password", "m3uUrl", "loginSubmitBtn"];
-let loginFocusIndex = 0;
-let loginTyping = false;
-
 const BACK_KEYS = ["Escape", "Backspace", "BrowserBack", "GoBack"];
 // El botón Atrás de los mandos de Tizen y webOS llega con estos códigos.
 const BACK_KEYCODES = [10009, 461];
@@ -3464,137 +3513,8 @@ function isLoginScreenActive() {
   return !!(loginScreen && loginScreen.style.display !== "none" && loginScreen.classList.contains("active"));
 }
 
-function getLoginControl(index) {
-  const i = index == null ? loginFocusIndex : index;
-  return document.getElementById(loginElements[i]);
-}
-
-function clearLoginFocusClass() {
-  loginElements.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove("login-focus");
-  });
-}
-
-function applyLoginBrowseHighlight() {
-  clearLoginFocusClass();
-  if (loginFocusIndex < 0) loginFocusIndex = 0;
-  if (loginFocusIndex > loginElements.length - 1) loginFocusIndex = loginElements.length - 1;
-  const el = getLoginControl();
-  if (!el) return;
-  el.classList.add("login-focus");
-  try {
-    el.scrollIntoView({ block: "nearest", inline: "nearest" });
-  } catch (err) {}
-}
-
-function enterLoginBrowseMode(index) {
-  loginTyping = false;
-  if (typeof index === "number") loginFocusIndex = index;
-  const active = document.activeElement;
-  if (active && loginElements.indexOf(active.id) >= 0) {
-    try {
-      active.blur();
-    } catch (err) {}
-  }
-  applyLoginBrowseHighlight();
-}
-
-function enterLoginTypingMode() {
-  const el = getLoginControl();
-  if (!el) return;
-  if (el.id === "loginSubmitBtn") {
-    el.click();
-    return;
-  }
-  loginTyping = true;
-  applyLoginBrowseHighlight();
-  el.focus();
-}
-
 function initTvLoginFocus() {
-  if (!isTvLayout() || !isLoginScreenActive()) return;
-  enterLoginBrowseMode(loginFocusIndex >= 0 ? loginFocusIndex : 0);
-}
-
-function handleTvLoginKey(e) {
-  const typingNow = loginTyping && isTypingTarget(e.target);
-
-  if (isConfirmKey(e)) {
-    e.preventDefault();
-    if (loginFocusIndex < 0) loginFocusIndex = 0;
-    const id = loginElements[loginFocusIndex];
-    if (id === "loginSubmitBtn") {
-      const btn = document.getElementById("loginSubmitBtn");
-      if (btn) btn.click();
-      return true;
-    }
-    if (typingNow) {
-      const next = loginFocusIndex + 1;
-      enterLoginBrowseMode(Math.min(next, loginElements.length - 1));
-      return true;
-    }
-    enterLoginTypingMode();
-    return true;
-  }
-
-  if (typingNow) return true;
-
-  if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-    e.preventDefault();
-    loginFocusIndex = Math.min(loginFocusIndex + 1, loginElements.length - 1);
-    enterLoginBrowseMode();
-    return true;
-  }
-  if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-    e.preventDefault();
-    loginFocusIndex = Math.max(loginFocusIndex - 1, 0);
-    enterLoginBrowseMode();
-    return true;
-  }
-  return false;
-}
-
-function handleDesktopLoginKey(e) {
-  if (e.key !== "Enter") e.preventDefault();
-
-  if (e.key === "ArrowDown") {
-    loginFocusIndex = Math.min(loginFocusIndex + 1, loginElements.length - 1);
-  } else if (e.key === "ArrowUp") {
-    loginFocusIndex = Math.max(loginFocusIndex - 1, 0);
-  } else if (isConfirmKey(e)) {
-    if (loginFocusIndex >= 0) {
-      const el = getLoginControl();
-      if (el) el.focus();
-      if (loginElements[loginFocusIndex] === "loginSubmitBtn") {
-        const btn = document.getElementById("loginSubmitBtn");
-        if (btn) btn.click();
-      }
-    }
-    return;
-  }
-  if (loginFocusIndex >= 0) {
-    const el = getLoginControl();
-    if (el) el.focus();
-  }
-}
-
-const loginFormEl = document.getElementById("loginForm");
-if (loginFormEl) {
-  loginFormEl.addEventListener("focusin", (e) => {
-    if (!isTvLayout() || !isLoginScreenActive()) return;
-    const idx = loginElements.indexOf(e.target && e.target.id);
-    if (idx < 0) return;
-    if (loginTyping) {
-      loginFocusIndex = idx;
-      applyLoginBrowseHighlight();
-      return;
-    }
-    loginFocusIndex = idx;
-    requestAnimationFrame(() => {
-      if (!loginTyping) enterLoginBrowseMode(loginFocusIndex);
-    });
-  });
+  // La entrada es solo el QR: no hay campos que recorrer con el mando.
 }
 
 // Al salir de pantalla completa el cursor vuelve a la lista, sobre el canal
@@ -3638,18 +3558,8 @@ document.addEventListener("keydown", (e) => {
 
   if (BACK_KEYS.includes(e.key) || BACK_KEYCODES.includes(e.keyCode)) {
     // Backspace dentro de un campo tiene que seguir borrando texto.
-    if (e.key === "Backspace" && isTypingTarget(e.target)) {
-      if (isTvLayout() && isLoginScreenActive() && !String(e.target.value || "")) {
-        e.preventDefault();
-        enterLoginBrowseMode(loginFocusIndex);
-      }
-      return;
-    }
-    if (isTvLayout() && isLoginScreenActive() && (loginTyping || isTypingTarget(e.target))) {
-      e.preventDefault();
-      enterLoginBrowseMode(loginFocusIndex);
-      return;
-    }
+    if (e.key === "Backspace" && isTypingTarget(e.target)) return;
+    if (isLoginScreenActive()) return;
     if (isFullscreen()) {
       e.preventDefault();
       exitFullscreen();
@@ -3674,15 +3584,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  if (isLoginScreenActive()) {
-    if (isTvLayout()) {
-      handleTvLoginKey(e);
-      return;
-    }
-    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !isConfirmKey(e)) return;
-    handleDesktopLoginKey(e);
-    return;
-  }
+  if (isLoginScreenActive()) return;
 
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "OK", "Select"];
   if (!validKeys.includes(e.key) && !isConfirmKey(e)) return;

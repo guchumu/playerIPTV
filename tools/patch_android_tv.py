@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Convierte el proyecto Android de Capacitor en una app de Android TV.
+"""Convierte el proyecto Android de Capacitor en una app de Android TV
+con reproductor nativo ExoPlayer (Media3).
 
 `npx cap add android` genera un proyecto pensado para móvil. Para que el
 televisor la acepte y la muestre en su pantalla de inicio hacen falta cuatro
@@ -10,6 +11,10 @@ cosas que Capacitor no pone:
   3. Un banner de 320x180, que en leanback es lo único que ve el usuario.
   4. La configuración de red que permite tráfico http a los orígenes IPTV.
 
+Además se inyecta ExoPlayer: el WebView de Fire Stick no decodifica bien
+MPEG-TS con mse, así que la web llama a un plugin nativo y se abre una
+Activity a pantalla completa.
+
 Se edita el XML con ElementTree en vez de con expresiones regulares porque el
 manifest de Capacitor cambia de forma entre versiones. Es idempotente: se puede
 ejecutar varias veces sin duplicar nada.
@@ -17,6 +22,7 @@ ejecutar varias veces sin duplicar nada.
 Uso: python3 tools/patch_android_tv.py [ruta/al/proyecto/android]
 """
 
+import re
 import shutil
 import sys
 import xml.etree.ElementTree as ET
@@ -24,8 +30,16 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 CONFIG = RAIZ / "native" / "android-config"
+EXO = CONFIG / "exoplayer"
 ANDROID = "http://schemas.android.com/apk/res/android"
 A = f"{{{ANDROID}}}"
+
+MEDIA3 = "1.4.1"
+DEPS_MEDIA3 = [
+    f'    implementation "androidx.media3:media3-exoplayer:{MEDIA3}"',
+    f'    implementation "androidx.media3:media3-exoplayer-hls:{MEDIA3}"',
+    f'    implementation "androidx.media3:media3-ui:{MEDIA3}"',
+]
 
 CARACTERISTICAS_OPCIONALES = [
     "android.hardware.touchscreen",
@@ -107,6 +121,24 @@ def parchear_manifest(ruta):
             app.set(f"{A}{clave}", valor)
             cambios.append(f"application {clave}")
 
+    # 4. Activity de ExoPlayer a pantalla completa.
+    tiene_player = False
+    for act in app.findall("activity"):
+        nombre = act.get(f"{A}name") or ""
+        if nombre.endswith("PlayerActivity"):
+            tiene_player = True
+            break
+    if not tiene_player:
+        app.append(ET.Element("activity", {
+            f"{A}name": ".PlayerActivity",
+            f"{A}configChanges": "keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode",
+            f"{A}exported": "false",
+            f"{A}hardwareAccelerated": "true",
+            f"{A}launchMode": "singleTop",
+            f"{A}theme": "@style/AppTheme",
+        }))
+        cambios.append("actividad PlayerActivity")
+
     indentar(manifest)
     arbol.write(ruta, encoding="utf-8", xml_declaration=True)
     return cambios
@@ -117,14 +149,97 @@ def copiar_recursos(base):
     parejas = [
         (CONFIG / "tv_banner.png", base / "src/main/res/drawable/tv_banner.png"),
         (CONFIG / "network_security_config.xml", base / "src/main/res/xml/network_security_config.xml"),
+        (EXO / "activity_player.xml", base / "src/main/res/layout/activity_player.xml"),
     ]
     for origen, destino in parejas:
         if not origen.exists():
-            raise SystemExit(f"error: falta {origen.relative_to(RAIZ)} (genera el banner con make_tv_banner.py)")
+            raise SystemExit(f"error: falta {origen.relative_to(RAIZ)}")
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origen, destino)
         hechos.append(str(destino.relative_to(base)))
     return hechos
+
+
+def encontrar_mainactivity(base: Path) -> Path:
+    java = list((base / "src/main/java").rglob("MainActivity.java"))
+    if java:
+        return java[0]
+    kotlin = list((base / "src/main/kotlin").rglob("MainActivity.kt"))
+    if kotlin:
+        return kotlin[0]
+    raise SystemExit("error: no encuentro MainActivity tras cap add")
+
+
+def paquete_de(main: Path, base: Path) -> str:
+    raiz_java = base / "src/main/java"
+    raiz_kt = base / "src/main/kotlin"
+    raiz = raiz_java if raiz_java in main.parents else raiz_kt
+    return ".".join(main.parent.relative_to(raiz).parts)
+
+
+def escribir_java(origen: Path, destino: Path, paquete: str):
+    texto = origen.read_text(encoding="utf-8").replace("PACKAGE_NAME", paquete)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto, encoding="utf-8")
+
+
+def copiar_exoplayer(base: Path) -> list:
+    main = encontrar_mainactivity(base)
+    paquete = paquete_de(main, base)
+    hechos = []
+    for nombre in ("NativePlayerPlugin.java", "PlayerActivity.java"):
+        origen = EXO / nombre
+        if not origen.exists():
+            raise SystemExit(f"error: falta {origen.relative_to(RAIZ)}")
+        destino = main.parent / nombre
+        escribir_java(origen, destino, paquete)
+        hechos.append(str(destino.relative_to(base)))
+
+    if main.suffix == ".kt":
+        main.write_text(
+            "package " + paquete + "\n\n"
+            "import android.os.Bundle\n"
+            "import com.getcapacitor.BridgeActivity\n\n"
+            "class MainActivity : BridgeActivity() {\n"
+            "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+            "        registerPlugin(NativePlayerPlugin::class.java)\n"
+            "        super.onCreate(savedInstanceState)\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+    else:
+        main.write_text(
+            "package " + paquete + ";\n\n"
+            "import android.os.Bundle;\n"
+            "import com.getcapacitor.BridgeActivity;\n\n"
+            "public class MainActivity extends BridgeActivity {\n"
+            "    @Override\n"
+            "    public void onCreate(Bundle savedInstanceState) {\n"
+            "        registerPlugin(NativePlayerPlugin.class);\n"
+            "        super.onCreate(savedInstanceState);\n"
+            "    }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+    hechos.append(str(main.relative_to(base)) + " (plugin NativePlayer)")
+    return hechos
+
+
+def parchear_gradle(ruta: Path) -> list:
+    if not ruta.exists():
+        raise SystemExit(f"error: no existe {ruta}")
+    texto = ruta.read_text(encoding="utf-8")
+    if "media3-exoplayer" in texto:
+        return ["gradle: Media3 ya estaba"]
+    patron = re.compile(r"implementation project\(['\"]:capacitor-android['\"]\)")
+    match = patron.search(texto)
+    if not match:
+        raise SystemExit("error: no encuentro capacitor-android en app/build.gradle")
+    ancla = match.group(0)
+    bloque = ancla + "\n" + "\n".join(DEPS_MEDIA3)
+    ruta.write_text(texto.replace(ancla, bloque, 1), encoding="utf-8")
+    return ["gradle: Media3 ExoPlayer " + MEDIA3]
 
 
 def main():
@@ -135,9 +250,13 @@ def main():
     if not manifest.exists():
         raise SystemExit(f"error: no existe {manifest}\nejecuta antes: npx cap add android")
 
-    print("parcheando para Android TV")
+    print("parcheando para Android TV + ExoPlayer")
     for r in copiar_recursos(base):
         print(f"  recurso: {r}")
+    for r in copiar_exoplayer(base):
+        print(f"  exoplayer: {r}")
+    for c in parchear_gradle(base / "build.gradle"):
+        print(f"  {c}")
     cambios = parchear_manifest(manifest)
     for c in cambios:
         print(f"  manifest: {c}")

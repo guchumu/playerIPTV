@@ -101,17 +101,24 @@ jobs:
           ORIGEN=native/android/app/build/outputs/apk/release/app-release.apk
           DESTINO="streambox-tv-1.0.${{ github.run_number }}.apk"
           cp "$ORIGEN" "$DESTINO"
-          ls -lh "$DESTINO"
+          # El mismo APK vale para Fire Stick y para el móvil: leanback es opcional.
+          cp "$ORIGEN" tv.apk
+          cp "$ORIGEN" android.apk
+          ls -lh "$DESTINO" tv.apk android.apk
           echo "nombre=$DESTINO" >> "$GITHUB_OUTPUT"
-          # Comprobación de que el banner y leanback han entrado de verdad.
+          # Comprobación de que el banner, leanback y ExoPlayer han entrado.
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
           "$AAPT" dump badging "$DESTINO" | grep -Ei "leanback|banner|package:|sdkVersion" || true
+          unzip -l "$DESTINO" | grep -Ei "exoplayer|media3|PlayerActivity" || true
 
       - name: Publicar el APK como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.apk.outputs.nombre }}
-          path: ${{ steps.apk.outputs.nombre }}
+          path: |
+            ${{ steps.apk.outputs.nombre }}
+            tv.apk
+            android.apk
           retention-days: 90
 
       - name: Publicar la clave nueva (guárdala como secreto KEYSTORE_BASE64)
@@ -126,4 +133,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.apk.outputs.nombre }}
+          files: |
+            ${{ steps.apk.outputs.nombre }}
+            tv.apk
+            android.apk
+          body: |
+            El mismo APK sirve para Fire Stick / Android TV y para el móvil Android.
+            Reproduce con ExoPlayer (no usa mpegts.js en la app nativa).
+
+            Instalación en Fire Stick: permitir apps de origen desconocido e instalar **Downloader**. No hace falta Android Studio.
