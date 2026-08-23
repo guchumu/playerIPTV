@@ -756,6 +756,7 @@ async function switchToList(listId) {
       const cached = await readListCache(user);
       if (cached && !detectProviderListError(cached)) {
         parseM3U(cached, currentListMeta(false));
+        tagChannelsWithList(entry);
       }
       if (!channelsData.length) {
         const ok = await performLoginAction(user.server, user.username, user.password, user.m3uUrl, entry.name, {
@@ -807,7 +808,20 @@ function renderListSelector() {
     sel.value = savedLists[0].id;
     setActiveListId(savedLists[0].id);
   }
-  sel.hidden = savedLists.length <= 1;
+  sel.hidden = savedLists.length < 1;
+  updateChannelColumnTitle();
+}
+
+function updateChannelColumnTitle() {
+  const title = document.getElementById("channelColumnTitle");
+  if (!title) return;
+  if (searchQuery) return;
+  if (activeListId === ALL_LISTS_ID) {
+    title.textContent = "Canales · Todas las listas";
+    return;
+  }
+  const entry = savedLists.find((l) => l.id === activeListId);
+  title.textContent = entry ? "Canales · " + entry.name : "Canales";
 }
 
 function renderListsManagePanel() {
@@ -1156,8 +1170,11 @@ function enterChannelView(user) {
   }
   if (channelsData.length) markSessionLive();
   try {
+    const entry = savedLists.find((l) => l.id === activeListId);
+    if (entry && activeListId !== ALL_LISTS_ID) tagChannelsWithList(entry);
     renderCategories();
     renderListSelector();
+    updateChannelColumnTitle();
   } catch (e) {
     showToast("Error al mostrar canales");
   }
@@ -2679,7 +2696,15 @@ function selectCategory(categoryName, opts) {
   });
 
   renderChannels(channelsForCategory(categoryName));
-  if (channelColumnTitle) channelColumnTitle.textContent = displayCategoryName(categoryName);
+  if (channelColumnTitle) {
+    const catLabel = displayCategoryName(categoryName);
+    if (activeListId === ALL_LISTS_ID) {
+      channelColumnTitle.textContent = catLabel + " · Todas las listas";
+    } else {
+      const entry = savedLists.find((l) => l.id === activeListId);
+      channelColumnTitle.textContent = entry ? catLabel + " · " + entry.name : catLabel;
+    }
+  }
   if (currentFocus && !(opts && opts.keepFocus)) currentFocus.col = 0;
 }
 
