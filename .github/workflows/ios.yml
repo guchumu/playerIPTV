@@ -1,0 +1,333 @@
+name: IPA iOS
+
+# Compila el IPA en los runners macOS de GitHub (este repo no tiene Xcode local).
+# El archivo publicado se llama siempre ios.ipa, igual que downloads/tv.apk.
+#
+# Lanzarlo a mano: Actions → "IPA iOS" → Run workflow.
+# O: git tag ios-1 && git push origin ios-1
+#
+# Sin los secretos de Apple Developer el artefacto existe pero NO se instala
+# en un iPhone normal. No se fabrica una firma falsa.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "ios-*"
+
+permissions:
+  contents: write
+
+env:
+  LANG: en_US.UTF-8
+  LANGUAGE: en_US.UTF-8
+  LC_ALL: en_US.UTF-8
+
+jobs:
+  construir:
+    runs-on: macos-latest
+
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar Capacitor
+        working-directory: native
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Generar el proyecto iOS
+        working-directory: native
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Aplicar ATS (HTTP de Xtream) y Pods
+        run: python3 tools/patch_ios.py native/ios
+
+      - name: Reinstalar Pods tras el parche
+        working-directory: native/ios/App
+        run: pod install
+
+      - name: Comprobar si hay certificado de Apple
+        id: firma
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_PROVISION_BASE64: ${{ secrets.IOS_PROVISION_BASE64 }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          if [ -n "$IOS_CERTIFICATE_BASE64" ] && [ -n "$IOS_PROVISION_BASE64" ] && [ -n "$IOS_TEAM_ID" ]; then
+            echo "disponible=si" >> "$GITHUB_OUTPUT"
+            echo "Hay certificado, perfil y Team ID: se firmará el IPA."
+          else
+            echo "disponible=no" >> "$GITHUB_OUTPUT"
+            echo "Faltan secretos de Apple. Se empaquetará ios.ipa SIN firma: no instalable en un iPhone normal."
+          fi
+
+      - name: Instalar certificado y perfil de aprovisionamiento
+        if: steps.firma.outputs.disponible == 'si'
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISION_BASE64: ${{ secrets.IOS_PROVISION_BASE64 }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, os, pathlib
+          tmp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          (tmp / "build_certificate.p12").write_bytes(
+              base64.b64decode(os.environ["IOS_CERTIFICATE_BASE64"])
+          )
+          (tmp / "build_pp.mobileprovision").write_bytes(
+              base64.b64decode(os.environ["IOS_PROVISION_BASE64"])
+          )
+          print("certificado y perfil decodificados")
+          PY
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="${{ github.run_id }}"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/build_certificate.p12" \
+            -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          UUID=$(security cms -D -i "$RUNNER_TEMP/build_pp.mobileprovision" | plutil -extract UUID raw -)
+          cp "$RUNNER_TEMP/build_pp.mobileprovision" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
+          cp "$RUNNER_TEMP/build_pp.mobileprovision" \
+            "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/${UUID}.mobileprovision"
+          echo "perfil $UUID instalado"
+
+      - name: Compilar y exportar el IPA
+        id: ipa
+        env:
+          FIRMADO: ${{ steps.firma.outputs.disponible }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_EXPORT_METHOD: ${{ secrets.IOS_EXPORT_METHOD }}
+        run: |
+          set -euo pipefail
+          WS="$GITHUB_WORKSPACE/native/ios/App/App.xcworkspace"
+          if [ ! -d "$WS" ]; then
+            echo "no encuentro App.xcworkspace"
+            find native/ios -name "*.xcworkspace" -o -name "*.xcodeproj" || true
+            exit 1
+          fi
+          xcodebuild -workspace "$WS" -list
+          VERSION="1.0.${{ github.run_number }}"
+          ARCHIVE="$RUNNER_TEMP/App.xcarchive"
+          EXPORT="$RUNNER_TEMP/export"
+          DERIVED="$RUNNER_TEMP/DerivedData"
+          DESTINO="$GITHUB_WORKSPACE/ios.ipa"
+          NOMBRE="streambox-ios-${VERSION}.ipa"
+
+          empaquetar_app() {
+            local app="$1"
+            local dest="$2"
+            rm -rf "$RUNNER_TEMP/ipa-payload"
+            mkdir -p "$RUNNER_TEMP/ipa-payload/Payload"
+            cp -R "$app" "$RUNNER_TEMP/ipa-payload/Payload/"
+            rm -f "$dest"
+            (cd "$RUNNER_TEMP/ipa-payload" && zip -qry "$dest" Payload)
+          }
+
+          if [ "$FIRMADO" = "si" ]; then
+            IDENTITY=$(security find-identity -v -p codesigning | awk -F'"' '/Apple|iPhone/{print $2; exit}')
+            if [ -z "$IDENTITY" ]; then
+              echo "no encuentro una identidad de firma en el llavero"
+              security find-identity -v -p codesigning || true
+              exit 1
+            fi
+            PROFILE_NAME=$(security cms -D -i "$RUNNER_TEMP/build_pp.mobileprovision" | plutil -extract Name raw -)
+            METODO="$IOS_EXPORT_METHOD"
+            if [ -z "$METODO" ]; then
+              METODO=$(python3 - <<'PY'
+          import os, plistlib, subprocess
+          raw = subprocess.check_output(
+              ["security", "cms", "-D", "-i", os.environ["RUNNER_TEMP"] + "/build_pp.mobileprovision"]
+          )
+          p = plistlib.loads(raw)
+          ents = p.get("Entitlements") or {}
+          if p.get("ProvisionsAllDevices"):
+              print("enterprise")
+          elif "ProvisionedDevices" in p:
+              print("development" if ents.get("get-task-allow") else "ad-hoc")
+          else:
+              print("app-store")
+          PY
+              )
+            fi
+            echo "firma: $IDENTITY / perfil: $PROFILE_NAME / método: $METODO"
+            xcodebuild archive \
+              -workspace "$WS" \
+              -scheme App \
+              -configuration Release \
+              -destination "generic/platform=iOS" \
+              -archivePath "$ARCHIVE" \
+              -derivedDataPath "$DERIVED" \
+              DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="$IDENTITY" \
+              PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+              CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+              MARKETING_VERSION="$VERSION"
+            export METODO EXPORT PROFILE_NAME
+            python3 - <<'PY'
+          import os, pathlib, plistlib
+          metodo = os.environ["METODO"]
+          team = os.environ["IOS_TEAM_ID"]
+          perfil = os.environ["PROFILE_NAME"]
+          export_dir = pathlib.Path(os.environ["EXPORT"])
+          export_dir.mkdir(parents=True, exist_ok=True)
+          opts = {
+              "method": metodo,
+              "teamID": team,
+              "signingStyle": "manual",
+              "compileBitcode": False,
+              "stripSwiftSymbols": True,
+              "thinning": "<none>",
+              "provisioningProfiles": {"com.guchumu.playeriptv": perfil},
+          }
+          plistlib.dump(opts, (export_dir / "ExportOptions.plist").open("wb"))
+          print("ExportOptions:", metodo, team, perfil)
+          PY
+            xcodebuild -exportArchive \
+              -archivePath "$ARCHIVE" \
+              -exportPath "$EXPORT" \
+              -exportOptionsPlist "$EXPORT/ExportOptions.plist"
+            IPA_GEN=$(find "$EXPORT" -name "*.ipa" | head -1)
+            if [ -z "$IPA_GEN" ]; then
+              echo "exportArchive no produjo un .ipa"
+              ls -la "$EXPORT" || true
+              exit 1
+            fi
+            cp "$IPA_GEN" "$DESTINO"
+            echo "firmado=si" >> "$GITHUB_OUTPUT"
+          else
+            set +e
+            xcodebuild archive \
+              -workspace "$WS" \
+              -scheme App \
+              -configuration Release \
+              -destination "generic/platform=iOS" \
+              -archivePath "$ARCHIVE" \
+              -derivedDataPath "$DERIVED" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              DEVELOPMENT_TEAM="" \
+              CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+              MARKETING_VERSION="$VERSION"
+            ARCHIVE_OK=$?
+            set -e
+            APP=""
+            if [ "$ARCHIVE_OK" -eq 0 ]; then
+              APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
+            fi
+            if [ -z "$APP" ]; then
+              echo "archive sin firma no produjo .app; se compila con build"
+              xcodebuild build \
+                -workspace "$WS" \
+                -scheme App \
+                -configuration Release \
+                -sdk iphoneos \
+                -destination "generic/platform=iOS" \
+                -derivedDataPath "$DERIVED" \
+                CODE_SIGNING_ALLOWED=NO \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGN_IDENTITY="-" \
+                DEVELOPMENT_TEAM="" \
+                CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+                MARKETING_VERSION="$VERSION"
+              APP=$(find "$DERIVED" -path "*iphoneos*" -name "App.app" | head -1)
+            fi
+            if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+              echo "no encuentro App.app"
+              find "$DERIVED" -name "*.app" | head -50 || true
+              exit 1
+            fi
+            echo "empaquetando $APP (sin firma de Apple)"
+            empaquetar_app "$APP" "$DESTINO"
+            echo "firmado=no" >> "$GITHUB_OUTPUT"
+          fi
+
+          cp "$DESTINO" "$GITHUB_WORKSPACE/$NOMBRE"
+          ls -lh "$DESTINO" "$GITHUB_WORKSPACE/$NOMBRE"
+          unzip -l "$DESTINO" | head -40
+          echo "nombre=$NOMBRE" >> "$GITHUB_OUTPUT"
+          {
+            echo "StreamBox IPTV — ios.ipa"
+            echo "versión: $VERSION"
+            if [ "${{ steps.firma.outputs.disponible }}" = "si" ]; then
+              echo "firma: Apple Developer (secretos presentes)"
+              echo "Este IPA solo se instala en dispositivos incluidos en el perfil, o vía TestFlight."
+            else
+              echo "firma: NINGUNA (faltan IOS_CERTIFICATE_BASE64, IOS_PROVISION_BASE64, IOS_TEAM_ID)"
+              echo "No se instala en un iPhone normal. No es equivalente a sideloadear el APK con Downloader."
+              echo "Hace falta cuenta de Apple Developer de pago y esos secretos en GitHub Actions."
+              echo "Alternativas: TestFlight, AltStore/Sideloadly (re-firman ellos), o Xcode en un Mac."
+            fi
+            echo "URL estable (cuando el archivo está en el repo): https://acortador.vip/player/downloads/ios.ipa"
+          } > "$GITHUB_WORKSPACE/LEEME-ios.txt"
+
+      - name: Publicar el IPA como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.ipa.outputs.nombre }}
+          path: |
+            ios.ipa
+            ${{ steps.ipa.outputs.nombre }}
+            LEEME-ios.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Adjuntar el IPA a la Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ios.ipa
+            ${{ steps.ipa.outputs.nombre }}
+            LEEME-ios.txt
+          body: |
+            IPA de iOS (`ios.ipa`).
+
+            **Sin certificado de Apple Developer este archivo no se instala en un iPhone normal.**
+            No es como el APK de Android (Downloader). Hace falta cuenta de pago y los secretos
+            `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISION_BASE64`, `IOS_TEAM_ID`.
+
+            URL estable cuando el archivo está desplegado: `https://acortador.vip/player/downloads/ios.ipa`
+
+      - name: Copiar ios.ipa a downloads/ en main
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/ios-')
+        run: |
+          set -euo pipefail
+          cp "$GITHUB_WORKSPACE/ios.ipa" "$RUNNER_TEMP/ios.ipa"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          mkdir -p downloads
+          cp "$RUNNER_TEMP/ios.ipa" downloads/ios.ipa
+          git add downloads/ios.ipa
+          if git diff --staged --quiet; then
+            echo "downloads/ios.ipa no ha cambiado"
+            exit 0
+          fi
+          git commit -m "$(cat <<'EOF'
+          Publicar downloads/ios.ipa para la URL estable del player.
+
+          EOF
+          )"
+          git push origin main
