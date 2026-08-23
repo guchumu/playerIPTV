@@ -29,7 +29,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260819c" />
+      <link rel="stylesheet" href="style.css?v=20260823b" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -140,6 +140,8 @@
                 <div class="channels-toolbar">
                     <h2 id="channelColumnTitle">Canales</h2>
                     <div class="channels-tools">
+                        <select id="listSelect" class="list-select" title="Lista activa" aria-label="Lista activa"></select>
+                        <button type="button" id="listsBtn" class="lists-btn" title="Gestionar listas" aria-label="Gestionar listas">Listas</button>
                         <input type="search" id="channelSearch" class="channel-search" placeholder="Buscar canal…" autocomplete="off" enterkeyhint="search" />
                         <button type="button" id="sortBtn" class="sort-btn" title="Orden de la lista" aria-label="Ordenar canales">A-Z</button>
                     </div>
@@ -207,6 +209,22 @@
 
     <div id="appToast" hidden></div>
 
+    <div id="listsOverlay" class="lists-overlay" hidden>
+        <div class="lists-panel">
+            <div class="lists-header">
+                <strong>Mis listas</strong>
+                <button type="button" id="listsCloseBtn">Cerrar</button>
+            </div>
+            <ul id="listsManageList" class="lists-manage-list"></ul>
+            <div id="listsAddPanel" class="lists-add-panel" hidden>
+                <p class="lists-add-lead">Escanea con el móvil para añadir otra lista</p>
+                <canvas id="listsAddQr" class="lists-add-qr" width="180" height="180" aria-label="QR para añadir lista"></canvas>
+                <p class="lists-add-hint">Puedes ponerle nombre al subirla desde el móvil</p>
+            </div>
+            <button type="button" id="listsAddBtn" class="lists-add-btn">Añadir lista</button>
+        </div>
+    </div>
+
     <div id="debugOverlay" class="debug-overlay" hidden>
         <div class="debug-panel">
             <div class="debug-header" id="debugHeader">
@@ -226,6 +244,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260819c"></script>
+    <script src="core.js?v=20260823b"></script>
 </body>
 </html>

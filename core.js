@@ -19,6 +19,9 @@ let nativePlaybackActive = false;
 let nativeFullscreen = false;
 const BUFFER_KEY = "streambox_buffer";
 const LAST_LIST_KEY = "streambox_last_list";
+const SAVED_LISTS_KEY = "streambox_saved_lists";
+const ACTIVE_LIST_KEY = "streambox_active_list";
+const ALL_LISTS_ID = "__all__";
 const LOGOUT_AT_KEY = "streambox_logout_at";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
@@ -66,6 +69,11 @@ let sessionToken = null;
 let activityInterval = null;
 let heartbeatInterval = null;
 let activeConnection = null;
+let savedLists = [];
+let activeListId = null;
+let listAddPollGen = 0;
+let listAddPollTimer = null;
+let pendingListName = null;
 
 const video = document.getElementById("videoPlayer");
 const spinner = document.getElementById("spinner");
@@ -280,11 +288,13 @@ function enterTvChannelsColumn() {
 
 function ensureTvChannelVisible() {
   if (!channelsContainer || !virtualList.length) return;
-  const h = channelRowHeight();
-  const view = Math.max(channelsContainer.clientHeight || 0, h);
-  const y = currentFocus.row * h;
+  const cols = channelGridCols();
+  const rowH = channelGridRowHeight();
+  const view = Math.max(channelsContainer.clientHeight || 0, rowH);
+  const gridRow = Math.floor(currentFocus.row / cols);
+  const y = gridRow * rowH;
   if (y < channelsContainer.scrollTop) channelsContainer.scrollTop = y;
-  else if (y + h > channelsContainer.scrollTop + view) channelsContainer.scrollTop = y + h - view;
+  else if (y + rowH > channelsContainer.scrollTop + view) channelsContainer.scrollTop = y + rowH - view;
   paintVirtualWindow();
 }
 
@@ -297,6 +307,15 @@ function displayName(str) {
 
 function displayCategoryName(str) {
   return displayName(str).replace(/^ES\s+/i, "");
+}
+
+function extractQualityHint(name) {
+  const n = String(name || "");
+  if (/\b(4K|2160p|UHD)\b/i.test(n)) return "4K";
+  if (/\b(1080p?|FHD|Full\s*HD)\b/i.test(n)) return "1080p";
+  if (/\b(720p?|HD)\b/i.test(n)) return "720p";
+  if (/\bSD\b/i.test(n)) return "SD";
+  return "";
 }
 
 function getBufferSeconds() {
@@ -419,7 +438,7 @@ const UI_KEY = "streambox_ui";
 const signCache = new Map();
 let playGen = 0;
 let virtualList = [];
-let virtualRange = { start: -1, end: -1 };
+let virtualRange = { start: -1, end: -1, cols: 0 };
 
 function bytesToB64(bytes) {
   const arr = new Uint8Array(bytes);
@@ -558,6 +577,358 @@ async function readListCache(user) {
   }
 }
 
+function loadSavedListsRegistry() {
+  try {
+    const raw = localStorage.getItem(SAVED_LISTS_KEY);
+    savedLists = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(savedLists)) savedLists = [];
+  } catch (e) {
+    savedLists = [];
+  }
+  try {
+    activeListId = localStorage.getItem(ACTIVE_LIST_KEY) || null;
+  } catch (e) {
+    activeListId = null;
+  }
+}
+
+function persistSavedLists() {
+  try {
+    localStorage.setItem(SAVED_LISTS_KEY, JSON.stringify(savedLists));
+  } catch (e) {}
+}
+
+function setActiveListId(id) {
+  activeListId = id || null;
+  try {
+    if (activeListId) localStorage.setItem(ACTIVE_LIST_KEY, activeListId);
+    else localStorage.removeItem(ACTIVE_LIST_KEY);
+  } catch (e) {}
+}
+
+function defaultListName(user, fromUpload) {
+  if (fromUpload && String(fromUpload).trim()) return String(fromUpload).trim();
+  if (user && user.isM3U && user.m3uUrl) {
+    try {
+      return new URL(user.m3uUrl).hostname.replace(/^www\./, "");
+    } catch (e) {}
+    return "Lista M3U";
+  }
+  if (user && user.username && user.username !== "Invitado M3U") return user.username;
+  return "Mi lista";
+}
+
+function currentListMeta(prefixId) {
+  if (activeListId === ALL_LISTS_ID) return { listId: "", listName: "", prefixId: false };
+  const entry = savedLists.find((l) => l.id === activeListId);
+  if (entry) return { listId: entry.id, listName: entry.name, prefixId: !!prefixId };
+  if (pendingListName) return { listId: activeListId || "", listName: pendingListName, prefixId: !!prefixId };
+  return { listId: activeListId || "", listName: "", prefixId: !!prefixId };
+}
+
+function tagChannelsWithList(entry) {
+  if (!entry) return;
+  const apply = (ch) => {
+    if (!ch) return;
+    ch.listId = entry.id;
+    ch.listName = entry.name;
+  };
+  channelsData.forEach(apply);
+  channelById.forEach(apply);
+  Object.keys(categoriesData).forEach((cat) => categoriesData[cat].forEach(apply));
+}
+
+async function listEntryToUser(entry) {
+  const user = {
+    username: entry.username || "",
+    server: entry.server || "",
+    isM3U: !!entry.isM3U,
+    m3uUrl: entry.m3uUrl || "",
+    listKey: entry.listKey || listCacheKey(entry),
+  };
+  if (!entry.isM3U) user.password = entry.password || (await openSecret(entry));
+  return user;
+}
+
+async function upsertSavedList(user, name) {
+  if (!user) return null;
+  const listKey = listCacheKey(user);
+  let entry = savedLists.find((l) => l.listKey === listKey);
+  if (entry) {
+    if (name) entry.name = String(name).trim() || entry.name;
+    entry.username = user.username || entry.username;
+    entry.server = user.server || entry.server;
+    entry.m3uUrl = user.m3uUrl || entry.m3uUrl;
+    entry.isM3U = !!user.isM3U;
+    entry.updatedAt = Date.now();
+  } else {
+    entry = {
+      id: "list_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: (name && String(name).trim()) || defaultListName(user),
+      listKey: listKey,
+      isM3U: !!user.isM3U,
+      username: user.username || "",
+      server: user.server || "",
+      m3uUrl: user.m3uUrl || "",
+      addedAt: Date.now(),
+    };
+    if (!user.isM3U && user.password) {
+      const sealed = await sealSecret(user.password);
+      if (sealed.password) entry.password = sealed.password;
+      else {
+        entry.pwEnc = sealed.pwEnc;
+        entry.pwIv = sealed.pwIv;
+      }
+    }
+    savedLists.push(entry);
+  }
+  persistSavedLists();
+  return entry;
+}
+
+async function migrateSavedListsFromSession() {
+  loadSavedListsRegistry();
+  if (savedLists.length) return;
+  const saved = await loadSession();
+  if (!saved || !((saved.username && saved.password) || saved.m3uUrl)) return;
+  const entry = await upsertSavedList(saved, defaultListName(saved));
+  if (entry && !activeListId) setActiveListId(entry.id);
+}
+
+function removeSavedList(id) {
+  savedLists = savedLists.filter((l) => l.id !== id);
+  persistSavedLists();
+  if (activeListId === id) {
+    setActiveListId(savedLists.length ? savedLists[0].id : null);
+  }
+}
+
+function renameSavedList(id, name) {
+  const entry = savedLists.find((l) => l.id === id);
+  if (!entry || !name) return;
+  entry.name = String(name).trim() || entry.name;
+  persistSavedLists();
+}
+
+async function loadAllListsMerged() {
+  const merged = [];
+  const cats = {};
+  const byId = new Map();
+  let chno = 1;
+  for (const entry of savedLists) {
+    const user = await listEntryToUser(entry);
+    const text = await readListCache(user);
+    if (!text || detectProviderListError(text)) continue;
+    parseM3U(text, { listId: entry.id, listName: entry.name, prefixId: true });
+    channelsData.forEach((ch) => {
+      ch.chno = chno++;
+      merged.push(ch);
+      byId.set(ch.id, ch);
+      if (!cats[ch.category]) cats[ch.category] = [];
+      cats[ch.category].push(ch);
+    });
+  }
+  channelsData = merged;
+  categoriesData = cats;
+  channelById = byId;
+  epgResolvedIds = {};
+}
+
+async function switchToList(listId) {
+  if (!listId || listId === activeListId) return;
+  const prevListId = activeListId;
+  const prevUser = currentUser;
+  const snap = snapshotChannelState();
+  setActiveListId(listId);
+  showSpinner(true, "Cargando lista…");
+  try {
+    if (listId === ALL_LISTS_ID) {
+      await loadAllListsMerged();
+      if (!channelsData.length) throw new Error("No hay listas en caché");
+      currentUser = { username: "Todas las listas", isM3U: true, isMerged: true };
+    } else {
+      const entry = savedLists.find((l) => l.id === listId);
+      if (!entry) throw new Error("Lista no encontrada");
+      const user = await listEntryToUser(entry);
+      currentUser = user;
+      currentServer = user.server || "";
+      await saveSession(currentUser);
+      const cached = await readListCache(user);
+      if (cached && !detectProviderListError(cached)) {
+        parseM3U(cached, currentListMeta(false));
+      }
+      if (!channelsData.length) {
+        const ok = await performLoginAction(user.server, user.username, user.password, user.m3uUrl, entry.name, {
+          noActivate: true,
+        });
+        if (!ok && !channelsData.length) throw new Error("No se pudo cargar la lista");
+      }
+    }
+    searchQuery = "";
+    const search = document.getElementById("channelSearch");
+    if (search) search.value = "";
+    renderCategories();
+    const names = listCategoryNames();
+    if (names[0]) selectCategory(names[0]);
+    renderListSelector();
+    const label =
+      listId === ALL_LISTS_ID ? "Todas las listas" : (savedLists.find((l) => l.id === listId) || {}).name || "Lista";
+    showToast("Mostrando: " + label);
+  } catch (e) {
+    setActiveListId(prevListId);
+    currentUser = prevUser;
+    restoreChannelState(snap);
+    showToast((e && e.message) || "Error al cambiar de lista");
+  } finally {
+    showSpinner(false);
+  }
+}
+
+function renderListSelector() {
+  const sel = document.getElementById("listSelect");
+  if (!sel) return;
+  const prev = activeListId;
+  sel.innerHTML = "";
+  savedLists.forEach((entry) => {
+    const opt = document.createElement("option");
+    opt.value = entry.id;
+    opt.textContent = entry.name;
+    sel.appendChild(opt);
+  });
+  if (savedLists.length > 1) {
+    const allOpt = document.createElement("option");
+    allOpt.value = ALL_LISTS_ID;
+    allOpt.textContent = "Todas las listas";
+    sel.appendChild(allOpt);
+  }
+  if (activeListId && (activeListId === ALL_LISTS_ID || savedLists.some((l) => l.id === activeListId))) {
+    sel.value = activeListId;
+  } else if (savedLists.length) {
+    sel.value = savedLists[0].id;
+    setActiveListId(savedLists[0].id);
+  }
+  sel.hidden = savedLists.length <= 1;
+}
+
+function renderListsManagePanel() {
+  const ul = document.getElementById("listsManageList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  savedLists.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "lists-manage-item";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "lists-rename-input";
+    nameInput.value = entry.name;
+    nameInput.title = "Nombre de la lista";
+    nameInput.addEventListener("change", () => {
+      renameSavedList(entry.id, nameInput.value);
+      renderListSelector();
+    });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "lists-del-btn";
+    delBtn.textContent = "Eliminar";
+    delBtn.title = "Quitar esta lista guardada";
+    delBtn.addEventListener("click", () => {
+      if (savedLists.length <= 1) {
+        showToast("Debe quedar al menos una lista");
+        return;
+      }
+      removeSavedList(entry.id);
+      renderListsManagePanel();
+      renderListSelector();
+      if (activeListId === entry.id || !savedLists.some((l) => l.id === activeListId)) {
+        switchToList(savedLists[0] ? savedLists[0].id : null);
+      }
+    });
+    li.appendChild(nameInput);
+    li.appendChild(delBtn);
+    ul.appendChild(li);
+  });
+}
+
+function showListsOverlay(show) {
+  const overlay = document.getElementById("listsOverlay");
+  if (!overlay) return;
+  if (show) {
+    renderListsManagePanel();
+    overlay.hidden = false;
+    overlay.classList.add("is-open");
+  } else {
+    overlay.classList.remove("is-open");
+    overlay.hidden = true;
+    stopAddListPolling();
+  }
+}
+
+function stopAddListPolling() {
+  listAddPollGen++;
+  if (listAddPollTimer) {
+    clearInterval(listAddPollTimer);
+    listAddPollTimer = null;
+  }
+}
+
+function startAddListPolling() {
+  stopAddListPolling();
+  const myGen = listAddPollGen;
+  const deviceId = showDeviceId();
+  const qrBox = document.getElementById("listsAddQr");
+  if (qrBox) {
+    const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
+    renderUploadQr(base + "upload.php?id=" + encodeURIComponent(deviceId), "listsAddQr");
+  }
+  async function tick() {
+    if (myGen !== listAddPollGen) return;
+    try {
+      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
+      const data = await res.json();
+      if (myGen !== listAddPollGen) return;
+      if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
+      if (assignmentIsStale(data)) return;
+      stopAddListPolling();
+      showListsOverlay(false);
+      await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      showToast("Lista añadida");
+    } catch (e) {}
+  }
+  tick();
+  listAddPollTimer = setInterval(tick, 5000);
+}
+
+function initListManager() {
+  loadSavedListsRegistry();
+  const sel = document.getElementById("listSelect");
+  if (sel) {
+    sel.addEventListener("change", () => {
+      if (sel.value) switchToList(sel.value);
+    });
+  }
+  const listsBtn = document.getElementById("listsBtn");
+  if (listsBtn) {
+    listsBtn.addEventListener("click", () => showListsOverlay(true));
+  }
+  const closeBtn = document.getElementById("listsCloseBtn");
+  if (closeBtn) closeBtn.addEventListener("click", () => showListsOverlay(false));
+  const addBtn = document.getElementById("listsAddBtn");
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      const addPanel = document.getElementById("listsAddPanel");
+      if (addPanel) addPanel.hidden = !addPanel.hidden;
+      if (addPanel && !addPanel.hidden) startAddListPolling();
+      else stopAddListPolling();
+    });
+  }
+  const overlay = document.getElementById("listsOverlay");
+  if (overlay) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) showListsOverlay(false);
+    });
+  }
+}
+
 async function signedStreamHref(url) {
   const now = Math.floor(Date.now() / 1000);
   const hit = signCache.get(url);
@@ -686,8 +1057,8 @@ function getDeviceId() {
  * solo queda pegar la lista: teclear ese código en una tele es lo más incómodo
  * de todo el proceso.
  */
-function renderUploadQr(url) {
-  const canvas = document.getElementById("uploadQr");
+function renderUploadQr(url, canvasId) {
+  const canvas = document.getElementById(canvasId || "uploadQr");
   if (!canvas || typeof qrcode === "undefined") return;
   try {
     const qr = qrcode(0, "M");
@@ -764,7 +1135,7 @@ function restoreChannelState(snap) {
 
 function applyListOrKeep(text) {
   const snap = snapshotChannelState();
-  parseM3U(text);
+  parseM3U(text, currentListMeta(false));
   if (channelsData.length) return true;
   if (restoreChannelState(snap)) {
     showToast("No se pudo actualizar la lista; se mantiene la anterior");
@@ -786,6 +1157,7 @@ function enterChannelView(user) {
   if (channelsData.length) markSessionLive();
   try {
     renderCategories();
+    renderListSelector();
   } catch (e) {
     showToast("Error al mostrar canales");
   }
@@ -816,7 +1188,7 @@ function startRemotePolling() {
       if (assignmentIsStale(data)) return;
       remoteLoginBusy = true;
       try {
-        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl);
+        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
       } finally {
         remoteLoginBusy = false;
         if (liveSession) stopRemotePolling();
@@ -852,8 +1224,9 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 }
 
 /********** MOTOR CENTRAL DE LOGIN **********/
-async function performLoginAction(serverUrl, username, password, m3uUrl) {
+async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
   loginCancelled = false;
+  pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
   showSpinner(true, "Conectando...");
 
@@ -878,7 +1251,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       await saveSession(currentUser);
       const cachedM3u = await readListCache(currentUser);
       if (cachedM3u && !detectProviderListError(cachedM3u)) {
-        parseM3U(cachedM3u);
+        parseM3U(cachedM3u, currentListMeta(false));
         if (channelsData.length) {
           enterChannelView(currentUser);
           showSpinner(true, "Actualizando lista...");
@@ -923,7 +1296,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       if (!applyListOrKeep(m3uContent)) throw new Error("La lista no contiene canales");
       await saveSession(currentUser);
       await writeListCache(currentUser, m3uContent);
+      const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
+      tagChannelsWithList(entry);
+      pendingListName = null;
+      if (!(opts && opts.noActivate) && entry && !(activeListId === ALL_LISTS_ID && savedLists.length > 1)) {
+        setActiveListId(entry.id);
+      }
+      if (activeListId === ALL_LISTS_ID && savedLists.length > 1) {
+        await loadAllListsMerged();
+        currentUser = { username: "Todas las listas", isM3U: true, isMerged: true };
+      }
       enterChannelView(currentUser);
+      renderListSelector();
       checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -934,7 +1318,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       const pendingUser = { username, password, server: serverUrl, isM3U: false };
       const cachedXt = await readListCache(pendingUser);
       if (cachedXt && !detectProviderListError(cachedXt)) {
-        parseM3U(cachedXt);
+        parseM3U(cachedXt, currentListMeta(false));
         if (channelsData.length) {
           currentUser = pendingUser;
           await saveSession(currentUser);
@@ -971,7 +1355,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
       setLoginStatus("Descargando canales...");
       showSpinner(true, "Descargando canales...");
       await loadM3UFromXtream();
+      const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
+      tagChannelsWithList(entry);
+      pendingListName = null;
+      if (!(opts && opts.noActivate) && entry && !(activeListId === ALL_LISTS_ID && savedLists.length > 1)) {
+        setActiveListId(entry.id);
+      }
+      if (activeListId === ALL_LISTS_ID && savedLists.length > 1) {
+        await loadAllListsMerged();
+        currentUser = { username: "Todas las listas", isM3U: true, isMerged: true };
+      }
       enterChannelView(currentUser);
+      renderListSelector();
       if (currentServer.includes("acortador.vip")) checkAccountExpiryFromChannels();
       showSpinner(false);
       return true;
@@ -979,6 +1374,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl) {
 
     throw new Error("Escanea el QR para cargar la lista.");
   } catch (error) {
+    pendingListName = null;
     showSpinner(false);
     const msg = (error && error.message) || "Error al iniciar sesión.";
     setLoginStatus(msg);
@@ -1137,6 +1533,7 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {}
   initSplash();
   initChannelTools();
+  initListManager();
   initAdSlot();
   registrarServiceWorker();
   prepararInstalacion();
@@ -1144,7 +1541,8 @@ window.addEventListener("DOMContentLoaded", () => {
   initTvLoginFocus();
   if (!canAutoLoginFromCache()) startRemotePolling();
 
-  loadSession().then((saved) => {
+  loadSession().then(async (saved) => {
+    await migrateSavedListsFromSession();
     if (!saved) {
       if (!pollingInterval) startRemotePolling();
       return;
@@ -1547,13 +1945,48 @@ function refreshPlayerEPG() {
 }
 
 function refreshVisibleChannelEPG() {
-  if (!channelsContainer || !hasEPG()) return;
+  if (!channelsContainer) return;
   channelsContainer.querySelectorAll(".channel-item").forEach((item) => {
     const epgEl = item.querySelector(".channel-epg");
     if (!epgEl) return;
     const channel = channelById.get(item.dataset.id);
     if (!channel) return;
-    epgEl.textContent = channelEpgLabel(channel);
+    if (searchQuery && channel.category) {
+      epgEl.textContent = displayCategoryName(channel.category);
+    } else if (hasEPG()) {
+      epgEl.textContent = channelEpgLabel(channel);
+    } else {
+      epgEl.textContent = "";
+    }
+    epgEl.hidden = !epgEl.textContent;
+  });
+}
+
+function formatChannelLiveStats() {
+  if (!currentlyPlayingId) return "";
+  const parts = [];
+  if (channelLiveStats.resolution) parts.push(channelLiveStats.resolution);
+  if (channelLiveStats.bitrate) parts.push(channelLiveStats.bitrate);
+  return parts.join(" · ");
+}
+
+function refreshVisibleChannelStats() {
+  if (!channelsContainer) return;
+  const live = formatChannelLiveStats();
+  channelsContainer.querySelectorAll(".channel-item").forEach((item) => {
+    const statsEl = item.querySelector(".channel-stats");
+    if (!statsEl) return;
+    const meta = statsEl.closest(".channel-meta");
+    const isPlaying = item.dataset.id === currentlyPlayingId;
+    if (isPlaying && live) {
+      statsEl.textContent = live;
+      statsEl.hidden = false;
+      if (meta) meta.hidden = false;
+    } else {
+      statsEl.textContent = "";
+      statsEl.hidden = true;
+      if (meta) meta.hidden = !meta.querySelector(".channel-quality") && !meta.querySelector(".channel-source");
+    }
   });
 }
 
@@ -1608,7 +2041,8 @@ function isStreamUrl(line) {
   return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line);
 }
 
-function parseM3U(content) {
+function parseM3U(content, listMeta) {
+  listMeta = listMeta || {};
   const started = Date.now();
   const raw = String(content || "");
   const lines = raw.split(/\r\n|\n|\r/);
@@ -1638,13 +2072,18 @@ function parseM3U(content) {
       const parsedChno = chnoMatch ? parseInt(chnoMatch[1], 10) : 0;
       const idBase = (tvgId || "") + "|" + category + "|" + safeName + "|" + extinf;
       const stableId = "ch_" + idBase.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      const channelId =
+        listMeta.prefixId && listMeta.listId ? listMeta.listId + "::" + stableId : stableId;
       currentChannel = {
         name: safeName,
         category: category,
         tvgId: tvgId,
         logo: logo,
         chno: parsedChno > 0 ? parsedChno : 0,
-        id: stableId,
+        id: channelId,
+        listId: listMeta.listId || "",
+        listName: listMeta.listName || "",
+        qualityHint: extractQualityHint(safeName),
       };
       continue;
     }
@@ -2275,30 +2714,16 @@ function buildChannelThumb(channel) {
 
 function buildChannelRow(channel) {
   const channelDiv = document.createElement("div");
-  channelDiv.className = "channel-item";
+  channelDiv.className = "channel-item channel-card";
   channelDiv.dataset.id = channel.id;
+
+  const header = document.createElement("div");
+  header.className = "channel-card-header";
 
   const chno = document.createElement("span");
   chno.className = "channel-chno";
   chno.textContent = channel.chno || "";
-  channelDiv.appendChild(chno);
-  channelDiv.appendChild(buildChannelThumb(channel));
-
-  const info = document.createElement("div");
-  info.className = "channel-info";
-  const nameEl = document.createElement("div");
-  nameEl.className = "channel-name";
-  nameEl.textContent = displayName(channel.name);
-  nameEl.title = channel.name;
-  info.appendChild(nameEl);
-  if (searchQuery && channel.category) {
-    const catEl = document.createElement("div");
-    catEl.className = "channel-epg";
-    catEl.textContent = displayCategoryName(channel.category);
-    catEl.title = channel.category;
-    info.appendChild(catEl);
-  }
-  channelDiv.appendChild(info);
+  header.appendChild(chno);
 
   const favBtn = document.createElement("button");
   favBtn.type = "button";
@@ -2312,7 +2737,56 @@ function buildChannelRow(channel) {
     e.stopPropagation();
     toggleFavorite(channel);
   });
-  channelDiv.appendChild(favBtn);
+  header.appendChild(favBtn);
+  channelDiv.appendChild(header);
+
+  const logoWrap = document.createElement("div");
+  logoWrap.className = "channel-card-logo";
+  logoWrap.appendChild(buildChannelThumb(channel));
+  channelDiv.appendChild(logoWrap);
+
+  const info = document.createElement("div");
+  info.className = "channel-info";
+  const nameEl = document.createElement("div");
+  nameEl.className = "channel-name";
+  nameEl.textContent = displayName(channel.name);
+  nameEl.title = channel.name;
+  info.appendChild(nameEl);
+
+  const quality = channel.qualityHint || extractQualityHint(channel.name);
+  const meta = document.createElement("div");
+  meta.className = "channel-meta";
+  if (quality) {
+    const qEl = document.createElement("span");
+    qEl.className = "channel-quality";
+    qEl.textContent = quality;
+    meta.appendChild(qEl);
+  }
+  if (channel.listName) {
+    const srcEl = document.createElement("span");
+    srcEl.className = "channel-source";
+    srcEl.textContent = channel.listName;
+    srcEl.title = "Lista: " + channel.listName;
+    meta.appendChild(srcEl);
+  }
+  const statsEl = document.createElement("span");
+  statsEl.className = "channel-stats";
+  statsEl.hidden = true;
+  meta.appendChild(statsEl);
+  info.appendChild(meta);
+  meta.hidden = !quality && !channel.listName && statsEl.hidden;
+
+  const epgEl = document.createElement("div");
+  epgEl.className = "channel-epg";
+  if (searchQuery && channel.category) {
+    epgEl.textContent = displayCategoryName(channel.category);
+  } else if (hasEPG()) {
+    epgEl.textContent = channelEpgLabel(channel);
+  }
+  epgEl.hidden = !epgEl.textContent;
+  if (epgEl.textContent) info.appendChild(epgEl);
+
+  channelDiv.appendChild(info);
 
   channelDiv.addEventListener("click", () => {
     if (isTvLayout()) {
@@ -2328,25 +2802,55 @@ function buildChannelRow(channel) {
   });
   if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
   else if (peekLastChannelId() === channel.id) channelDiv.classList.add("last");
+
+  if (currentlyPlayingId === channel.id) {
+    const live = formatChannelLiveStats();
+    if (live) {
+      statsEl.textContent = live;
+      statsEl.hidden = false;
+      meta.hidden = false;
+    }
+  }
+
   return channelDiv;
 }
 
-function channelRowHeight() {
-  if (document.body.classList.contains("is-tv")) return 44;
-  if (document.body.classList.contains("ui-large")) return 72;
-  return 64;
+function channelGridCols() {
+  if (document.body.classList.contains("is-tv")) return 1;
+  const w = channelsContainer ? channelsContainer.clientWidth : 320;
+  if (w >= 560) return 3;
+  if (w >= 360) return 2;
+  return 1;
+}
+
+function channelCardHeight() {
+  if (document.body.classList.contains("is-tv")) return 108;
+  if (document.body.classList.contains("ui-large")) return 156;
+  return 140;
+}
+
+function channelGridGap() {
+  return document.body.classList.contains("is-tv") ? 6 : 8;
+}
+
+function channelGridRowHeight() {
+  return channelCardHeight() + channelGridGap();
 }
 
 function bindVirtualScroll() {
   if (!channelsContainer || channelsContainer.dataset.virtual === "1") return;
   channelsContainer.dataset.virtual = "1";
   channelsContainer.addEventListener("scroll", () => paintVirtualWindow(), { passive: true });
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => paintVirtualWindow(true));
+    ro.observe(channelsContainer);
+  }
 }
 
 function renderChannels(channels) {
   virtualList =
     currentCategory === FAV_NAME || currentCategory === HIST_NAME ? channels.slice() : applySort(channels);
-  virtualRange = { start: -1, end: -1 };
+  virtualRange = { start: -1, end: -1, cols: 0 };
   if (!channelsContainer) return;
   bindVirtualScroll();
   channelsContainer.scrollTop = 0;
@@ -2355,20 +2859,25 @@ function renderChannels(channels) {
 
 function paintVirtualWindow(force) {
   if (!channelsContainer) return;
-  const h = channelRowHeight();
+  const cols = channelGridCols();
+  const rowH = channelGridRowHeight();
   const total = virtualList.length;
+  const totalRows = Math.ceil(total / cols) || 0;
   const view = Math.max(channelsContainer.clientHeight || 0, 180);
-  const start = Math.max(0, Math.floor(channelsContainer.scrollTop / h) - 12);
-  const end = Math.min(total, Math.ceil((channelsContainer.scrollTop + view) / h) + 12);
-  if (!force && start === virtualRange.start && end === virtualRange.end) {
+  const startRow = Math.max(0, Math.floor(channelsContainer.scrollTop / rowH) - 3);
+  const endRow = Math.min(totalRows, Math.ceil((channelsContainer.scrollTop + view) / rowH) + 3);
+  const start = startRow * cols;
+  const end = Math.min(total, endRow * cols);
+  if (!force && startRow === virtualRange.start && endRow === virtualRange.end && cols === virtualRange.cols) {
     markTvCursor();
     return;
   }
-  virtualRange = { start: start, end: end };
+  virtualRange = { start: startRow, end: endRow, cols: cols };
 
   const frag = document.createDocumentFragment();
   const head = document.createElement("div");
-  head.style.height = start * h + "px";
+  head.className = "channels-spacer";
+  head.style.height = startRow * rowH + "px";
   frag.appendChild(head);
   if (!total && currentCategory === FAV_NAME) {
     const empty = document.createElement("p");
@@ -2376,9 +2885,14 @@ function paintVirtualWindow(force) {
     empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
     frag.appendChild(empty);
   }
-  for (let i = start; i < end; i++) frag.appendChild(buildChannelRow(virtualList[i]));
+  const grid = document.createElement("div");
+  grid.className = "channels-grid";
+  grid.style.setProperty("--channel-cols", String(cols));
+  for (let i = start; i < end; i++) grid.appendChild(buildChannelRow(virtualList[i]));
+  frag.appendChild(grid);
   const tail = document.createElement("div");
-  tail.style.height = Math.max(0, (total - end) * h) + "px";
+  tail.className = "channels-spacer";
+  tail.style.height = Math.max(0, (totalRows - endRow) * rowH) + "px";
   frag.appendChild(tail);
   channelsContainer.innerHTML = "";
   channelsContainer.appendChild(frag);
@@ -2400,6 +2914,7 @@ function runChannelSearch(query) {
       normalizeSearch(displayName(ch.name)).indexOf(needle) >= 0 ||
       normalizeSearch(ch.category).indexOf(needle) >= 0 ||
       normalizeSearch(displayCategoryName(ch.category)).indexOf(needle) >= 0 ||
+      normalizeSearch(ch.listName || "").indexOf(needle) >= 0 ||
       String(ch.chno) === searchQuery
   );
   document.querySelectorAll(".category-btn").forEach((b) => b.classList.remove("active"));
@@ -3090,6 +3605,7 @@ const statusStalls = document.getElementById("statusStalls");
 
 const goLiveBtn = document.getElementById("goLiveBtn");
 const stopBtn = document.getElementById("stopBtn");
+let channelLiveStats = { id: null, resolution: "", bitrate: "" };
 
 // Sin perseguidor de latencia el retraso podría crecer sin fin tras muchos
 // baches, así que hay un tope; por debajo de él el colchón es bienvenido.
@@ -3161,6 +3677,8 @@ function updatePlaybackStatus() {
     if (goLiveBtn) goLiveBtn.hidden = true;
     if (stopBtn) stopBtn.hidden = true;
     setStatusLevel("");
+    channelLiveStats = { id: null, resolution: "", bitrate: "" };
+    refreshVisibleChannelStats();
     return;
   }
 
@@ -3189,15 +3707,26 @@ function updatePlaybackStatus() {
   if (statusQuality) {
     if (nativePlaybackActive) {
       statusQuality.textContent = "ExoPlayer";
+      channelLiveStats = { id: currentlyPlayingId, resolution: "", bitrate: "ExoPlayer" };
     } else {
       const parts = [];
-      if (video && video.videoWidth) parts.push(video.videoWidth + "×" + video.videoHeight);
+      let resolution = "";
+      let bitrate = "";
+      if (video && video.videoWidth) {
+        resolution = video.videoWidth + "×" + video.videoHeight;
+        parts.push(resolution);
+      }
       try {
         const level = hls && hls.levels ? hls.levels[hls.currentLevel] : null;
-        if (level && level.bitrate) parts.push(Math.round(level.bitrate / 1000) + " kbps");
+        if (level && level.bitrate) {
+          bitrate = Math.round(level.bitrate / 1000) + " kbps";
+          parts.push(bitrate);
+        }
       } catch (e) {}
       statusQuality.textContent = parts.length ? parts.join(" · ") : "Conectando...";
+      channelLiveStats = { id: currentlyPlayingId, resolution: resolution, bitrate: bitrate };
     }
+    refreshVisibleChannelStats();
   }
 
   if (statusStalls) {
@@ -3852,6 +4381,10 @@ async function forceReloadApp() {
 
 async function doRefresh() {
   if (!currentUser) return;
+  if (currentUser.isMerged || activeListId === ALL_LISTS_ID) {
+    showToast("Elige una lista concreta para actualizarla");
+    return;
+  }
   const ok = await performLoginAction(
     currentUser.server,
     currentUser.username,

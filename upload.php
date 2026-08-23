@@ -16,6 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'username' => isset($_POST['username']) ? $_POST['username'] : '',
         'password' => isset($_POST['password']) ? $_POST['password'] : '',
         'm3uUrl' => isset($_POST['m3uUrl']) ? $_POST['m3uUrl'] : '',
+        'listName' => isset($_POST['listName']) ? trim($_POST['listName']) : '',
         'ts' => (int) round(microtime(true) * 1000),
         'status' => 'listo',
     );
@@ -59,6 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="text" name="device_id" placeholder="Ej: A1-B2-C3" required autocomplete="off"
                    value="<?php echo htmlspecialchars($idPrevio, ENT_QUOTES, 'UTF-8'); ?>"><?php if ($idPrevio !== ''): ?>
             <p class="ok-id">Dispositivo detectado por QR</p><?php endif; ?>
+
+            <label>Nombre de la lista (opcional)</label>
+            <input type="text" name="listName" placeholder="Ej: Casa, Trabajo, Proveedor X" maxlength="64">
 
             <label>Servidor Xtream Codes</label>
             <input type="text" name="serverUrl" placeholder="http://servidor.com:8080">
