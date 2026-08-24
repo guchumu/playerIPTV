@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convierte el proyecto Android de Capacitor en una app de Android TV
-con reproductor nativo ExoPlayer (Media3).
+con reproductor nativo: LibVLC en TV y ExoPlayer (Media3) en móvil.
 
 `npx cap add android` genera un proyecto pensado para móvil. Para que el
 televisor la acepte y la muestre en su pantalla de inicio hacen falta cuatro
@@ -11,15 +11,14 @@ cosas que Capacitor no pone:
   3. Un banner de 320x180, que en leanback es lo único que ve el usuario.
   4. La configuración de red que permite tráfico http a los orígenes IPTV.
 
-Además se inyecta ExoPlayer: el WebView de Fire Stick no decodifica bien
-MPEG-TS con mse, así que la web llama a un plugin nativo. En TV el vídeo
-empieza en la ventana pequeña (overlay TextureView) y pasa a pantalla
-completa con el segundo OK. Si el overlay no se puede montar, se abre
-PlayerActivity como antes.
+Además se inyecta el reproductor nativo. En Google TV Streamer (MediaTek)
+ExoPlayer congela el vídeo y el audio sigue; por eso en leanback se usa
+LibVLC. En el teléfono sigue ExoPlayer. En TV el vídeo empieza en la ventana
+pequeña (overlay) y pasa a pantalla completa con el segundo OK.
 
 El WebView de Android TV usa un User-Agent de Chrome de móvil, sin "TV".
 StreamBoxPlugin detecta leanback / UI_MODE_TYPE_TELEVISION e inyecta
-window.StreamBoxNative = { isTv, hasExo } antes de core.js.
+window.StreamBoxNative = { isTv, hasExo, hasVlc, engine } antes de core.js.
 
 Se edita el XML con ElementTree en vez de con expresiones regulares porque el
 manifest de Capacitor cambia de forma entre versiones. Es idempotente: se puede
@@ -41,10 +40,12 @@ ANDROID = "http://schemas.android.com/apk/res/android"
 A = f"{{{ANDROID}}}"
 
 MEDIA3 = "1.4.1"
-DEPS_MEDIA3 = [
+LIBVLC = "3.6.0"
+DEPS_PLAYER = [
     f'    implementation "androidx.media3:media3-exoplayer:{MEDIA3}"',
     f'    implementation "androidx.media3:media3-exoplayer-hls:{MEDIA3}"',
     f'    implementation "androidx.media3:media3-ui:{MEDIA3}"',
+    f'    implementation "org.videolan.android:libvlc-all:{LIBVLC}"',
     '    implementation "androidx.webkit:webkit:1.9.0"',
 ]
 
@@ -70,6 +71,14 @@ ATRIBUTOS_APP = {
     "networkSecurityConfig": "@xml/network_security_config",
 }
 
+JAVA_PLUGINS = (
+    "NativePlayerPlugin.java",
+    "PlayerActivity.java",
+    "VlcPlayerActivity.java",
+    "VlcOptions.java",
+    "StreamBoxPlugin.java",
+)
+
 
 def indentar(elem, nivel=0):
     """Deja el XML legible: ElementTree no formatea al escribir."""
@@ -83,6 +92,22 @@ def indentar(elem, nivel=0):
             elem[-1].tail = hueco
     if nivel and not (elem.tail or "").strip():
         elem.tail = hueco
+
+
+def asegurar_actividad(app, nombre_corto, cambios):
+    for act in app.findall("activity"):
+        nombre = act.get(f"{A}name") or ""
+        if nombre.endswith(nombre_corto):
+            return
+    app.append(ET.Element("activity", {
+        f"{A}name": "." + nombre_corto,
+        f"{A}configChanges": "keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode",
+        f"{A}exported": "false",
+        f"{A}hardwareAccelerated": "true",
+        f"{A}launchMode": "singleTop",
+        f"{A}theme": "@style/AppTheme",
+    }))
+    cambios.append("actividad " + nombre_corto)
 
 
 def parchear_manifest(ruta):
@@ -128,23 +153,9 @@ def parchear_manifest(ruta):
             app.set(f"{A}{clave}", valor)
             cambios.append(f"application {clave}")
 
-    # 4. Activity de ExoPlayer a pantalla completa.
-    tiene_player = False
-    for act in app.findall("activity"):
-        nombre = act.get(f"{A}name") or ""
-        if nombre.endswith("PlayerActivity"):
-            tiene_player = True
-            break
-    if not tiene_player:
-        app.append(ET.Element("activity", {
-            f"{A}name": ".PlayerActivity",
-            f"{A}configChanges": "keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode",
-            f"{A}exported": "false",
-            f"{A}hardwareAccelerated": "true",
-            f"{A}launchMode": "singleTop",
-            f"{A}theme": "@style/AppTheme",
-        }))
-        cambios.append("actividad PlayerActivity")
+    # 4. Activities de ExoPlayer (móvil) y LibVLC (TV).
+    asegurar_actividad(app, "PlayerActivity", cambios)
+    asegurar_actividad(app, "VlcPlayerActivity", cambios)
 
     indentar(manifest)
     arbol.write(ruta, encoding="utf-8", xml_declaration=True)
@@ -157,7 +168,9 @@ def copiar_recursos(base):
         (CONFIG / "tv_banner.png", base / "src/main/res/drawable/tv_banner.png"),
         (CONFIG / "network_security_config.xml", base / "src/main/res/xml/network_security_config.xml"),
         (EXO / "activity_player.xml", base / "src/main/res/layout/activity_player.xml"),
+        (EXO / "activity_vlc.xml", base / "src/main/res/layout/activity_vlc.xml"),
         (EXO / "overlay_player.xml", base / "src/main/res/layout/overlay_player.xml"),
+        (EXO / "overlay_vlc.xml", base / "src/main/res/layout/overlay_vlc.xml"),
     ]
     for origen, destino in parejas:
         if not origen.exists():
@@ -195,7 +208,7 @@ def copiar_exoplayer(base: Path) -> list:
     main = encontrar_mainactivity(base)
     paquete = paquete_de(main, base)
     hechos = []
-    for nombre in ("NativePlayerPlugin.java", "PlayerActivity.java", "StreamBoxPlugin.java"):
+    for nombre in JAVA_PLUGINS:
         origen = EXO / nombre
         if not origen.exists():
             raise SystemExit(f"error: falta {origen.relative_to(RAIZ)}")
@@ -240,16 +253,68 @@ def parchear_gradle(ruta: Path) -> list:
     if not ruta.exists():
         raise SystemExit(f"error: no existe {ruta}")
     texto = ruta.read_text(encoding="utf-8")
-    if "media3-exoplayer" in texto:
-        return ["gradle: Media3 ya estaba"]
-    patron = re.compile(r"implementation project\(['\"]:capacitor-android['\"]\)")
-    match = patron.search(texto)
-    if not match:
-        raise SystemExit("error: no encuentro capacitor-android en app/build.gradle")
-    ancla = match.group(0)
-    bloque = ancla + "\n" + "\n".join(DEPS_MEDIA3)
-    ruta.write_text(texto.replace(ancla, bloque, 1), encoding="utf-8")
-    return ["gradle: Media3 ExoPlayer " + MEDIA3]
+    hechos = []
+
+    if "libvlc-all" not in texto:
+        if "media3-exoplayer" in texto:
+            # Había solo Media3: añadir LibVLC detrás del bloque media3-ui.
+            if f'implementation "org.videolan.android:libvlc-all:{LIBVLC}"' not in texto:
+                texto = texto.replace(
+                    f'    implementation "androidx.media3:media3-ui:{MEDIA3}"',
+                    f'    implementation "androidx.media3:media3-ui:{MEDIA3}"\n'
+                    f'    implementation "org.videolan.android:libvlc-all:{LIBVLC}"',
+                    1,
+                )
+                hechos.append("gradle: LibVLC " + LIBVLC)
+        else:
+            patron = re.compile(r"implementation project\(['\"]:capacitor-android['\"]\)")
+            match = patron.search(texto)
+            if not match:
+                raise SystemExit("error: no encuentro capacitor-android en app/build.gradle")
+            ancla = match.group(0)
+            bloque = ancla + "\n" + "\n".join(DEPS_PLAYER)
+            texto = texto.replace(ancla, bloque, 1)
+            hechos.append("gradle: Media3 " + MEDIA3 + " + LibVLC " + LIBVLC)
+    else:
+        hechos.append("gradle: LibVLC ya estaba")
+
+    if "media3-exoplayer" not in texto and "libvlc-all" in texto:
+        # Caso raro: solo VLC; añadir Media3 para el móvil.
+        texto = texto.replace(
+            f'    implementation "org.videolan.android:libvlc-all:{LIBVLC}"',
+            "\n".join(DEPS_PLAYER),
+            1,
+        )
+        hechos.append("gradle: Media3 añadido para móvil")
+
+    # Evitar conflictos de libc++_shared.so entre Media3/VLC y Capacitor.
+    if "libc++_shared.so" not in texto:
+        if "android {" in texto and "packagingOptions" not in texto and "packaging {" not in texto:
+            texto = texto.replace(
+                "android {",
+                "android {\n"
+                "    packagingOptions {\n"
+                "        pickFirst 'lib/**/libc++_shared.so'\n"
+                "        pickFirst 'lib/**/libvlc.so'\n"
+                "    }",
+                1,
+            )
+            hechos.append("gradle: packagingOptions libc++/libvlc")
+
+    # El APK de TV no necesita x86; reduce tamaño (LibVLC es gordo).
+    if "abiFilters" not in texto and "defaultConfig" in texto:
+        texto = re.sub(
+            r"(defaultConfig\s*\{)",
+            r"\1\n        ndk {\n"
+            r"            abiFilters 'armeabi-v7a', 'arm64-v8a'\n"
+            r"        }",
+            texto,
+            count=1,
+        )
+        hechos.append("gradle: abiFilters armeabi-v7a + arm64-v8a")
+
+    ruta.write_text(texto, encoding="utf-8")
+    return hechos or ["gradle: sin cambios"]
 
 
 def main():
@@ -260,11 +325,11 @@ def main():
     if not manifest.exists():
         raise SystemExit(f"error: no existe {manifest}\nejecuta antes: npx cap add android")
 
-    print("parcheando para Android TV + ExoPlayer")
+    print("parcheando para Android TV + LibVLC (TV) / ExoPlayer (móvil)")
     for r in copiar_recursos(base):
         print(f"  recurso: {r}")
     for r in copiar_exoplayer(base):
-        print(f"  exoplayer: {r}")
+        print(f"  nativo: {r}")
     for c in parchear_gradle(base / "build.gradle"):
         print(f"  {c}")
     cambios = parchear_manifest(manifest)

@@ -126,7 +126,7 @@ jobs:
           echo "nombre=$DESTINO" >> "$GITHUB_OUTPUT"
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
           "$AAPT" dump badging tv.apk | grep -Ei "leanback|banner|package:|sdkVersion" || true
-          unzip -l tv.apk | grep -Ei "exoplayer|media3|PlayerActivity|StreamBoxPlugin" || true
+          unzip -l tv.apk | grep -Ei "exoplayer|media3|libvlc|VlcPlayer|PlayerActivity|StreamBoxPlugin" || true
 
       - name: Publicar el APK como artefacto
         uses: actions/upload-artifact@v4

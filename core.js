@@ -1,6 +1,6 @@
 /*******************************************************
  * STREAMBOX IPTV - CORE.JS (backup que funcionaba + mejoras)
- * Login por QR (carga remota), get.php output=ts, parseM3U, mpegts/HLS / ExoPlayer
+ * Login por QR (carga remota), get.php output=ts, parseM3U, mpegts/HLS / ExoPlayer|LibVLC
  *******************************************************/
 
 if (!window.CSS) window.CSS = {};
@@ -136,7 +136,7 @@ function isNativeApp() {
   } catch (e) {}
   try {
     const n = window.StreamBoxNative;
-    if (n && (n.hasExo || n.exo)) return true;
+    if (n && (n.hasExo || n.exo || n.hasVlc)) return true;
   } catch (e) {}
   return false;
 }
@@ -2362,7 +2362,7 @@ function getPlaybackStats() {
     lines.push("  url origen: " + maskUrl(channel.url));
     lines.push("  url activa: " + maskUrl(video.getAttribute("data-active-url")));
   }
-  lines.push("  motor: " + (nativePlaybackActive ? "ExoPlayer" : hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
+  lines.push("  motor: " + (nativePlaybackActive ? (nativePlayerEngine() === "vlc" ? "LibVLC" : "ExoPlayer") : hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
   lines.push("  readyState: " + video.readyState + " · networkState: " + video.networkState);
   const mediaError = describeMediaError();
   if (mediaError) lines.push("  error del <video>: " + mediaError);
@@ -3258,6 +3258,15 @@ function playChannel(channel) {
   updatePlaybackStatus();
 }
 
+function nativePlayerEngine() {
+  try {
+    const n = window.StreamBoxNative;
+    if (n && n.engine) return String(n.engine);
+    if (isTvLayout()) return "vlc";
+  } catch (e) {}
+  return "exo";
+}
+
 function nativePlayerPlugin() {
   try {
     const cap = window.Capacitor;
@@ -3302,6 +3311,11 @@ function bindNativePlayerEvents() {
   plugin.addListener("nativePlayer", (ev) => {
     if (!ev) return;
     if (typeof ev.fullscreen === "boolean") nativeFullscreen = ev.fullscreen;
+    if (ev.engine) {
+      try {
+        window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: ev.engine });
+      } catch (e) {}
+    }
     if (ev.stopped) {
       nativePlaybackActive = false;
       nativeFullscreen = false;
@@ -3372,7 +3386,7 @@ async function startNativePlayback(channel, opts) {
   const fullscreen = !isTvLayout() || !!(opts && opts.fullscreen);
   nativeFullscreen = fullscreen;
   try {
-    await plugin.play(
+    const ret = await plugin.play(
       Object.assign(
         { url: playUrl, title: displayName(channel.name), mime: mime, fullscreen: fullscreen },
         nativeEmbedRect()
@@ -3380,13 +3394,15 @@ async function startNativePlayback(channel, opts) {
     );
     nativePlaybackActive = true;
     showVideoSpinner(false);
-    logPlayback("motor", "ExoPlayer · " + (fullscreen ? "pantalla completa" : "ventana") + " · " + maskUrl(playUrl));
+    const engine = (ret && ret.engine) || nativePlayerEngine();
+    const label = engine === "vlc" ? "LibVLC" : "ExoPlayer";
+    logPlayback("motor", label + " · " + (fullscreen ? "pantalla completa" : "ventana") + " · " + maskUrl(playUrl));
     requestAnimationFrame(() => layoutNativePlayer());
   } catch (e) {
     nativePlaybackActive = false;
     nativeFullscreen = false;
     showVideoSpinner(false);
-    logPlayback("error exo", String((e && e.message) || e));
+    logPlayback("error nativo", String((e && e.message) || e));
     showToast("No se pudo abrir el reproductor nativo");
   }
   return true;
@@ -3731,8 +3747,9 @@ function updatePlaybackStatus() {
 
   if (statusQuality) {
     if (nativePlaybackActive) {
-      statusQuality.textContent = "ExoPlayer";
-      channelLiveStats = { id: currentlyPlayingId, resolution: "", bitrate: "ExoPlayer" };
+      const label = nativePlayerEngine() === "vlc" ? "LibVLC" : "ExoPlayer";
+      statusQuality.textContent = label;
+      channelLiveStats = { id: currentlyPlayingId, resolution: "", bitrate: label };
     } else {
       const parts = [];
       let resolution = "";

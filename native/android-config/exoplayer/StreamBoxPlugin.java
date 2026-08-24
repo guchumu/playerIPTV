@@ -48,10 +48,14 @@ public class StreamBoxPlugin extends Plugin {
     }
 
     static String scriptNativo(boolean isTv) {
+        // En TV el motor nativo es LibVLC (ExoPlayer congela en Streamer/MediaTek).
+        String engine = isTv ? "vlc" : "exo";
         return "(function(){try{"
             + "window.StreamBoxNative={isTv:"
             + (isTv ? "true" : "false")
-            + ",hasExo:true,exo:true};"
+            + ",hasExo:true,exo:true,hasVlc:true,engine:'"
+            + engine
+            + "'};"
             + (isTv
                 ? "document.documentElement.classList.add('is-native-tv');"
                     + "function a(){if(document.body)document.body.classList.add('is-tv');}"
@@ -127,6 +131,8 @@ public class StreamBoxPlugin extends Plugin {
         ret.put("isTv", isTv);
         ret.put("hasExo", true);
         ret.put("exo", true);
+        ret.put("hasVlc", true);
+        ret.put("engine", isTv ? "vlc" : "exo");
         call.resolve(ret);
     }
 }
