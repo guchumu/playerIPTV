@@ -992,13 +992,13 @@ function dismissSplash(instant) {
   if (html.classList.contains("splash-done")) return;
   if (!html.classList.contains("needs-splash")) {
     html.classList.add("splash-done");
-    initTvLoginFocus();
+    if (isLoginScreenActive() && !remoteLoginBusy && !liveSession) initTvLoginFocus();
     return;
   }
   if (instant) {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
-    initTvLoginFocus();
+    if (isLoginScreenActive() && !remoteLoginBusy && !liveSession) initTvLoginFocus();
     return;
   }
   if (html.classList.contains("splash-leaving")) return;
@@ -1006,7 +1006,7 @@ function dismissSplash(instant) {
   window.setTimeout(() => {
     html.classList.add("splash-done");
     html.classList.remove("needs-splash", "splash-leaving");
-    initTvLoginFocus();
+    if (isLoginScreenActive() && !remoteLoginBusy && !liveSession) initTvLoginFocus();
   }, 600);
 }
 
@@ -1175,6 +1175,19 @@ function enterChannelView(user) {
   try {
     dismissSplash(true);
     showScreen("main");
+    // No dejar el foco en Recargar (OK del mando reiniciaría toda la app).
+    const reload = document.getElementById("forceReloadBtn");
+    if (reload) {
+      reload.classList.remove("login-focus");
+      try {
+        reload.blur();
+      } catch (e) {}
+    }
+    if (document.activeElement && document.activeElement.blur) {
+      try {
+        document.activeElement.blur();
+      } catch (e) {}
+    }
   } catch (e) {}
   try {
     const entry = savedLists.find((l) => l.id === activeListId);
@@ -1182,7 +1195,13 @@ function enterChannelView(user) {
     renderCategories();
     renderListSelector();
     updateChannelColumnTitle();
-    requestAnimationFrame(() => paintVirtualWindow(true));
+    requestAnimationFrame(() => {
+      paintVirtualWindow(true);
+      if (isTvLayout()) {
+        focusTvCategoryColumn();
+        updateCursorVisuals();
+      }
+    });
   } catch (e) {
     showToast("Error al mostrar canales");
   }
@@ -1221,6 +1240,16 @@ function startRemotePolling() {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
       setLoginStatus("Lista recibida. Cargando canales…");
+      try {
+        const reloadBusy = document.getElementById("forceReloadBtn");
+        if (reloadBusy) {
+          reloadBusy.disabled = true;
+          reloadBusy.classList.remove("login-focus");
+          try {
+            reloadBusy.blur();
+          } catch (e) {}
+        }
+      } catch (e) {}
       const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
       if (ok || liveSession || channelsData.length) stopRemotePolling();
       else if (!loginCancelled) {
@@ -1273,6 +1302,16 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     if (remoteLoginBusy) return liveSession && channelsData.length > 0;
   }
   remoteLoginBusy = true;
+  try {
+    const reloadBusy = document.getElementById("forceReloadBtn");
+    if (reloadBusy) {
+      reloadBusy.classList.remove("login-focus");
+      reloadBusy.disabled = true;
+      try {
+        reloadBusy.blur();
+      } catch (e) {}
+    }
+  } catch (e) {}
   loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
@@ -1437,6 +1476,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     return false;
   } finally {
     remoteLoginBusy = false;
+    try {
+      const reloadBusy = document.getElementById("forceReloadBtn");
+      if (reloadBusy) reloadBusy.disabled = false;
+    } catch (e) {}
     if (liveSession && channelsData.length) stopRemotePolling();
   }
 }
@@ -2757,7 +2800,8 @@ function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
   fallback.textContent = channelInitials(displayName(channel.name));
-  if (!channel.logo) return fallback;
+  // En TV no cargar logos remotos: saturan memoria/red y reinician el WebView (vuelve al logo).
+  if (!channel.logo || isTvLayout()) return fallback;
 
   const img = document.createElement("img");
   img.className = "channel-logo";
@@ -3909,31 +3953,68 @@ function restoreLastChannel() {
   }
 }
 
-/********** PANTALLA COMPLETA **********/
-function isFullscreen() {
+/********** PANTALLA COMPLETA / MODO TEATRO **********/
+function isOsFullscreen() {
   return !!(
     document.fullscreenElement ||
     document.webkitFullscreenElement ||
-    (video && video.webkitDisplayingFullscreen) ||
-    document.body.classList.contains("player-max")
+    (video && video.webkitDisplayingFullscreen)
   );
 }
 
-function enterFullscreen() {
-  if (!video) return;
-  const target = document.querySelector(".video-wrapper") || video.parentElement || video;
+function isTheaterMode() {
+  return document.body.classList.contains("player-theater");
+}
+
+function isFullscreen() {
+  return isOsFullscreen() || isTheaterMode();
+}
+
+function enterTheaterMode() {
+  document.body.classList.add("player-theater");
   try {
-    if (target.requestFullscreen) target.requestFullscreen();
-    else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
-    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
-    else document.body.classList.add("player-max");
-  } catch (e) {
-    document.body.classList.add("player-max");
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } catch (e) {}
+  syncTheaterButtons();
+  try {
+    layoutNativePlayer();
+  } catch (e) {}
+}
+
+function exitTheaterMode() {
+  document.body.classList.remove("player-theater");
+  syncTheaterButtons();
+  try {
+    layoutNativePlayer();
+  } catch (e) {}
+}
+
+function toggleTheaterMode() {
+  if (isTheaterMode()) exitTheaterMode();
+  else enterTheaterMode();
+}
+
+function enterFullscreen() {
+  // Móvil: pantalla completa del sistema. PC: modo teatro (100% ancho, como YouTube).
+  if (document.body.classList.contains("is-mobile")) {
+    if (!video) return;
+    const target = document.querySelector(".video-wrapper") || video.parentElement || video;
+    try {
+      if (target.requestFullscreen) target.requestFullscreen();
+      else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+      else enterTheaterMode();
+    } catch (e) {
+      enterTheaterMode();
+    }
+    return;
   }
-  syncFullscreenButtons();
+  enterTheaterMode();
 }
 
 function exitFullscreen() {
+  exitTheaterMode();
   try {
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       if (document.exitFullscreen) document.exitFullscreen();
@@ -3941,8 +4022,6 @@ function exitFullscreen() {
       else if (video && video.webkitExitFullscreen) video.webkitExitFullscreen();
     }
   } catch (e) {}
-  document.body.classList.remove("player-max");
-  syncFullscreenButtons();
 }
 
 function toggleFullscreen() {
@@ -3950,22 +4029,22 @@ function toggleFullscreen() {
   else enterFullscreen();
 }
 
-function syncFullscreenButtons() {
-  const on = isFullscreen();
+function syncTheaterButtons() {
+  const on = isTheaterMode();
   ["fullscreenBtn", "playerFsBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.classList.toggle("is-on", on);
-    btn.title = on ? "Salir del visor 100%" : "Visor al 100%";
+    btn.title = on ? "Salir del visor ancho" : "Visor al 100% de ancho";
     btn.setAttribute("aria-label", btn.title);
   });
 }
 
-document.addEventListener("fullscreenchange", syncFullscreenButtons);
-document.addEventListener("webkitfullscreenchange", syncFullscreenButtons);
+document.addEventListener("fullscreenchange", syncTheaterButtons);
+document.addEventListener("webkitfullscreenchange", syncTheaterButtons);
 document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape" && document.body.classList.contains("player-max")) {
-    exitFullscreen();
+  if (ev.key === "Escape" && isTheaterMode()) {
+    exitTheaterMode();
   }
 });
 
@@ -3975,7 +4054,7 @@ function bindFullscreenButtons() {
       ev.preventDefault();
       ev.stopPropagation();
     }
-    toggleFullscreen();
+    toggleTheaterMode();
   };
   const headerBtn = document.getElementById("fullscreenBtn");
   const playerBtn = document.getElementById("playerFsBtn");
@@ -3987,7 +4066,7 @@ function bindFullscreenButtons() {
     playerBtn.dataset.bound = "1";
     playerBtn.addEventListener("click", go);
   }
-  syncFullscreenButtons();
+  syncTheaterButtons();
 }
 
 // Girar el móvil a horizontal entra a pantalla completa. Algunos navegadores
@@ -3995,8 +4074,8 @@ function bindFullscreenButtons() {
 function handleOrientationChange() {
   if (!document.body.classList.contains("is-mobile")) return;
   const landscape = window.matchMedia("(orientation: landscape)").matches;
-  if (landscape && currentlyPlayingId && !isFullscreen()) enterFullscreen();
-  else if (!landscape && isFullscreen()) exitFullscreen();
+  if (landscape && currentlyPlayingId && !isOsFullscreen()) enterFullscreen();
+  else if (!landscape && isOsFullscreen()) exitFullscreen();
 }
 
 window.addEventListener("orientationchange", () => setTimeout(handleOrientationChange, 250));
@@ -4502,6 +4581,11 @@ function doLogout() {
 }
 
 async function forceReloadApp() {
+  // Durante la carga remota, un OK del mando sobre Recargar reiniciaba al splash.
+  if (remoteLoginBusy || (liveSession && channelsData.length)) {
+    showToast(remoteLoginBusy ? "Espera: cargando la lista…" : "Ya estás dentro. Usa Actualizar en el menú.");
+    return;
+  }
   setLoginStatus("Recargando…");
   showSpinner(true, "Recargando…");
   try {
@@ -4528,7 +4612,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824f");
+  url.searchParams.set("v", "20260824g");
   window.location.replace(url.toString());
 }
 
@@ -4633,6 +4717,7 @@ function isLoginScreenActive() {
 }
 
 function initTvLoginFocus() {
+  if (!isLoginScreenActive() || remoteLoginBusy || liveSession) return;
   const reload = document.getElementById("forceReloadBtn");
   if (!reload) return;
   reload.classList.add("login-focus");
@@ -4780,6 +4865,19 @@ document.addEventListener("keydown", (e) => {
 
   if (isLoginScreenActive()) {
     const reload = document.getElementById("forceReloadBtn");
+    if (remoteLoginBusy || liveSession) {
+      if (isConfirmKey(e) || ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (reload) {
+        reload.classList.remove("login-focus");
+        try {
+          reload.blur();
+        } catch (err) {}
+      }
+      return;
+    }
     if (reload && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
       e.preventDefault();
       reload.classList.add("login-focus");
@@ -4788,6 +4886,17 @@ document.addEventListener("keydown", (e) => {
       } catch (err) {
         reload.focus();
       }
+      return;
+    }
+    // OK sobre Recargar: solo si el foco está ahí a propósito (no durante carga).
+    if (isConfirmKey(e)) {
+      if (reload && (document.activeElement === reload || reload.classList.contains("login-focus"))) {
+        e.preventDefault();
+        forceReloadApp();
+      } else {
+        e.preventDefault();
+      }
+      return;
     }
     return;
   }
