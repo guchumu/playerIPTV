@@ -180,6 +180,18 @@ async function refreshNativeTvFlag() {
     });
     detectDevice();
     applyUiMode();
+    showApkVersion(info.versionName);
+  } catch (e) {}
+}
+
+function showApkVersion(versionName) {
+  const tag = document.querySelector(".build-tag");
+  if (!tag) return;
+  const web = "v20260825e";
+  const apk = versionName ? String(versionName) : "";
+  tag.textContent = apk ? web + " · APK " + apk : web;
+  try {
+    if (apk) window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { versionName: apk });
   } catch (e) {}
 }
 
@@ -1420,6 +1432,13 @@ window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   refreshNativeTvFlag();
   applyUiMode();
+  try {
+    const n = window.StreamBoxNative;
+    if (n && n.versionName) showApkVersion(n.versionName);
+    else showApkVersion("");
+  } catch (e) {
+    showApkVersion("");
+  }
   try {
     const session = localStorage.getItem(SESSION_KEY);
     if (session && !localStorage.getItem(LAST_LIST_KEY)) localStorage.setItem(LAST_LIST_KEY, session);
@@ -2695,44 +2714,50 @@ function renderChannels(channels) {
 
 function paintVirtualWindow(force) {
   if (!channelsContainer) return;
-  const cols = channelGridCols();
-  const rowH = channelGridRowHeight();
-  const total = virtualList.length;
-  const totalRows = Math.ceil(total / cols) || 0;
-  const view = Math.max(channelsContainer.clientHeight || 0, 180);
-  const startRow = Math.max(0, Math.floor(channelsContainer.scrollTop / rowH) - 3);
-  const endRow = Math.min(totalRows, Math.ceil((channelsContainer.scrollTop + view) / rowH) + 3);
-  const start = startRow * cols;
-  const end = Math.min(total, endRow * cols);
-  if (!force && startRow === virtualRange.start && endRow === virtualRange.end && cols === virtualRange.cols) {
-    markTvCursor();
-    return;
-  }
-  virtualRange = { start: startRow, end: endRow, cols: cols };
+  try {
+    const cols = channelGridCols();
+    const rowH = channelGridRowHeight();
+    const total = virtualList.length;
+    const totalRows = Math.ceil(total / cols) || 0;
+    const view = Math.max(channelsContainer.clientHeight || 0, 180);
+    const startRow = Math.max(0, Math.floor(channelsContainer.scrollTop / rowH) - 3);
+    const endRow = Math.min(totalRows, Math.ceil((channelsContainer.scrollTop + view) / rowH) + 3);
+    const start = startRow * cols;
+    const end = Math.min(total, endRow * cols);
+    if (!force && startRow === virtualRange.start && endRow === virtualRange.end && cols === virtualRange.cols) {
+      markTvCursor();
+      return;
+    }
+    virtualRange = { start: startRow, end: endRow, cols: cols };
 
-  const frag = document.createDocumentFragment();
-  const head = document.createElement("div");
-  head.className = "channels-spacer";
-  head.style.height = startRow * rowH + "px";
-  frag.appendChild(head);
-  if (!total && currentCategory === FAV_NAME) {
-    const empty = document.createElement("p");
-    empty.className = "tv-fav-empty";
-    empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
-    frag.appendChild(empty);
+    const frag = document.createDocumentFragment();
+    const head = document.createElement("div");
+    head.className = "channels-spacer";
+    head.style.height = startRow * rowH + "px";
+    frag.appendChild(head);
+    if (!total && currentCategory === FAV_NAME) {
+      const empty = document.createElement("p");
+      empty.className = "tv-fav-empty";
+      empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
+      frag.appendChild(empty);
+    }
+    const grid = document.createElement("div");
+    grid.className = "channels-grid";
+    grid.style.setProperty("--channel-cols", String(cols));
+    for (let i = start; i < end; i++) grid.appendChild(buildChannelRow(virtualList[i]));
+    frag.appendChild(grid);
+    const tail = document.createElement("div");
+    tail.className = "channels-spacer";
+    tail.style.height = Math.max(0, (totalRows - endRow) * rowH) + "px";
+    frag.appendChild(tail);
+    channelsContainer.innerHTML = "";
+    channelsContainer.appendChild(frag);
+    markTvCursor();
+  } catch (e) {
+    try {
+      logPlayback("lista", String((e && e.message) || e));
+    } catch (err) {}
   }
-  const grid = document.createElement("div");
-  grid.className = "channels-grid";
-  grid.style.setProperty("--channel-cols", String(cols));
-  for (let i = start; i < end; i++) grid.appendChild(buildChannelRow(virtualList[i]));
-  frag.appendChild(grid);
-  const tail = document.createElement("div");
-  tail.className = "channels-spacer";
-  tail.style.height = Math.max(0, (totalRows - endRow) * rowH) + "px";
-  frag.appendChild(tail);
-  channelsContainer.innerHTML = "";
-  channelsContainer.appendChild(frag);
-  markTvCursor();
 }
 
 function runChannelSearch(query) {
@@ -4233,16 +4258,12 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825b");
+  url.searchParams.set("v", "20260825e");
   window.location.replace(url.toString());
 }
 
 async function doRefresh() {
   if (!currentUser) return;
-  if (currentUser.isMerged || activeListId === ALL_LISTS_ID) {
-    showToast("Elige una lista concreta para actualizarla");
-    return;
-  }
   const ok = await performLoginAction(
     currentUser.server,
     currentUser.username,
@@ -4648,44 +4669,48 @@ document.addEventListener("keyup", (e) => {
 });
 
 function updateCursorVisuals() {
-  document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
-  getTvHeaderActions().forEach((el) => el.classList.remove("cursor"));
-  let target = null;
-  if (currentFocus.col === TV_HEADER_COL) {
-    const actions = getTvHeaderActions();
-    target = actions[currentFocus.row] || actions[0];
-    if (target) {
-      target.classList.add("cursor");
-      if (document.activeElement !== target) {
-        try {
-          target.focus({ preventScroll: true });
-        } catch (e) {
-          target.focus();
+  try {
+    document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
+    getTvHeaderActions().forEach((el) => el.classList.remove("cursor"));
+    let target = null;
+    if (currentFocus.col === TV_HEADER_COL) {
+      const actions = getTvHeaderActions();
+      target = actions[currentFocus.row] || actions[0];
+      if (target) {
+        target.classList.add("cursor");
+        if (document.activeElement !== target) {
+          try {
+            target.focus({ preventScroll: true });
+          } catch (e) {
+            target.focus();
+          }
         }
       }
+      if (video) video.style.outline = "none";
+      return;
+    }
+    if (currentFocus.col === 0) {
+      target = document.querySelectorAll(".category-btn")[currentFocus.row];
+    } else if (currentFocus.col === 1) {
+      const ch = virtualList[currentFocus.row];
+      if (ch && channelsContainer) {
+        target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+      }
+      if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
     }
     if (video) video.style.outline = "none";
-    return;
-  }
-  if (currentFocus.col === 0) {
-    target = document.querySelectorAll(".category-btn")[currentFocus.row];
-  } else if (currentFocus.col === 1) {
-    const ch = virtualList[currentFocus.row];
-    if (ch && channelsContainer) {
-      target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+    const headerActive = document.activeElement;
+    if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
+    if (target) {
+      target.classList.add("cursor");
+      try {
+        target.scrollIntoView({ block: "nearest", behavior: "auto" });
+      } catch (e) {}
+      if (currentFocus.col === 0 && !isTvLayout()) {
+        selectCategory(target.dataset.category);
+      }
     }
-    if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
-  }
-  if (video) video.style.outline = "none";
-  const headerActive = document.activeElement;
-  if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
-  if (target) {
-    target.classList.add("cursor");
-    target.scrollIntoView({ block: "nearest", behavior: "auto" });
-    if (currentFocus.col === 0 && !isTvLayout()) {
-      selectCategory(target.dataset.category);
-    }
-  }
+  } catch (e) {}
 }
 
 const debugProbeBtn = document.getElementById("debugProbeBtn");

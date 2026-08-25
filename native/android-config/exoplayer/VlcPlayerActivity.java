@@ -203,9 +203,7 @@ public class VlcPlayerActivity extends Activity {
             }
             if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
                 || code == KeyEvent.KEYCODE_MEDIA_PLAY
-                || code == KeyEvent.KEYCODE_MEDIA_PAUSE
-                || code == KeyEvent.KEYCODE_DPAD_CENTER
-                || code == KeyEvent.KEYCODE_ENTER) {
+                || code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
                 if (mediaPlayer != null) {
                     if (code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
                         mediaPlayer.pause();
@@ -223,6 +221,7 @@ public class VlcPlayerActivity extends Activity {
                 }
                 return true;
             }
+            // OK/Enter no pausan: en TV el usuario espera que el vídeo siga.
         }
         return super.dispatchKeyEvent(event);
     }
@@ -271,6 +270,11 @@ public class VlcPlayerActivity extends Activity {
             } catch (Throwable ignored) {}
             libVLC = null;
         }
+        try {
+            Intent done = new Intent(getPackageName() + ".VLC_FINISHED");
+            done.setPackage(getPackageName());
+            sendBroadcast(done);
+        } catch (Throwable ignored) {}
         super.onDestroy();
     }
 }

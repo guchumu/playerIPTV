@@ -2,9 +2,11 @@ package PACKAGE_NAME;
 
 import android.app.UiModeManager;
 import android.content.Context;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.os.Build;
 import android.webkit.WebView;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -47,15 +49,32 @@ public class StreamBoxPlugin extends Plugin {
         return false;
     }
 
-    static String scriptNativo(boolean isTv) {
-        // En TV el motor nativo es LibVLC (ExoPlayer congela en Streamer/MediaTek).
+    static String versionName(Context ctx) {
+        if (ctx == null) return "";
+        try {
+            PackageInfo pi;
+            if (Build.VERSION.SDK_INT >= 33) {
+                pi = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), PackageManager.PackageInfoFlags.of(0));
+            } else {
+                pi = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+            }
+            return pi != null && pi.versionName != null ? pi.versionName : "";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    static String scriptNativo(Context ctx, boolean isTv) {
         String engine = isTv ? "vlc" : "exo";
+        String ver = versionName(ctx).replace("'", "").replace("\\", "");
         return "(function(){try{"
-            + "window.StreamBoxNative={isTv:"
+            + "window.StreamBoxNative=Object.assign({},window.StreamBoxNative||{},{isTv:"
             + (isTv ? "true" : "false")
             + ",hasExo:true,exo:true,hasVlc:true,engine:'"
             + engine
-            + "'};"
+            + "',versionName:'"
+            + ver
+            + "'});"
             + (isTv
                 ? "document.documentElement.classList.add('is-native-tv');"
                     + "function a(){if(document.body)document.body.classList.add('is-tv');}"
@@ -72,7 +91,7 @@ public class StreamBoxPlugin extends Plugin {
         WebView webView = getBridge().getWebView();
         if (webView == null) return;
 
-        String js = scriptNativo(isTv);
+        String js = scriptNativo(ctx, isTv);
         if (isTv) {
             String ua = webView.getSettings().getUserAgentString();
             if (ua != null && !ua.contains("StreamBoxTV")) {
@@ -80,12 +99,24 @@ public class StreamBoxPlugin extends Plugin {
             }
         }
 
+        boolean injected = false;
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             for (String origin : origenes(webView)) {
                 try {
                     WebViewCompat.addDocumentStartJavaScript(webView, js, Collections.singleton(origin));
+                    injected = true;
                 } catch (Exception ignored) {}
             }
+        }
+        // Por si DOCUMENT_START_SCRIPT no existe o falla: inyectar al cargar.
+        final String jsFinal = js;
+        webView.post(() -> {
+            try {
+                webView.evaluateJavascript(jsFinal, null);
+            } catch (Exception ignored) {}
+        });
+        if (!injected) {
+            // nada más: evaluateJavascript cubre el caso
         }
     }
 
@@ -133,6 +164,7 @@ public class StreamBoxPlugin extends Plugin {
         ret.put("exo", true);
         ret.put("hasVlc", true);
         ret.put("engine", isTv ? "vlc" : "exo");
+        ret.put("versionName", versionName(getContext()));
         call.resolve(ret);
     }
 }
