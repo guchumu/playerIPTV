@@ -88,21 +88,19 @@ cd native/android && ./gradlew assembleDebug
 # salida: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Reproducción: LibVLC en TV, ExoPlayer en móvil
+## Reproducción: LibVLC o ExoPlayer (elegible)
 
-La interfaz sigue siendo la web (categorías, QR, guía). Al elegir un canal, la
-app nativa abre el reproductor embebido:
+En la APK puedes elegir el motor en el login o en la cabecera (Motor):
 
-- **Televisor / Google Streamer / Fire Stick:** LibVLC. En esos chips (MediaTek)
-  ExoPlayer suele congelar el vídeo dejando el audio; VLC aguanta mejor el TS.
-- **Móvil Android:** ExoPlayer (Media3), que ahí va bien.
+- **LibVLC** (recomendado en TV / Streamer): proceso `:vlc`.
+- **ExoPlayer**: proceso `:exo` en TV; en móvil puede ir encima del WebView.
 
-En TV el vídeo empieza en la ventana pequeña y pasa a pantalla completa con el
-segundo OK. En el navegador y en la PWA se sigue usando `<video>` + mpegts.js.
+Por defecto: LibVLC en televisor, ExoPlayer en teléfono. En navegador/PWA sigue
+`<video>` + mpegts.js.
 
 `tools/patch_android_tv.py` copia el plugin `NativePlayer`, el plugin
-`StreamBox` (detecta leanback y elige motor), las Activities y las
-dependencias Media3 + LibVLC justo después de `npx cap add android`.
+`StreamBox` (detecta leanback), las Activities y las dependencias Media3 + LibVLC
+justo después de `npx cap add android`.
 
 ## iOS
 
