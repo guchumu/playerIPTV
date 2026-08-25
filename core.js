@@ -4285,6 +4285,9 @@ function doLogout() {
   liveSession = false;
   remoteLoginBusy = false;
   loginCancelled = false;
+  lastRemoteAssignKey = "";
+  lastRemoteFailAt = 0;
+  remoteFailCount = 0;
   try {
     sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
   } catch (e) {}
