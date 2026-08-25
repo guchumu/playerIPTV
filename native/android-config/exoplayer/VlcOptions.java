@@ -2,7 +2,12 @@ package PACKAGE_NAME;
 
 import java.util.ArrayList;
 
-/** Opciones compartidas de LibVLC para directo IPTV. */
+/**
+ * Opciones de LibVLC para directo IPTV.
+ *
+ * En Google TV Streamer / chips MediaTek el decoder HW (MediaCodec) suele
+ * congelar el vídeo y dejar el audio. Por eso en TV forzamos software.
+ */
 public final class VlcOptions {
     private VlcOptions() {}
 
@@ -19,6 +24,8 @@ public final class VlcOptions {
         opts.add("--skip-frames");
         opts.add("--http-reconnect");
         opts.add("--no-stats");
+        // Sin HW: el MediaCodec del Streamer congela tras 1–2 frames.
+        opts.add("--avcodec-hw=none");
         return opts;
     }
 }

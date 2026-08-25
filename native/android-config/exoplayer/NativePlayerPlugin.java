@@ -225,7 +225,8 @@ public class NativePlayerPlugin extends Plugin {
         ArrayList<String> opts = VlcOptions.base();
         libVLC = new LibVLC(act, opts);
         vlcPlayer = new MediaPlayer(libVLC);
-        vlcPlayer.attachViews(vlcLayout, null, false, false);
+        // TextureView: SurfaceView encima del WebView congela el vídeo.
+        vlcPlayer.attachViews(vlcLayout, null, false, true);
 
         overlay = vlcRoot;
         parent.addView(overlay, new FrameLayout.LayoutParams(boxW, boxH));
@@ -348,6 +349,13 @@ public class NativePlayerPlugin extends Plugin {
         overlay.setLayoutParams(lp);
         overlay.bringToFront();
         overlay.setVisibility(View.VISIBLE);
+        if (vlcPlayer != null) {
+            overlay.post(() -> {
+                try {
+                    if (vlcPlayer != null) vlcPlayer.updateVideoSurfaces();
+                } catch (Exception ignored) {}
+            });
+        }
         if (backCallback != null) backCallback.setEnabled(fs);
     }
 
@@ -363,13 +371,22 @@ public class NativePlayerPlugin extends Plugin {
     private void playVlc(String url) {
         if (vlcPlayer == null || libVLC == null) return;
         Media media = new Media(libVLC, Uri.parse(url));
-        media.setHWDecoderEnabled(true, false);
+        // false+true: forzar software; el HW del Streamer congela el frame.
+        media.setHWDecoderEnabled(false, true);
+        media.addOption(":avcodec-hw=none");
         media.addOption(":network-caching=2000");
         media.addOption(":live-caching=2000");
         media.addOption(":http-user-agent=" + UA);
         vlcPlayer.setMedia(media);
         media.release();
         vlcPlayer.play();
+        if (overlay != null) {
+            overlay.post(() -> {
+                try {
+                    if (vlcPlayer != null) vlcPlayer.updateVideoSurfaces();
+                } catch (Exception ignored) {}
+            });
+        }
     }
 
     private void playExo(String url, String mime) {

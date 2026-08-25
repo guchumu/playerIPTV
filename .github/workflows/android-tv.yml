@@ -16,6 +16,10 @@ on:
   push:
     tags:
       - "v*"
+    paths:
+      - "native/**"
+      - "tools/patch_android_tv.py"
+      - ".github/workflows/android-tv.yml"
 
 permissions:
   contents: write

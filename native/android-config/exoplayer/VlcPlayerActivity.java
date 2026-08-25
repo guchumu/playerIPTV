@@ -66,7 +66,7 @@ public class VlcPlayerActivity extends Activity {
         ArrayList<String> opts = VlcOptions.base();
         libVLC = new LibVLC(this, opts);
         mediaPlayer = new MediaPlayer(libVLC);
-        mediaPlayer.attachViews(vlcLayout, null, false, false);
+        mediaPlayer.attachViews(vlcLayout, null, false, true);
 
         if (getIntent() != null) {
             playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
@@ -96,7 +96,8 @@ public class VlcPlayerActivity extends Activity {
             }
         }
         Media media = new Media(libVLC, Uri.parse(url));
-        media.setHWDecoderEnabled(true, false);
+        media.setHWDecoderEnabled(false, true);
+        media.addOption(":avcodec-hw=none");
         media.addOption(":network-caching=2000");
         media.addOption(":live-caching=2000");
         media.addOption(":http-user-agent=" + UA);
@@ -104,6 +105,13 @@ public class VlcPlayerActivity extends Activity {
         media.release();
         paused = false;
         mediaPlayer.play();
+        if (vlcLayout != null) {
+            vlcLayout.post(() -> {
+                try {
+                    if (mediaPlayer != null) mediaPlayer.updateVideoSurfaces();
+                } catch (Exception ignored) {}
+            });
+        }
     }
 
     private void ocultarBarras() {
