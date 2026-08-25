@@ -3397,15 +3397,22 @@ function playChannel(channel) {
 }
 
 function nativePlayerEngine() {
+  // Sin selector en UI: en TV LibVLC (estable); en móvil/PC nativo ExoPlayer.
+  // Forzar exo en TV rompía la reproducción (v20260824h).
+  try {
+    if (isTvLayout() || nativeTvFlag() === true || document.documentElement.classList.contains("is-native-tv")) {
+      return "vlc";
+    }
+  } catch (e) {}
   return "exo";
 }
 
 function getPreferredNativeEngine() {
-  return "exo";
+  return nativePlayerEngine();
 }
 
 function setPreferredNativeEngine(engine, opts) {
-  const e = "exo";
+  const e = nativePlayerEngine();
   try {
     localStorage.setItem(ENGINE_KEY, e);
   } catch (err) {}
@@ -3413,28 +3420,26 @@ function setPreferredNativeEngine(engine, opts) {
     window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: e });
   } catch (err) {}
   syncEngineSelects(e);
-  if (!(opts && opts.silent)) {
-    showToast("Reproductor: ExoPlayer");
-  }
   return e;
 }
 
 function syncEngineSelects(engine) {
-  const e = "exo";
+  const e = engine || nativePlayerEngine();
   ["engineSelect", "loginEngineSelect"].forEach((id) => {
     const sel = document.getElementById(id);
-    if (sel) sel.value = e;
+    if (sel) sel.value = e === "exo" ? "exo" : "vlc";
   });
 }
 
 function initNativeEnginePicker() {
-  // Solo ExoPlayer: el <select> no es usable con mando en TV.
+  // Sin menú: el <select> no se maneja bien con el mando.
+  const e = nativePlayerEngine();
   try {
-    localStorage.setItem(ENGINE_KEY, "exo");
-  } catch (e) {}
+    localStorage.setItem(ENGINE_KEY, e);
+  } catch (err) {}
   try {
-    window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: "exo" });
-  } catch (e) {}
+    window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: e });
+  } catch (err) {}
   const loginWrap = document.getElementById("loginEngineControl");
   const headerWrap = document.getElementById("engineControl");
   if (loginWrap) loginWrap.hidden = true;
@@ -4686,7 +4691,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824h");
+  url.searchParams.set("v", "20260824i");
   window.location.replace(url.toString());
 }
 
