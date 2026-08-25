@@ -66,10 +66,19 @@ public class VlcPlayerActivity extends Activity {
         ArrayList<String> opts = VlcOptions.base();
         libVLC = new LibVLC(this, opts);
         mediaPlayer = new MediaPlayer(libVLC);
-        mediaPlayer.attachViews(vlcLayout, null, false, true);
-
-        if (getIntent() != null) {
-            playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
+        if (vlcLayout != null) {
+            vlcLayout.post(() -> {
+                try {
+                    if (mediaPlayer != null) mediaPlayer.attachViews(vlcLayout, null, false, false);
+                } catch (Throwable e) {
+                    try {
+                        if (mediaPlayer != null) mediaPlayer.attachViews(vlcLayout, null, false, true);
+                    } catch (Throwable ignored) {}
+                }
+                if (getIntent() != null) {
+                    playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
+                }
+            });
         }
     }
 
@@ -95,16 +104,19 @@ public class VlcPlayerActivity extends Activity {
                 titleView.setVisibility(View.GONE);
             }
         }
-        Media media = new Media(libVLC, Uri.parse(url));
-        media.setHWDecoderEnabled(false, true);
-        media.addOption(":avcodec-hw=none");
-        media.addOption(":network-caching=2000");
-        media.addOption(":live-caching=2000");
-        media.addOption(":http-user-agent=" + UA);
-        mediaPlayer.setMedia(media);
-        media.release();
-        paused = false;
-        mediaPlayer.play();
+        try {
+            Media media = new Media(libVLC, Uri.parse(url));
+            media.setHWDecoderEnabled(true, false);
+            media.addOption(":network-caching=2000");
+            media.addOption(":live-caching=2000");
+            media.addOption(":http-user-agent=" + UA);
+            mediaPlayer.setMedia(media);
+            media.release();
+            paused = false;
+            mediaPlayer.play();
+        } catch (Throwable ignored) {
+            return;
+        }
         if (vlcLayout != null) {
             vlcLayout.post(() -> {
                 try {

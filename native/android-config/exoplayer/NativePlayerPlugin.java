@@ -27,7 +27,6 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import java.util.ArrayList;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
@@ -79,17 +78,28 @@ public class NativePlayerPlugin extends Plugin {
             return;
         }
         act.runOnUiThread(() -> {
-            rememberBox(call);
-            useVlc = StreamBoxPlugin.esTelevisor(act);
-            if (!ensureOverlay()) {
-                lanzarActivity(url, title, mime);
+            try {
+                rememberBox(call);
+                useVlc = StreamBoxPlugin.esTelevisor(act);
+                if (useVlc && !ensureOverlay()) {
+                    useVlc = false;
+                }
+                if (!useVlc && !ensureOverlay()) {
+                    lanzarActivity(url, title, mime);
+                    call.resolve(ok(true, wantFs));
+                    return;
+                }
+                if (useVlc && overlay != null) {
+                    overlay.post(() -> startVlcWhenReady(call, url, mime, wantFs, 0));
+                    return;
+                }
+                playUrl(url, mime);
+                applyLayout(wantFs);
+                emit(false, wantFs);
                 call.resolve(ok(true, wantFs));
-                return;
+            } catch (Throwable t) {
+                fallbackExoOrActivity(call, url, title, mime, wantFs, t);
             }
-            playUrl(url, mime);
-            applyLayout(wantFs);
-            emit(false, wantFs);
-            call.resolve(ok(true, wantFs));
         });
     }
 
@@ -216,23 +226,78 @@ public class NativePlayerPlugin extends Plugin {
     }
 
     private boolean ensureVlc(Activity act, ViewGroup parent) {
-        vlcRoot = act.getLayoutInflater().inflate(R.layout.overlay_vlc, parent, false);
-        vlcRoot.setBackgroundColor(Color.BLACK);
-        vlcRoot.setFocusable(false);
-        vlcRoot.setFocusableInTouchMode(false);
-        vlcLayout = vlcRoot.findViewById(R.id.overlay_vlc_layout);
+        try {
+            vlcRoot = act.getLayoutInflater().inflate(R.layout.overlay_vlc, parent, false);
+            vlcRoot.setBackgroundColor(Color.BLACK);
+            vlcRoot.setFocusable(false);
+            vlcRoot.setFocusableInTouchMode(false);
+            vlcLayout = vlcRoot.findViewById(R.id.overlay_vlc_layout);
+            if (vlcLayout == null) return false;
 
-        ArrayList<String> opts = VlcOptions.base();
-        libVLC = new LibVLC(act, opts);
-        vlcPlayer = new MediaPlayer(libVLC);
-        // TextureView: SurfaceView encima del WebView congela el vídeo.
-        vlcPlayer.attachViews(vlcLayout, null, false, true);
+            libVLC = new LibVLC(act, VlcOptions.base());
+            vlcPlayer = new MediaPlayer(libVLC);
 
-        overlay = vlcRoot;
-        parent.addView(overlay, new FrameLayout.LayoutParams(boxW, boxH));
-        wireOverlayKeys();
-        wireBackCallback(act);
-        return true;
+            overlay = vlcRoot;
+            parent.addView(overlay, new FrameLayout.LayoutParams(boxW, boxH));
+            overlay.bringToFront();
+            wireOverlayKeys();
+            wireBackCallback(act);
+            return true;
+        } catch (Throwable t) {
+            soltar();
+            return false;
+        }
+    }
+
+    private void startVlcWhenReady(PluginCall call, String url, String mime, boolean wantFs, int tries) {
+        try {
+            if (vlcPlayer == null || vlcLayout == null || overlay == null) {
+                throw new IllegalStateException("sin VLC");
+            }
+            if (!overlay.isAttachedToWindow() || overlay.getWidth() < 2 || overlay.getHeight() < 2) {
+                if (tries > 30) throw new IllegalStateException("VLC sin superficie");
+                overlay.postDelayed(() -> startVlcWhenReady(call, url, mime, wantFs, tries + 1), 32);
+                return;
+            }
+            boolean attached = vlcPlayer.getVLCVout() != null && vlcPlayer.getVLCVout().areViewsAttached();
+            if (!attached) {
+                try {
+                    vlcPlayer.attachViews(vlcLayout, null, false, false);
+                    attached = true;
+                } catch (Throwable ignored) {}
+            }
+            if (!attached) {
+                vlcPlayer.attachViews(vlcLayout, null, false, true);
+            }
+            playVlc(url);
+            applyLayout(wantFs);
+            emit(false, wantFs);
+            call.resolve(ok(true, wantFs));
+        } catch (Throwable t) {
+            fallbackExoOrActivity(call, url, "", mime, wantFs, t);
+        }
+    }
+
+    private void fallbackExoOrActivity(PluginCall call, String url, String title, String mime, boolean wantFs, Throwable t) {
+        try {
+            soltar();
+            useVlc = false;
+            Activity act = getActivity();
+            WebView web = getBridge() != null ? getBridge().getWebView() : null;
+            ViewGroup parent = web != null ? (ViewGroup) web.getParent() : null;
+            if (act != null && parent != null && ensureExo(act, parent)) {
+                playExo(url, mime);
+                applyLayout(wantFs);
+                emit(false, wantFs);
+                call.resolve(ok(true, wantFs));
+                return;
+            }
+            lanzarActivity(url, title, mime);
+            call.resolve(ok(true, wantFs));
+        } catch (Throwable ignored) {
+            String msg = t != null && t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
+            call.reject(msg);
+        }
     }
 
     private boolean ensureExo(Activity act, ViewGroup parent) {
@@ -372,15 +437,16 @@ public class NativePlayerPlugin extends Plugin {
     private void playVlc(String url) {
         if (vlcPlayer == null || libVLC == null) return;
         Media media = new Media(libVLC, Uri.parse(url));
-        // false+true: forzar software; el HW del Streamer congela el frame.
-        media.setHWDecoderEnabled(false, true);
-        media.addOption(":avcodec-hw=none");
-        media.addOption(":network-caching=2000");
-        media.addOption(":live-caching=2000");
-        media.addOption(":http-user-agent=" + UA);
-        vlcPlayer.setMedia(media);
-        media.release();
-        vlcPlayer.play();
+        try {
+            media.setHWDecoderEnabled(true, false);
+            media.addOption(":network-caching=2000");
+            media.addOption(":live-caching=2000");
+            media.addOption(":http-user-agent=" + UA);
+            vlcPlayer.setMedia(media);
+            vlcPlayer.play();
+        } finally {
+            media.release();
+        }
         if (overlay != null) {
             overlay.post(() -> {
                 try {
