@@ -1,6 +1,10 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -11,81 +15,123 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.TextView;
 import androidx.annotation.Nullable;
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
 /**
- * Pantalla completa con LibVLC. En Google TV Streamer ExoPlayer congela el
- * vídeo (audio sigue); VLC usa otro camino de decodificación y suele aguantar.
+ * Pantalla completa con LibVLC en un proceso aparte (:vlc).
+ * Así un aborto nativo de VLC no tumba el menú del WebView.
  */
 public class VlcPlayerActivity extends Activity {
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
+    public static final String ACTION_STOP = "PACKAGE_NAME.STOP_VLC";
 
     private static final String UA = "VLC/3.0.16 LibVLC/3.0.16";
-
-    private static WeakReference<VlcPlayerActivity> viva;
 
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout vlcLayout;
     private TextView titleView;
     private boolean paused;
+    private boolean receiverOn;
 
-    public static boolean isRunning() {
-        return viva != null && viva.get() != null;
-    }
+    private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            finish();
+        }
+    };
 
-    public static void playNow(String url, String title) {
-        VlcPlayerActivity a = viva == null ? null : viva.get();
-        if (a == null) return;
-        a.runOnUiThread(() -> a.playUrl(url, title));
-    }
-
-    public static void stopNow() {
-        VlcPlayerActivity a = viva == null ? null : viva.get();
-        if (a == null) return;
-        a.runOnUiThread(a::finish);
+    public static void stopNow(Context ctx) {
+        if (ctx == null) return;
+        try {
+            Intent i = new Intent(ACTION_STOP);
+            i.setPackage(ctx.getPackageName());
+            ctx.sendBroadcast(i);
+        } catch (Throwable ignored) {}
     }
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        viva = new WeakReference<>(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setContentView(R.layout.activity_vlc);
+        if (ACTION_STOP.equals(getIntent() != null ? getIntent().getAction() : null)) {
+            finish();
+            return;
+        }
+        registrarStop();
+        try {
+            setContentView(R.layout.activity_vlc);
+        } catch (Throwable t) {
+            finish();
+            return;
+        }
         ocultarBarras();
 
         vlcLayout = findViewById(R.id.vlc_layout);
         titleView = findViewById(R.id.player_title);
 
-        ArrayList<String> opts = VlcOptions.base();
-        libVLC = new LibVLC(this, opts);
-        mediaPlayer = new MediaPlayer(libVLC);
+        try {
+            libVLC = new LibVLC(this, VlcOptions.base());
+            mediaPlayer = new MediaPlayer(libVLC);
+        } catch (Throwable t) {
+            finish();
+            return;
+        }
         if (vlcLayout != null) {
-            vlcLayout.post(() -> {
-                try {
-                    if (mediaPlayer != null) mediaPlayer.attachViews(vlcLayout, null, false, false);
-                } catch (Throwable e) {
-                    try {
-                        if (mediaPlayer != null) mediaPlayer.attachViews(vlcLayout, null, false, true);
-                    } catch (Throwable ignored) {}
-                }
-                if (getIntent() != null) {
-                    playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
-                }
-            });
+            vlcLayout.post(() -> attachWhenReady(0));
+        }
+    }
+
+    private void registrarStop() {
+        if (receiverOn) return;
+        IntentFilter filter = new IntentFilter(ACTION_STOP);
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(stopReceiver, filter);
+            }
+            receiverOn = true;
+        } catch (Throwable ignored) {}
+    }
+
+    private void attachWhenReady(int tries) {
+        if (isFinishing() || mediaPlayer == null || vlcLayout == null) return;
+        if (vlcLayout.getWidth() < 2 || vlcLayout.getHeight() < 2) {
+            if (tries > 40) {
+                finish();
+                return;
+            }
+            vlcLayout.postDelayed(() -> attachWhenReady(tries + 1), 32);
+            return;
+        }
+        try {
+            mediaPlayer.attachViews(vlcLayout, null, false, false);
+        } catch (Throwable e) {
+            try {
+                mediaPlayer.attachViews(vlcLayout, null, false, true);
+            } catch (Throwable ignored) {
+                finish();
+                return;
+            }
+        }
+        if (getIntent() != null) {
+            playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
         }
     }
 
     @Override
-    protected void onNewIntent(android.content.Intent intent) {
+    protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            finish();
+            return;
+        }
         if (intent != null) {
             playUrl(intent.getStringExtra(EXTRA_URL), intent.getStringExtra(EXTRA_TITLE));
         }
@@ -181,27 +227,46 @@ public class VlcPlayerActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (mediaPlayer != null) mediaPlayer.pause();
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.pause();
+            } catch (Throwable ignored) {}
+        }
         super.onStop();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        if (mediaPlayer != null && !paused) mediaPlayer.play();
+        if (mediaPlayer != null && !paused) {
+            try {
+                mediaPlayer.play();
+            } catch (Throwable ignored) {}
+        }
     }
 
     @Override
     protected void onDestroy() {
-        if (viva != null && viva.get() == this) viva = null;
+        if (receiverOn) {
+            try {
+                unregisterReceiver(stopReceiver);
+            } catch (Throwable ignored) {}
+            receiverOn = false;
+        }
         if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.detachViews();
-            mediaPlayer.release();
+            try {
+                mediaPlayer.stop();
+                mediaPlayer.detachViews();
+            } catch (Throwable ignored) {}
+            try {
+                mediaPlayer.release();
+            } catch (Throwable ignored) {}
             mediaPlayer = null;
         }
         if (libVLC != null) {
-            libVLC.release();
+            try {
+                libVLC.release();
+            } catch (Throwable ignored) {}
             libVLC = null;
         }
         super.onDestroy();

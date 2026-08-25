@@ -505,66 +505,51 @@ html.is-native-tv .splash-hint-tv { display: inline; }
 }
 .channel-item {
   display: flex;
-  flex-direction: column;
-  height: 140px;
-  min-height: 140px;
-  padding: 8px;
-  background: rgba(15, 23, 42, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  border-radius: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 64px;
+  min-height: 64px;
+  padding: 7px 8px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid transparent;
+  border-radius: 8px;
   cursor: pointer;
   user-select: none;
   box-sizing: border-box;
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
 }
 .channel-item:hover {
   border-color: rgba(99, 102, 241, 0.45);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .channel-item.playing {
   border-color: #22c55e;
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5), 0 4px 16px rgba(34, 197, 94, 0.12);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5);
 }
 .channel-item.last:not(.playing) {
-  border-color: rgba(251, 191, 36, 0.55);
-  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35);
-}
-.channel-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  flex-shrink: 0;
-  min-height: 24px;
-}
-.channel-card-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  min-height: 0;
-  padding: 2px 0 4px;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.55);
 }
 .channel-chno {
   flex-shrink: 0;
-  font-size: 0.68rem;
+  width: 2.1rem;
+  font-size: 0.7rem;
   color: #64748b;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 @media (max-width: 1200px) {
-  body:not(.is-tv) .channel-chno { display: inline; }
+  body:not(.is-tv) .channel-chno { display: none; }
 }
 .fav-btn {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border: 0;
   background: transparent;
   color: #64748b;
   cursor: pointer;
-  border-radius: 6px;
-  padding: 4px;
+  border-radius: 8px;
+  padding: 6px;
 }
 .fav-btn svg,
 .fav-btn svg path { width: 100%; height: 100%; fill: currentColor; overflow: visible; }
@@ -572,25 +557,25 @@ html.is-native-tv .splash-hint-tv { display: inline; }
 .fav-btn:focus-visible { outline: 2px solid #fbbf24; }
 .category-btn.is-special { color: #fde68a; }
 .channel-logo {
-  width: 48px;
-  height: 48px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(2, 6, 23, 0.9);
   object-fit: contain;
-  padding: 3px;
+  padding: 2px;
 }
 .channel-logo-fallback {
-  width: 48px;
-  height: 48px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(135deg, #1e293b, #334155);
   color: #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -598,25 +583,25 @@ html.is-native-tv .splash-hint-tv { display: inline; }
   display: flex;
   flex-direction: column;
   min-width: 0;
-  flex-shrink: 0;
-  gap: 2px;
+  flex: 1;
+  gap: 1px;
 }
 .channel-name {
   font-weight: 600;
-  font-size: 0.82rem;
-  line-height: 1.2;
+  font-size: 0.9rem;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: center;
+  text-align: left;
 }
 .channel-meta {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: wrap;
-  min-height: 1.1rem;
+  min-height: 0;
 }
 .channel-quality {
   font-size: 0.65rem;
@@ -658,7 +643,7 @@ html.is-native-tv .splash-hint-tv { display: inline; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: center;
+  text-align: left;
   line-height: 1.2;
 }
 
@@ -1459,20 +1444,20 @@ body.is-tv .category-btn {
   overflow: hidden;
 }
 body.is-tv .channel-item {
-  min-height: 108px;
-  height: 108px;
+  min-height: 64px;
+  height: 64px;
   border-radius: 8px;
   overflow: hidden;
 }
 body.is-tv .channel-name {
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 650;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 body.is-tv .channel-chno { font-size: 0.68rem; color: #94a3b8; }
-body.is-tv .fav-btn { width: 26px; height: 26px; padding: 3px; overflow: visible; }
+body.is-tv .fav-btn { width: 32px; height: 32px; padding: 4px; overflow: visible; }
 body.is-tv .category-btn.cursor,
 body.is-tv .channel-item.cursor {
   outline: 3px solid #fbbf24;
@@ -1480,7 +1465,7 @@ body.is-tv .channel-item.cursor {
   background: rgba(251, 191, 36, 0.12);
 }
 body.is-tv .channel-item.playing { box-shadow: inset 3px 0 0 #22c55e; }
-body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 40px; height: 40px; }
+body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 34px; height: 34px; }
 body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
 body.is-tv .channels-column h2 { font-size: 0.78rem; margin-bottom: 0.2rem; }
 body.is-tv .channels-toolbar { margin-bottom: 0.25rem; }
@@ -1671,10 +1656,10 @@ body.is-ios #videoPlayer { object-fit: contain; }
 body.ui-large { font-size: 18px; }
 body.ui-large .category-btn,
 body.ui-large .channel-item { font-size: 1.05rem; }
-body.ui-large .channel-item { height: 156px; min-height: 156px; }
+body.ui-large .channel-item { height: 72px; min-height: 72px; }
 body.ui-large .channel-name { font-size: 0.95rem; }
 body.ui-large .channel-logo,
-body.ui-large .channel-logo-fallback { width: 52px; height: 52px; }
+body.ui-large .channel-logo-fallback { width: 40px; height: 40px; }
 body.ui-contrast {
   background: #000;
   color: #fff;

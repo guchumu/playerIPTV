@@ -13,8 +13,9 @@ cosas que Capacitor no pone:
 
 Además se inyecta el reproductor nativo. En Google TV Streamer (MediaTek)
 ExoPlayer congela el vídeo y el audio sigue; por eso en leanback se usa
-LibVLC. En el teléfono sigue ExoPlayer. En TV el vídeo empieza en la ventana
-pequeña (overlay) y pasa a pantalla completa con el segundo OK.
+LibVLC, pero nunca encima del WebView (eso abortaba el proceso al mover el
+mando). En TV el canal abre VlcPlayerActivity en el proceso :vlc. En el
+teléfono sigue ExoPlayer encima del WebView.
 
 El WebView de Android TV usa un User-Agent de Chrome de móvil, sin "TV".
 StreamBoxPlugin detecta leanback / UI_MODE_TYPE_TELEVISION e inyecta
@@ -94,19 +95,26 @@ def indentar(elem, nivel=0):
         elem.tail = hueco
 
 
-def asegurar_actividad(app, nombre_corto, cambios):
+def asegurar_actividad(app, nombre_corto, cambios, extras=None):
+    extras = extras or {}
     for act in app.findall("activity"):
         nombre = act.get(f"{A}name") or ""
         if nombre.endswith(nombre_corto):
+            for clave, valor in extras.items():
+                if act.get(clave) != valor:
+                    act.set(clave, valor)
+                    cambios.append(f"activity {nombre_corto} {clave}")
             return
-    app.append(ET.Element("activity", {
+    attrs = {
         f"{A}name": "." + nombre_corto,
         f"{A}configChanges": "keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode",
         f"{A}exported": "false",
         f"{A}hardwareAccelerated": "true",
         f"{A}launchMode": "singleTop",
         f"{A}theme": "@style/AppTheme",
-    }))
+    }
+    attrs.update(extras)
+    app.append(ET.Element("activity", attrs))
     cambios.append("actividad " + nombre_corto)
 
 
@@ -154,8 +162,12 @@ def parchear_manifest(ruta):
             cambios.append(f"application {clave}")
 
     # 4. Activities de ExoPlayer (móvil) y LibVLC (TV).
+    # VLC va en :vlc para que un aborto nativo no mate el menú del WebView.
     asegurar_actividad(app, "PlayerActivity", cambios)
-    asegurar_actividad(app, "VlcPlayerActivity", cambios)
+    asegurar_actividad(app, "VlcPlayerActivity", cambios, {
+        f"{A}process": ":vlc",
+        f"{A}excludeFromRecents": "true",
+    })
 
     indentar(manifest)
     arbol.write(ruta, encoding="utf-8", xml_declaration=True)
