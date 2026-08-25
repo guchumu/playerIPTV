@@ -11,11 +11,25 @@ if (!preg_match('/^[A-Z0-9-]{4,16}$/', $idPrevio)) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $deviceId = strtoupper(trim(isset($_POST['device_id']) ? $_POST['device_id'] : ''));
+    $serverUrl = isset($_POST['serverUrl']) ? trim((string) $_POST['serverUrl']) : '';
+    $username = isset($_POST['username']) ? trim((string) $_POST['username']) : '';
+    $password = isset($_POST['password']) ? trim((string) $_POST['password']) : '';
+    $m3uUrl = isset($_POST['m3uUrl']) ? trim((string) $_POST['m3uUrl']) : '';
+    // Usuario+clave = Xtream (ignorar M3U residual del autocompletado).
+    if ($username !== '' && $password !== '') {
+        if ($serverUrl === '') {
+            $serverUrl = 'http://masquecero.net';
+        }
+        $m3uUrl = '';
+    } elseif ($m3uUrl !== '') {
+        $username = '';
+        $password = '';
+    }
     $data = array(
-        'serverUrl' => isset($_POST['serverUrl']) ? $_POST['serverUrl'] : '',
-        'username' => isset($_POST['username']) ? $_POST['username'] : '',
-        'password' => isset($_POST['password']) ? $_POST['password'] : '',
-        'm3uUrl' => isset($_POST['m3uUrl']) ? $_POST['m3uUrl'] : '',
+        'serverUrl' => $serverUrl,
+        'username' => $username,
+        'password' => $password,
+        'm3uUrl' => $m3uUrl,
         'listName' => isset($_POST['listName']) ? trim($_POST['listName']) : '',
         'ts' => (int) round(microtime(true) * 1000),
         'status' => 'listo',

@@ -149,11 +149,16 @@ function detectDevice() {
   const markedTv = /StreamBoxTV|Leanback/i.test(ua);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const noHover = window.matchMedia("(hover: none)").matches;
-  const wide = Math.max(window.innerWidth, window.screen.width) >= 960;
-  const heuristicTV = isFireTV || isAndroidTV || markedTv || (coarse && noHover && wide && window.innerHeight >= 500);
-  // El WebView de Android TV parece Chrome de móvil: sin StreamBoxNative.isTv
-  // la heurística por UA no basta. En el APK de teléfono isTv es false y no
-  // se fuerza el layout de televisor.
+  const w = Math.max(window.innerWidth || 0, (window.screen && screen.width) || 0);
+  const h = Math.max(window.innerHeight || 0, (window.screen && screen.height) || 0);
+  const wide = w >= 960;
+  const landscape = w >= h && w >= 900;
+  const heuristicTV =
+    isFireTV ||
+    isAndroidTV ||
+    markedTv ||
+    (coarse && noHover && wide && h >= 500) ||
+    (landscape && (markedTv || isNativeApp() || /Android/i.test(ua)));
   const isTV = nativeTv === true || (nativeTv !== false && heuristicTV);
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
@@ -161,7 +166,11 @@ function detectDevice() {
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
-  document.documentElement.classList.toggle("is-native-tv", nativeTv === true || (isTV && (markedTv || isNativeApp())));
+  document.documentElement.classList.toggle(
+    "is-native-tv",
+    nativeTv === true || (isTV && (markedTv || isNativeApp() || landscape))
+  );
+  document.documentElement.classList.toggle("login-landscape", landscape);
   if (!isTV) document.body.classList.remove("tv-channels-open");
   applyTvChrome();
 }
@@ -243,7 +252,9 @@ function assignmentIsStale(data) {
   const logoutAt = getLogoutAt();
   if (!logoutAt) return false;
   const ts = data && data.ts != null ? Number(data.ts) : 0;
-  return !ts || ts <= logoutAt;
+  // Sin ts (ficheros antiguos) no bloqueamos: si no, la TV ve la lista y nunca entra.
+  if (!ts) return false;
+  return ts <= logoutAt;
 }
 
 function setTvChannelsOpen(open) {
@@ -1202,15 +1213,29 @@ function startRemotePolling() {
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
-      if (assignmentIsStale(data)) return;
+      if (assignmentIsStale(data)) {
+        setLoginStatus("Hay una lista antigua. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
+        return;
+      }
+      try {
+        sessionStorage.removeItem(LOGOUT_AT_KEY);
+      } catch (e) {}
+      setLoginStatus("Lista recibida. Cargando canales…");
       remoteLoginBusy = true;
       try {
-        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+        const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+        if (ok || liveSession || channelsData.length) stopRemotePolling();
+        else if (!loginCancelled) {
+          const errEl = document.getElementById("loginError");
+          setLoginStatus((errEl && errEl.textContent) || "No se pudieron cargar los canales.");
+        }
       } finally {
         remoteLoginBusy = false;
         if (liveSession) stopRemotePolling();
       }
-    } catch (e) {}
+    } catch (e) {
+      setLoginStatus((e && e.message) || "Error al leer la lista remota.");
+    }
   }
 
   tick();
@@ -1252,15 +1277,15 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
   password = (password || "").trim();
   m3uUrl = (m3uUrl || "").trim();
 
-  // Si hay usuario y clave, es Xtream. La M3U solo se usa cuando NO hay Xtream.
-  // (Antes, un m3uUrl residual o vacío mal leído saltaba el login Xtream.)
+  // Xtream si hay usuario+clave. M3U solo si no hay Xtream (evita basura de autocompletado).
   const hasXtream = !!(username && password);
+  const useM3u = !hasXtream && !!m3uUrl;
   if (hasXtream && !serverUrl) {
     serverUrl = "http://masquecero.net";
   }
 
   try {
-    if (!hasXtream && m3uUrl) {
+    if (useM3u) {
       try {
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
@@ -1300,17 +1325,11 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
         throw new Error(msg);
       }
       const listaConError = detectProviderListError(m3uContent);
-      if (listaConError) {
-        if (channelsData.length) {
-          showSpinner(false);
-          markSessionLive();
-          showToast("El proveedor responde: " + listaConError);
-          return true;
-        }
-        throw new Error("El proveedor responde: " + listaConError);
+      if (!applyListOrKeep(m3uContent)) {
+        throw new Error(
+          listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
+        );
       }
-
-      if (!applyListOrKeep(m3uContent)) throw new Error("La lista no contiene canales");
       await saveSession(currentUser);
       await writeListCache(currentUser, m3uContent);
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
@@ -1556,29 +1575,21 @@ window.addEventListener("DOMContentLoaded", () => {
   prepararInstalacion();
   showDeviceId();
   initTvLoginFocus();
-  if (!canAutoLoginFromCache()) startRemotePolling();
+  // Siempre escuchar el QR; el auto-login no debe dejar la TV sin poll.
+  startRemotePolling();
 
   loadSession().then(async (saved) => {
     await migrateSavedListsFromSession();
-    if (!saved) {
-      if (!pollingInterval) startRemotePolling();
-      return;
-    }
+    if (!saved) return;
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
-    if (!canAutoLogin) {
-      if (!pollingInterval) startRemotePolling();
-      return;
-    }
+    if (!canAutoLogin) return;
 
     setTimeout(() => {
-      if (loginCancelled) {
-        startRemotePolling();
-        return;
-      }
+      if (loginCancelled || liveSession || remoteLoginBusy) return;
       performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
-        if (!ok && !liveSession) startRemotePolling();
+        if (ok || liveSession) stopRemotePolling();
       });
-    }, 400);
+    }, 1200);
   });
 });
 
@@ -2014,18 +2025,53 @@ function formatTime(date) {
 
 /********** CARGAR Y PARSEAR M3U **********/
 /**
- * Varios paneles no contestan con un error HTTP cuando la cuenta no vale:
- * devuelven una lista perfectamente formada con un único canal falso cuyo
- * nombre es el mensaje de error y cuya URL es inservible. Sin detectarlo, el
- * player pinta ese canal como si fuera real y desde fuera parece que la lista
- * no ha cargado, sin explicar el motivo.
+ * Solo error de proveedor cuando NO hay canales válidos (lista = un canal-falso).
+ * Antes, un nombre con "Expirado"/"Inactivo" tumba toda la lista.
  */
-function detectProviderListError(content) {
-  const m = content.match(/#EXTINF[^,\n]*,\s*(?:Error\s*:\s*)?([^\n\r]*(?:invalid|inactiv|expir|caducad|bloquea|suspend|no\s*activ)[^\n\r]*)/i);
-  if (m) return m[1].trim();
-  if (/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i.test(content)) {
-    return content.match(/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i)[1].trim();
+function extractM3UEntries(content) {
+  const lines = String(content || "").split(/\r\n|\n|\r/);
+  const out = [];
+  let pending = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim().replace(/^["']|["']$/g, "");
+    if (!line) continue;
+    if (line.startsWith("#EXTINF:")) {
+      if (pending) out.push(pending);
+      const nameMatch = line.match(/,(.+)$/);
+      pending = { name: nameMatch ? nameMatch[1].trim() : "Canal", url: "" };
+      continue;
+    }
+    if (line.charAt(0) === "#") continue;
+    if (pending) {
+      pending.url = line;
+      out.push(pending);
+      pending = null;
+    }
   }
+  if (pending) out.push(pending);
+  return out;
+}
+
+function isProviderErrorChannel(name, url) {
+  const n = String(name || "").trim();
+  const u = String(url || "").trim();
+  if (/^error\s*:/i.test(n)) return true;
+  if (isStreamUrl(u)) return false;
+  if (/^(account|cuenta|usuario|user|subscription|suscripci[oó]n|lista)\b/i.test(n)) return true;
+  if (/\b(expired|caducad[ao]|invalid|inactiv[ao]|suspendid[ao]|bloquead[ao])\b/i.test(n) && n.length < 96) {
+    return true;
+  }
+  return false;
+}
+
+function detectProviderListError(content) {
+  const entries = extractM3UEntries(content);
+  if (!entries.length) return "";
+  const valid = entries.filter((e) => isStreamUrl(e.url) && !isProviderErrorChannel(e.name, e.url));
+  if (valid.length > 0) return "";
+  const err = entries.find((e) => isProviderErrorChannel(e.name, e.url));
+  if (err) return err.name.replace(/^error\s*:\s*/i, "").trim();
+  if (entries.length <= 2) return (entries[0].name || "Lista vacía del proveedor").trim();
   return "";
 }
 
@@ -2044,12 +2090,9 @@ async function loadM3UFromXtream() {
   if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
     throw new Error("No se pudo descargar la lista M3U");
   }
-  const providerError = detectProviderListError(trimmed);
-  if (providerError) {
-    throw new Error("El proveedor responde: " + providerError);
-  }
   if (!applyListOrKeep(m3uContent)) {
-    throw new Error("La lista no contiene canales");
+    const providerError = detectProviderListError(trimmed);
+    throw new Error(providerError ? "El proveedor responde: " + providerError : "La lista no contiene canales");
   }
   await writeListCache(currentUser, m3uContent);
 }
@@ -4417,7 +4460,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260819c");
+  url.searchParams.set("v", "20260824b");
   window.location.replace(url.toString());
 }
 

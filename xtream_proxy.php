@@ -15,13 +15,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-if (!player_rate_limit('xtream', 40, 60)) {
-    http_response_code(429);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(array('error' => 'Demasiadas peticiones'));
-    exit;
-}
-
 function xtream_fetch($url, $timeout = 120)
 {
     $ch = curl_init();
@@ -36,6 +29,26 @@ function xtream_fetch($url, $timeout = 120)
     $err = curl_error($ch);
     curl_close($ch);
     return array($response, $httpCode, $err);
+}
+
+function xtream_rate_or_fail()
+{
+    if (player_rate_limit('xtream', 80, 60)) {
+        return;
+    }
+    http_response_code(429);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(array('error' => 'Demasiadas peticiones'));
+    exit;
+}
+
+function xtream_m3u_is_cacheable($body)
+{
+    if (!$body || strlen($body) < 48) {
+        return false;
+    }
+    $n = preg_match_all('/#EXTINF:/i', $body);
+    return $n >= 3;
 }
 
 const M3U_CACHE_TTL = 480;
@@ -55,9 +68,12 @@ if (isset($_GET['direct_url'])) {
         echo $cached;
         exit;
     }
+    xtream_rate_or_fail();
     list($response, $httpCode, $err) = xtream_fetch($url);
-    if ($response) {
+    if ($response && xtream_m3u_is_cacheable($response)) {
         player_cache_set($cacheName, $response);
+        echo $response;
+    } elseif ($response) {
         echo $response;
     } else {
         player_log('m3u directa fallo ' . $httpCode . ' ' . $err);
@@ -85,7 +101,6 @@ if (!in_array($endpointBase, $allowed, true)) {
 }
 
 if (!player_url_ok(rtrim($server, '/') . '/')) {
-    // player_url_ok needs a path-ish url; check host via fake path
     $check = rtrim($server, '/') . '/x';
     if (!player_url_ok($check)) {
         http_response_code(400);
@@ -114,6 +129,8 @@ if ($isList) {
     }
 }
 
+xtream_rate_or_fail();
+
 list($response, $httpCode, $err) = xtream_fetch($url);
 if ($response === false || $response === null) {
     player_log('xtream fallo ' . $endpointBase . ' ' . $httpCode . ' ' . $err);
@@ -128,7 +145,7 @@ if ($endpointBase === 'player_api.php') {
 } else {
     header('Content-Type: text/plain; charset=utf-8');
 }
-if ($isList && $response) {
+if ($isList && $response && xtream_m3u_is_cacheable($response)) {
     player_cache_set($cacheName, $response);
 }
 echo $response;
