@@ -93,10 +93,30 @@ let debugTitleTimer = null;
 let currentFocus = { col: 1, row: 0 };
 
 function showSpinner(show, message) {
+  // Ya dentro con canales: no tapar la lista (Validando/Actualizando en segundo plano).
+  if (show && liveSession && channelsData.length > 0) {
+    if (globalSpinner) {
+      globalSpinner.classList.remove("is-visible");
+      globalSpinner.hidden = true;
+    }
+    return;
+  }
   if (globalSpinner) {
     globalSpinner.classList.toggle("is-visible", !!show);
     globalSpinner.hidden = !show;
     if (globalSpinnerText && message) globalSpinnerText.textContent = message;
+    if (show) {
+      const btn = document.getElementById("spinnerCancelBtn");
+      if (btn && isTvLayout()) {
+        try {
+          btn.focus({ preventScroll: true });
+        } catch (e) {
+          try {
+            btn.focus();
+          } catch (err) {}
+        }
+      }
+    }
   }
 }
 
@@ -1404,14 +1424,37 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
           currentUser = pendingUser;
           await saveSession(currentUser);
           enterChannelView(currentUser);
-          showSpinner(true, "Comprobando cuenta...");
+          showSpinner(false);
         }
       }
 
-      showSpinner(true, "Validando acceso...");
-      const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
+      // Si ya hay canales en pantalla, la validación no bloquea con spinner.
+      if (!(liveSession && channelsData.length)) showSpinner(true, "Validando acceso...");
+      let response;
+      try {
+        response = await fetchXtream("player_api.php", { username, password }, serverUrl, { timeoutMs: 20000 });
+      } catch (netErr) {
+        if (loginCancelled || (netErr && netErr.name === "AbortError")) {
+          if (channelsData.length) {
+            showSpinner(false);
+            markSessionLive();
+            return true;
+          }
+          throw new Error("Validación cancelada o sin respuesta del servidor");
+        }
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("Sin respuesta del servidor; usando lista en caché");
+          return true;
+        }
+        throw new Error("No se pudo conectar con el servidor Xtream");
+      }
       const rawText = await response.text();
-      if (loginCancelled) return liveSession && channelsData.length > 0;
+      if (loginCancelled) {
+        showSpinner(false);
+        return liveSession && channelsData.length > 0;
+      }
       let data = null;
       try {
         data = JSON.parse(rawText);
@@ -1420,6 +1463,12 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
 
       if (!data || !data.user_info) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("No se pudo validar; se mantiene la lista en caché");
+          return true;
+        }
         throw new Error(
           isProxyFailure(response, data, rawText)
             ? xtreamLoginFailureMessage(response, data, rawText)
@@ -1428,14 +1477,35 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
 
       if (Number(data.user_info.auth) !== 1) {
+        if (channelsData.length) {
+          showSpinner(false);
+          showToast("Cuenta no válida en el servidor; se mantiene la lista en caché");
+          return true;
+        }
         throw new Error("Credenciales inválidas.");
       }
 
       currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
       await saveSession(currentUser);
-      setLoginStatus("Descargando canales...");
-      showSpinner(true, "Descargando canales...");
-      await loadM3UFromXtream();
+      if (!(liveSession && channelsData.length)) {
+        setLoginStatus("Descargando canales...");
+        showSpinner(true, "Descargando canales...");
+      }
+      try {
+        await loadM3UFromXtream();
+      } catch (loadErr) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast((loadErr && loadErr.message) || "No se pudo actualizar; se mantiene la caché");
+          return true;
+        }
+        throw loadErr;
+      }
+      if (loginCancelled) {
+        showSpinner(false);
+        return liveSession && channelsData.length > 0;
+      }
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
       tagChannelsWithList(entry);
       pendingListName = null;
@@ -1476,6 +1546,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     return false;
   } finally {
     remoteLoginBusy = false;
+    showSpinner(false);
     try {
       const reloadBusy = document.getElementById("forceReloadBtn");
       if (reloadBusy) reloadBusy.disabled = false;
@@ -1487,9 +1558,21 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
 /********** AUTO-LOGIN **********/
 function cancelLogin() {
   loginCancelled = true;
+  try {
+    if (loginAbort) loginAbort.abort();
+  } catch (e) {}
   showSpinner(false);
+  if (channelsData.length) {
+    markSessionLive();
+    try {
+      showScreen("main");
+    } catch (e) {}
+    setLoginStatus("");
+    showToast("Carga en segundo plano cancelada");
+    return;
+  }
   setLoginStatus("Entrada automática cancelada. Escanea el QR para cargar la lista.");
-  startRemotePolling();
+  if (!pollingInterval && !liveSession) startRemotePolling();
 }
 
 /**
@@ -1655,13 +1738,31 @@ window.addEventListener("resize", () => {
   layoutNativePlayer();
 });
 
-async function fetchXtream(endpoint, params, serverOverride) {
+let loginAbort = null;
+
+async function fetchXtream(endpoint, params, serverOverride, opts) {
   const targetServer = serverOverride || currentServer;
   const queryString = new URLSearchParams(params || {}).toString();
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
-  return await fetch(
-    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "")
-  );
+  const url =
+    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "");
+  const timeoutMs = (opts && opts.timeoutMs) || 25000;
+  if (loginAbort) {
+    try {
+      loginAbort.abort();
+    } catch (e) {}
+  }
+  loginAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = loginAbort ? setTimeout(() => {
+    try {
+      loginAbort.abort();
+    } catch (e) {}
+  }, timeoutMs) : null;
+  try {
+    return await fetch(url, loginAbort ? { signal: loginAbort.signal, cache: "no-store" } : { cache: "no-store" });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function checkAccountExpiryFromChannels() {
@@ -3296,26 +3397,15 @@ function playChannel(channel) {
 }
 
 function nativePlayerEngine() {
-  try {
-    const pref = getPreferredNativeEngine();
-    if (pref) return pref;
-    const n = window.StreamBoxNative;
-    if (n && n.engine) return String(n.engine);
-    if (isTvLayout()) return "vlc";
-  } catch (e) {}
   return "exo";
 }
 
 function getPreferredNativeEngine() {
-  try {
-    const v = localStorage.getItem(ENGINE_KEY);
-    if (v === "exo" || v === "vlc") return v;
-  } catch (e) {}
-  return "";
+  return "exo";
 }
 
 function setPreferredNativeEngine(engine, opts) {
-  const e = engine === "exo" ? "exo" : "vlc";
+  const e = "exo";
   try {
     localStorage.setItem(ENGINE_KEY, e);
   } catch (err) {}
@@ -3324,47 +3414,31 @@ function setPreferredNativeEngine(engine, opts) {
   } catch (err) {}
   syncEngineSelects(e);
   if (!(opts && opts.silent)) {
-    showToast(e === "vlc" ? "Reproductor: LibVLC" : "Reproductor: ExoPlayer");
+    showToast("Reproductor: ExoPlayer");
   }
   return e;
 }
 
 function syncEngineSelects(engine) {
-  const e = engine || nativePlayerEngine();
+  const e = "exo";
   ["engineSelect", "loginEngineSelect"].forEach((id) => {
     const sel = document.getElementById(id);
-    if (sel) sel.value = e === "exo" ? "exo" : "vlc";
+    if (sel) sel.value = e;
   });
 }
 
 function initNativeEnginePicker() {
-  const native = isNativeApp() || nativeTvFlag() === true || document.documentElement.classList.contains("is-native-tv");
+  // Solo ExoPlayer: el <select> no es usable con mando en TV.
+  try {
+    localStorage.setItem(ENGINE_KEY, "exo");
+  } catch (e) {}
+  try {
+    window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: "exo" });
+  } catch (e) {}
   const loginWrap = document.getElementById("loginEngineControl");
   const headerWrap = document.getElementById("engineControl");
-  if (loginWrap) loginWrap.hidden = !native;
-  if (headerWrap) headerWrap.hidden = !native;
-  if (!native) return;
-
-  if (!getPreferredNativeEngine()) {
-    setPreferredNativeEngine(isTvLayout() || nativeTvFlag() === true ? "vlc" : "exo", { silent: true });
-  } else {
-    syncEngineSelects(getPreferredNativeEngine());
-  }
-
-  const onChange = (ev) => {
-    const val = ev && ev.target ? ev.target.value : "vlc";
-    setPreferredNativeEngine(val);
-  };
-  const loginSel = document.getElementById("loginEngineSelect");
-  const headerSel = document.getElementById("engineSelect");
-  if (loginSel && !loginSel.dataset.bound) {
-    loginSel.dataset.bound = "1";
-    loginSel.addEventListener("change", onChange);
-  }
-  if (headerSel && !headerSel.dataset.bound) {
-    headerSel.dataset.bound = "1";
-    headerSel.addEventListener("change", onChange);
-  }
+  if (loginWrap) loginWrap.hidden = true;
+  if (headerWrap) headerWrap.hidden = true;
 }
 
 function nativePlayerPlugin() {
@@ -4612,7 +4686,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824g");
+  url.searchParams.set("v", "20260824h");
   window.location.replace(url.toString());
 }
 
