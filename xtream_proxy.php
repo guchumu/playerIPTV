@@ -15,13 +15,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-if (!player_rate_limit('xtream', 40, 60)) {
-    http_response_code(429);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(array('error' => 'Demasiadas peticiones'));
-    exit;
-}
-
 function xtream_fetch($url, $timeout = 120)
 {
     $ch = curl_init();
@@ -36,6 +29,20 @@ function xtream_fetch($url, $timeout = 120)
     $err = curl_error($ch);
     curl_close($ch);
     return array($response, $httpCode, $err);
+}
+
+function xtream_rate_or_fail()
+{
+    if (player_rate_limit('xtream', 120, 60)) {
+        return;
+    }
+    http_response_code(429);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(array(
+        'error' => 'Demasiadas peticiones',
+        'message' => 'El servidor está ocupado. Espera unos segundos y pulsa Recargar.',
+    ));
+    exit;
 }
 
 const M3U_CACHE_TTL = 480;
@@ -55,6 +62,7 @@ if (isset($_GET['direct_url'])) {
         echo $cached;
         exit;
     }
+    xtream_rate_or_fail();
     list($response, $httpCode, $err) = xtream_fetch($url);
     if ($response) {
         player_cache_set($cacheName, $response);
@@ -85,7 +93,6 @@ if (!in_array($endpointBase, $allowed, true)) {
 }
 
 if (!player_url_ok(rtrim($server, '/') . '/')) {
-    // player_url_ok needs a path-ish url; check host via fake path
     $check = rtrim($server, '/') . '/x';
     if (!player_url_ok($check)) {
         http_response_code(400);
@@ -113,6 +120,8 @@ if ($isList) {
         exit;
     }
 }
+
+xtream_rate_or_fail();
 
 list($response, $httpCode, $err) = xtream_fetch($url);
 if ($response === false || $response === null) {

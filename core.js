@@ -200,7 +200,7 @@ async function refreshNativeTvFlag() {
 function showApkVersion(versionName) {
   const tag = document.querySelector(".build-tag");
   if (!tag) return;
-  const web = "v20260825g";
+  const web = "v20260825h";
   const apk = versionName ? String(versionName) : "";
   tag.textContent = apk ? web + " · APK " + apk : web;
   try {
@@ -1089,6 +1089,12 @@ function enterChannelView(user) {
 let lastRemoteAssignKey = "";
 let lastRemoteFailAt = 0;
 let remoteFailCount = 0;
+let lastLoginError = "";
+let loginMutex = Promise.resolve();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function startRemotePolling() {
   if (liveSession && channelsData.length && !logoutRequested) return;
@@ -1108,6 +1114,7 @@ function startRemotePolling() {
       const data = await res.json();
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
+      if (remoteLoginBusy) return;
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
       if (assignmentIsStale(data)) {
         setLoginStatus("Hay una lista antigua en el servidor. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
@@ -1121,11 +1128,11 @@ function startRemotePolling() {
         String(data.username || "") +
         "|" +
         String(data.serverUrl || "");
-      // Tras un fallo, no martillar la misma asignación cada 4s (ni en bucle inmediato).
       if (assignKey && assignKey === lastRemoteAssignKey && remoteFailCount > 0) {
-        const wait = Math.min(60000, 8000 * remoteFailCount);
+        const wait = Math.min(45000, 12000 * remoteFailCount);
         if (Date.now() - lastRemoteFailAt < wait) {
-          setLoginStatus("No se pudieron cargar los canales. Reintento en unos segundos…");
+          const why = lastLoginError || "No se pudieron cargar los canales.";
+          setLoginStatus(why + " Reintento en unos segundos…");
           return;
         }
       }
@@ -1136,16 +1143,19 @@ function startRemotePolling() {
       setLoginStatus("Lista recibida. Cargando canales…");
       showSpinner(true, "Cargando canales…");
       const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-      if (ok || liveSession) {
+      if (ok || liveSession || channelsData.length) {
         remoteFailCount = 0;
+        lastLoginError = "";
         stopRemotePolling();
       } else if (!loginCancelled) {
         remoteFailCount++;
         lastRemoteFailAt = Date.now();
-        setLoginStatus("No se pudieron cargar los canales. Reintento en unos segundos…");
+        const why = lastLoginError || "No se pudieron cargar los canales.";
+        setLoginStatus(why + " Reintento en unos segundos…");
       }
     } catch (e) {
-      setLoginStatus("Error al leer la lista remota. Reintentando…");
+      lastLoginError = (e && e.message) || "Error al leer la lista remota.";
+      setLoginStatus(lastLoginError + " Reintentando…");
     }
   }
 
@@ -1178,7 +1188,7 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 
 /********** MOTOR CENTRAL DE LOGIN **********/
 async function fetchWithTimeout(url, ms) {
-  const timeoutMs = ms || 90000;
+  const timeoutMs = ms || 120000;
   if (typeof AbortController === "undefined") return fetch(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1189,8 +1199,32 @@ async function fetchWithTimeout(url, ms) {
   }
 }
 
+function describeProxyBody(text, fallback) {
+  const t = String(text || "").trim();
+  if (!t) return fallback;
+  try {
+    const j = JSON.parse(t);
+    if (j && (j.message || j.error)) return String(j.message || j.error);
+  } catch (e) {}
+  if (/Error al cargar/i.test(t)) return "No se pudo descargar la lista M3U.";
+  if (t.length < 220 && !/#EXT/i.test(t) && !/^#/.test(t)) return t;
+  return fallback;
+}
+
 async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
-  if (remoteLoginBusy) return !!(liveSession && channelsData.length);
+  const job = loginMutex.then(
+    () => performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts),
+    () => performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts)
+  );
+  loginMutex = job.then(
+    () => undefined,
+    () => undefined
+  );
+  return job;
+}
+
+async function performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts) {
+  if (liveSession && channelsData.length && !logoutRequested) return true;
   remoteLoginBusy = true;
   loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
@@ -1202,10 +1236,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
   password = (password || "").trim();
   m3uUrl = (m3uUrl || "").trim();
 
-  // Si el formulario de carga (o el autocompletado del móvil) manda usuario/clave
-  // SIN servidor, pero sí hay URL M3U, es una lista M3U: no inventar Xtream.
+  // Lista M3U gana: el formulario del móvil a menudo rellena usuario/clave/servidor
+  // por autocompletado y entonces la TV intentaba Xtream y nunca descargaba la M3U.
   const hasM3u = !!m3uUrl;
-  const hasXtream = !!(username && password && (serverUrl || !hasM3u));
+  const hasXtream = !hasM3u && !!(username && password);
   if (hasXtream && !serverUrl) {
     serverUrl = "http://masquecero.net";
   }
@@ -1228,7 +1262,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
 
       let response;
       try {
-        response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 90000);
+        response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 120000);
       } catch (netErr) {
         if (channelsData.length) {
           showSpinner(false);
@@ -1240,20 +1274,19 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
       const m3uContent = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
+      if (response.status === 429) {
+        throw new Error(describeProxyBody(m3uContent, "El servidor está ocupado. Espera y pulsa Recargar."));
+      }
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         if (channelsData.length) {
           showSpinner(false);
           markSessionLive();
           return true;
         }
-        throw new Error("No se pudo cargar la URL.");
+        throw new Error(describeProxyBody(m3uContent, "No se pudo cargar la URL."));
       }
       if (m3uContent.trim().charAt(0) === "{" || /<!DOCTYPE|<html/i.test(m3uContent)) {
-        let msg = "No se pudo cargar la URL.";
-        try {
-          const err = JSON.parse(m3uContent);
-          if (err && err.message) msg = err.message;
-        } catch (e) {}
+        const msg = describeProxyBody(m3uContent, "No se pudo cargar la URL.");
         if (channelsData.length) {
           showSpinner(false);
           markSessionLive();
@@ -1321,6 +1354,9 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
       const rawText = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
+      if (response.status === 429) {
+        throw new Error(describeProxyBody(rawText, "El servidor está ocupado. Espera y pulsa Recargar."));
+      }
       let data = null;
       try {
         data = JSON.parse(rawText);
@@ -1367,21 +1403,24 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     pendingListName = null;
     showSpinner(false);
     const msg = (error && error.message) || "Error al iniciar sesión.";
+    lastLoginError = msg;
     setLoginStatus(msg);
     if (liveSession || channelsData.length) {
       showToast(msg);
-      if (channelsData.length) markSessionLive();
-      const main = document.getElementById("mainScreen");
-      if (main && !main.classList.contains("active") && channelsData.length) {
+      if (channelsData.length) {
         try {
-          showScreen("main");
-        } catch (e) {}
+          enterChannelView(currentUser || { username: "Lista", isM3U: true });
+        } catch (e) {
+          try {
+            showScreen("main");
+          } catch (e2) {}
+        }
+        markSessionLive();
+        return true;
       }
       return false;
     }
     showScreen("login");
-    // No llamar startRemotePolling() aquí: reinicia el timer y hace tick() al
-    // instante → bucle infinito Lista recibida → fallo → otra vez.
     if (!pollingInterval && !liveSession) startRemotePolling();
     return false;
   } finally {
@@ -1549,12 +1588,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
     if (!canAutoLogin) return;
 
+    // Dar tiempo al QR a entregar la lista; no competir con la carga remota.
     setTimeout(() => {
-      if (loginCancelled || liveSession) return;
+      if (loginCancelled || liveSession || remoteLoginBusy || channelsData.length) return;
       performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
         if (ok || liveSession) stopRemotePolling();
       });
-    }, 400);
+    }, 1800);
   });
 });
 
@@ -1571,7 +1611,7 @@ async function fetchXtream(endpoint, params, serverOverride) {
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
   return await fetchWithTimeout(
     "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : ""),
-    90000
+    120000
   );
 }
 
@@ -2019,7 +2059,7 @@ async function loadM3UFromXtream() {
 }
 
 function isStreamUrl(line) {
-  return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line);
+  return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line) || /^\/\/[a-z0-9.-]+\//i.test(line);
 }
 
 function parseM3U(content, listMeta) {
@@ -4288,6 +4328,7 @@ function doLogout() {
   lastRemoteAssignKey = "";
   lastRemoteFailAt = 0;
   remoteFailCount = 0;
+  lastLoginError = "";
   try {
     sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
   } catch (e) {}
@@ -4346,7 +4387,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825g");
+  url.searchParams.set("v", "20260825h");
   window.location.replace(url.toString());
 }
 

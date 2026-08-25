@@ -1313,10 +1313,13 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   margin-top: 8px;
 }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .error {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   margin-top: 0.4rem;
-  max-height: 3.2em;
+  max-height: 4.8em;
   overflow: hidden;
+}
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .spinner-cancel {
+  display: none;
 }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .global-spinner {
   position: absolute;
