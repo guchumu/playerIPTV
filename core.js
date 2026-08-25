@@ -1029,6 +1029,14 @@ function initSplash() {
 /********** DEVICE ID & CARGA REMOTA **********/
 function getDeviceId() {
   const KEY = "device_id";
+  function formatId(raw) {
+    const clean = String(raw || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 6);
+    if (clean.length !== 6) return String(raw || "").toUpperCase();
+    return clean.slice(0, 2) + "-" + clean.slice(2, 4) + "-" + clean.slice(4);
+  }
   try {
     let id = localStorage.getItem(KEY);
     if (!id) {
@@ -1040,7 +1048,9 @@ function getDeviceId() {
       const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
       id = "";
       for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
-      id = id.match(/.{1,2}/g).join("-");
+      id = formatId(id);
+    } else {
+      id = formatId(id);
     }
     localStorage.setItem(KEY, id);
     try {
@@ -1052,7 +1062,7 @@ function getDeviceId() {
       const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
       let id = "";
       for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
-      getDeviceId._mem = id.match(/.{1,2}/g).join("-");
+      getDeviceId._mem = formatId(id);
     }
     return getDeviceId._mem;
   }
@@ -1408,7 +1418,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       return false;
     }
     showScreen("login");
-    startRemotePolling();
+    // No reiniciar el poll aquí: provoca tick() al instante y bucles.
+    if (!pollingInterval && !liveSession) startRemotePolling();
     return false;
   }
 }
@@ -1612,6 +1623,9 @@ async function checkAccountExpiryFromChannels() {
 }
 
 function finishLogin(user) {
+  try {
+    dismissSplash(true);
+  } catch (e) {}
   if (document.activeElement) document.activeElement.blur();
   window.scrollTo(0, 0);
   showScreen("main");

@@ -2,15 +2,23 @@
 // upload.php - Portal de carga remota
 $mensaje = '';
 
+function rs_format_device_id($raw) {
+    $id = strtoupper(preg_replace('/[^A-Z0-9]/', '', (string) $raw));
+    if (strlen($id) === 6) {
+        return substr($id, 0, 2) . '-' . substr($id, 2, 2) . '-' . substr($id, 4, 2);
+    }
+    return strtoupper(trim((string) $raw));
+}
+
 // El QR de la pantalla de inicio trae el Device ID en la URL para no tener que
 // copiarlo a mano desde la tele, que es la parte más incómoda del proceso.
-$idPrevio = isset($_GET['id']) ? strtoupper(trim($_GET['id'])) : '';
-if (!preg_match('/^[A-Z0-9-]{4,16}$/', $idPrevio)) {
+$idPrevio = isset($_GET['id']) ? rs_format_device_id($_GET['id']) : '';
+if (!preg_match('/^[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}$/', $idPrevio)) {
     $idPrevio = '';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $deviceId = strtoupper(trim(isset($_POST['device_id']) ? $_POST['device_id'] : ''));
+    $deviceId = rs_format_device_id(isset($_POST['device_id']) ? $_POST['device_id'] : '');
     $serverUrl = isset($_POST['serverUrl']) ? trim((string) $_POST['serverUrl']) : '';
     $username = isset($_POST['username']) ? trim((string) $_POST['username']) : '';
     $password = isset($_POST['password']) ? trim((string) $_POST['password']) : '';
@@ -39,11 +47,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mkdir(__DIR__ . '/cuentas', 0777, true);
     }
 
-    if ($deviceId !== '' && preg_match('/^[A-Z0-9-]{4,16}$/', $deviceId)) {
+    if ($deviceId !== '' && preg_match('/^[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}$/', $deviceId)) {
         file_put_contents(__DIR__ . '/cuentas/' . $deviceId . '.json', json_encode($data));
+        // Compatibilidad: borrar copia sin guiones si existía.
+        $plain = str_replace('-', '', $deviceId);
+        $plainFile = __DIR__ . '/cuentas/' . $plain . '.json';
+        if (is_file($plainFile)) {
+            @unlink($plainFile);
+        }
         $mensaje = 'Lista enviada con éxito a la TV (' . htmlspecialchars($deviceId, ENT_QUOTES, 'UTF-8') . '). Aparecerá en unos segundos.';
     } else {
-        $mensaje = 'Error: Debes introducir un Device ID válido.';
+        $mensaje = 'Error: Debes introducir un Device ID válido (6 caracteres, ej. A1B2C3).';
     }
 }
 ?>
@@ -63,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .msg { margin-bottom: 15px; padding: 10px; border-radius: 6px; background: rgba(34, 197, 94, 0.2); color: #4ade80; text-align: center; font-size: 0.9rem; }
         .divider { text-align: center; margin: 20px 0; color: #475569; font-size: 0.8rem; }
         .ok-id { margin: 6px 0 0; font-size: 0.75rem; color: #4ade80; }
+        .device-id-input { letter-spacing: 0.12em; font-size: 1.15rem; font-weight: 700; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -71,7 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php if ($mensaje): ?><div class="msg"><?php echo $mensaje; ?></div><?php endif; ?>
         <form method="POST">
             <label>Device ID (Aparece en la pantalla de la TV)</label>
-            <input type="text" name="device_id" placeholder="Ej: A1-B2-C3" required autocomplete="off"
+            <input type="text" id="deviceIdInput" class="device-id-input" name="device_id"
+                   placeholder="A1B2C3" required autocomplete="off" inputmode="text"
+                   maxlength="8"
                    value="<?php echo htmlspecialchars($idPrevio, ENT_QUOTES, 'UTF-8'); ?>"><?php if ($idPrevio !== ''): ?>
             <p class="ok-id">Dispositivo detectado por QR</p><?php endif; ?>
 
@@ -79,19 +96,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="text" name="listName" placeholder="Ej: Casa, Trabajo, Proveedor X" maxlength="64">
 
             <label>Servidor Xtream Codes</label>
-            <input type="text" name="serverUrl" placeholder="http://servidor.com:8080">
+            <input type="text" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="off">
             <label>Usuario</label>
-            <input type="text" name="username">
+            <input type="text" name="username" autocomplete="username">
             <label>Contraseña</label>
-            <input type="password" name="password">
+            <input type="password" name="password" autocomplete="current-password">
 
             <div class="divider">— O SI TIENES LISTA M3U —</div>
 
             <label>Enlace M3U Directo</label>
-            <input type="text" name="m3uUrl" placeholder="http://...">
+            <input type="text" name="m3uUrl" placeholder="http://..." autocomplete="off">
 
             <button type="submit">Enviar al Dispositivo</button>
         </form>
     </div>
+    <script>
+      (function () {
+        var input = document.getElementById("deviceIdInput");
+        if (!input) return;
+
+        function formatId(raw) {
+          var clean = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+          if (clean.length <= 2) return clean;
+          if (clean.length <= 4) return clean.slice(0, 2) + "-" + clean.slice(2);
+          return clean.slice(0, 2) + "-" + clean.slice(2, 4) + "-" + clean.slice(4);
+        }
+
+        function applyFormat() {
+          var start = input.selectionStart;
+          var before = input.value;
+          var next = formatId(before);
+          if (next === before) return;
+          // Contar cuántos caracteres "reales" había antes del cursor.
+          var left = before.slice(0, start).toUpperCase().replace(/[^A-Z0-9]/g, "").length;
+          input.value = next;
+          var pos = 0;
+          var seen = 0;
+          while (pos < next.length && seen < left) {
+            if (/[A-Z0-9]/.test(next.charAt(pos))) seen++;
+            pos++;
+          }
+          try { input.setSelectionRange(pos, pos); } catch (e) {}
+        }
+
+        input.addEventListener("input", applyFormat);
+        input.addEventListener("blur", applyFormat);
+        applyFormat();
+      })();
+    </script>
 </body>
 </html>
