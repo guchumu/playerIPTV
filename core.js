@@ -1173,11 +1173,16 @@ function enterChannelView(user) {
   }
   if (channelsData.length) markSessionLive();
   try {
+    dismissSplash(true);
+    showScreen("main");
+  } catch (e) {}
+  try {
     const entry = savedLists.find((l) => l.id === activeListId);
     if (entry && activeListId !== ALL_LISTS_ID) tagChannelsWithList(entry);
     renderCategories();
     renderListSelector();
     updateChannelColumnTitle();
+    requestAnimationFrame(() => paintVirtualWindow(true));
   } catch (e) {
     showToast("Error al mostrar canales");
   }
@@ -1200,11 +1205,14 @@ function startRemotePolling() {
       return;
     }
     try {
-      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
+      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId) + "&_=" + Date.now(), {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
-      if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
+      const hasList = !!(data && (data.serverUrl || data.m3uUrl || (data.username && data.password)));
+      if (!data || data.status === "esperando" || !hasList) return;
       if (assignmentIsStale(data)) {
         setLoginStatus("Hay una lista antigua. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
         return;
@@ -1213,17 +1221,11 @@ function startRemotePolling() {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
       setLoginStatus("Lista recibida. Cargando canales…");
-      remoteLoginBusy = true;
-      try {
-        const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-        if (ok || liveSession || channelsData.length) stopRemotePolling();
-        else if (!loginCancelled) {
-          const errEl = document.getElementById("loginError");
-          setLoginStatus((errEl && errEl.textContent) || "No se pudieron cargar los canales.");
-        }
-      } finally {
-        remoteLoginBusy = false;
-        if (liveSession) stopRemotePolling();
+      const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      if (ok || liveSession || channelsData.length) stopRemotePolling();
+      else if (!loginCancelled) {
+        const errEl = document.getElementById("loginError");
+        setLoginStatus((errEl && errEl.textContent) || "No se pudieron cargar los canales.");
       }
     } catch (e) {
       setLoginStatus((e && e.message) || "Error al leer la lista remota.");
@@ -1231,7 +1233,7 @@ function startRemotePolling() {
   }
 
   tick();
-  pollingInterval = setInterval(tick, 5000);
+  pollingInterval = setInterval(tick, 2500);
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -1259,6 +1261,18 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 
 /********** MOTOR CENTRAL DE LOGIN **********/
 async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
+  // Serializar: auto-login y poll QR no deben pisarse.
+  if (remoteLoginBusy) {
+    let waited = 0;
+    while (remoteLoginBusy && waited < 45000) {
+      await new Promise((r) => setTimeout(r, 120));
+      waited += 120;
+      if (liveSession && channelsData.length) return true;
+      if (loginCancelled) return false;
+    }
+    if (remoteLoginBusy) return liveSession && channelsData.length > 0;
+  }
+  remoteLoginBusy = true;
   loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
@@ -1421,6 +1435,9 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     // No reiniciar el poll aquí: provoca tick() al instante y bucles.
     if (!pollingInterval && !liveSession) startRemotePolling();
     return false;
+  } finally {
+    remoteLoginBusy = false;
+    if (liveSession && channelsData.length) stopRemotePolling();
   }
 }
 
@@ -1565,6 +1582,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initChannelTools();
   initListManager();
   initAdSlot();
+  bindFullscreenButtons();
   registrarServiceWorker();
   prepararInstalacion();
   showDeviceId();
@@ -2739,13 +2757,13 @@ function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
   fallback.textContent = channelInitials(displayName(channel.name));
-  // En TV no cargar logos remotos al navegar: satura la red y ralentiza el mando.
-  if (!channel.logo || isTvLayout()) return fallback;
+  if (!channel.logo) return fallback;
 
   const img = document.createElement("img");
   img.className = "channel-logo";
   img.loading = "lazy";
   img.decoding = "async";
+  img.referrerPolicy = "no-referrer";
   img.alt = "";
   img.addEventListener(
     "error",
@@ -2825,9 +2843,9 @@ function channelGridCols() {
 }
 
 function channelCardHeight() {
-  if (document.body.classList.contains("is-tv")) return 56;
-  if (document.body.classList.contains("ui-large")) return 68;
-  return 56;
+  if (document.body.classList.contains("is-tv")) return 64;
+  if (document.body.classList.contains("ui-large")) return 72;
+  return 64;
 }
 
 function channelGridGap() {
@@ -3896,31 +3914,80 @@ function isFullscreen() {
   return !!(
     document.fullscreenElement ||
     document.webkitFullscreenElement ||
-    (video && video.webkitDisplayingFullscreen)
+    (video && video.webkitDisplayingFullscreen) ||
+    document.body.classList.contains("player-max")
   );
 }
 
 function enterFullscreen() {
   if (!video) return;
-  const target = video.parentElement || video;
+  const target = document.querySelector(".video-wrapper") || video.parentElement || video;
   try {
     if (target.requestFullscreen) target.requestFullscreen();
     else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
     else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
-  } catch (e) {}
+    else document.body.classList.add("player-max");
+  } catch (e) {
+    document.body.classList.add("player-max");
+  }
+  syncFullscreenButtons();
 }
 
 function exitFullscreen() {
   try {
-    if (document.exitFullscreen) document.exitFullscreen();
-    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-    else if (video && video.webkitExitFullscreen) video.webkitExitFullscreen();
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      else if (video && video.webkitExitFullscreen) video.webkitExitFullscreen();
+    }
   } catch (e) {}
+  document.body.classList.remove("player-max");
+  syncFullscreenButtons();
 }
 
 function toggleFullscreen() {
   if (isFullscreen()) exitFullscreen();
   else enterFullscreen();
+}
+
+function syncFullscreenButtons() {
+  const on = isFullscreen();
+  ["fullscreenBtn", "playerFsBtn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.classList.toggle("is-on", on);
+    btn.title = on ? "Salir del visor 100%" : "Visor al 100%";
+    btn.setAttribute("aria-label", btn.title);
+  });
+}
+
+document.addEventListener("fullscreenchange", syncFullscreenButtons);
+document.addEventListener("webkitfullscreenchange", syncFullscreenButtons);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && document.body.classList.contains("player-max")) {
+    exitFullscreen();
+  }
+});
+
+function bindFullscreenButtons() {
+  const go = (ev) => {
+    if (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+    toggleFullscreen();
+  };
+  const headerBtn = document.getElementById("fullscreenBtn");
+  const playerBtn = document.getElementById("playerFsBtn");
+  if (headerBtn && !headerBtn.dataset.bound) {
+    headerBtn.dataset.bound = "1";
+    headerBtn.addEventListener("click", go);
+  }
+  if (playerBtn && !playerBtn.dataset.bound) {
+    playerBtn.dataset.bound = "1";
+    playerBtn.addEventListener("click", go);
+  }
+  syncFullscreenButtons();
 }
 
 // Girar el móvil a horizontal entra a pantalla completa. Algunos navegadores
@@ -4461,7 +4528,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824d");
+  url.searchParams.set("v", "20260824f");
   window.location.replace(url.toString());
 }
 

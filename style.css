@@ -412,7 +412,7 @@ html.is-native-tv .engine-control select {
 .main-container {
   flex: 1;
   display: grid;
-  grid-template-columns: 170px 300px 1fr;
+  grid-template-columns: minmax(132px, 12%) minmax(420px, 1.35fr) minmax(300px, 0.95fr);
   height: calc(100vh - 40px);
   min-height: 0;
   overflow: hidden;
@@ -532,11 +532,11 @@ html.is-native-tv .engine-control select {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  height: 56px;
-  min-height: 56px;
-  max-height: 56px;
-  padding: 6px 8px;
+  gap: 10px;
+  height: 64px;
+  min-height: 64px;
+  max-height: 64px;
+  padding: 6px 10px 6px 8px;
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 8px;
@@ -545,6 +545,8 @@ html.is-native-tv .engine-control select {
   box-sizing: border-box;
   overflow: hidden;
   transition: border-color 0.15s, box-shadow 0.15s;
+  justify-content: flex-start;
+  text-align: left;
 }
 .channel-item:hover {
   border-color: rgba(99, 102, 241, 0.45);
@@ -561,11 +563,11 @@ html.is-native-tv .engine-control select {
 .channel-card-logo { display: none; }
 .channel-chno {
   flex-shrink: 0;
-  width: 2.2rem;
-  font-size: 0.68rem;
+  width: 2.4rem;
+  font-size: 0.72rem;
   color: #64748b;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: left;
 }
 @media (max-width: 1200px) {
   body:not(.is-tv) .channel-chno { display: inline; }
@@ -580,7 +582,7 @@ html.is-native-tv .engine-control select {
   cursor: pointer;
   border-radius: 6px;
   padding: 4px;
-  margin-left: auto;
+  margin-left: 4px;
 }
 .fav-btn svg,
 .fav-btn svg path { width: 100%; height: 100%; fill: currentColor; overflow: visible; }
@@ -588,8 +590,8 @@ html.is-native-tv .engine-control select {
 .fav-btn:focus-visible { outline: 2px solid #fbbf24; }
 .category-btn.is-special { color: #fde68a; }
 .channel-logo {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
   border-radius: 6px;
   background: rgba(2, 6, 23, 0.9);
@@ -597,8 +599,8 @@ html.is-native-tv .engine-control select {
   padding: 2px;
 }
 .channel-logo-fallback {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
   border-radius: 6px;
   background: linear-gradient(135deg, #1e293b, #334155);
@@ -615,16 +617,25 @@ html.is-native-tv .engine-control select {
   flex-direction: column;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 1px;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
 }
 .channel-name {
   font-weight: 600;
-  font-size: 0.88rem;
-  line-height: 1.2;
-  white-space: nowrap;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: unset;
   text-align: left;
+  width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .channel-meta,
 .channel-quality,
@@ -643,6 +654,7 @@ html.is-native-tv .engine-control select {
   text-overflow: ellipsis;
   text-align: left;
   line-height: 1.2;
+  max-width: 100%;
 }
 
 /********** COLUMNA PLAYER **********/
@@ -662,6 +674,86 @@ html.is-native-tv .engine-control select {
   background: #000;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   flex-shrink: 0;
+}
+.player-fs-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 25;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.72);
+  color: #e2e8f0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+.player-fs-btn:hover,
+.player-fs-btn.is-on {
+  background: rgba(79, 70, 229, 0.9);
+  color: #fff;
+}
+.player-fs-btn svg { width: 100%; height: 100%; }
+.action-btn.is-on {
+  background: #4f46e5;
+  color: #fff;
+}
+body.is-tv .pc-only-btn,
+html.is-native-tv .pc-only-btn,
+body.is-mobile .pc-only-btn {
+  display: none !important;
+}
+body.player-max .categories-column,
+body.player-max .channels-column,
+body.player-max .compact-header .header-left,
+body.player-max .epg-timeline-box,
+body.player-max .epg-container,
+body.player-max .playback-status,
+body.player-max .ad-slot {
+  display: none !important;
+}
+body.player-max .main-container {
+  grid-template-columns: 1fr;
+  height: 100vh;
+  height: 100dvh;
+}
+body.player-max .player-column {
+  padding: 0;
+}
+body.player-max .video-wrapper {
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.player-max .compact-header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 40;
+  background: transparent;
+  border: 0;
+  width: auto;
+}
+.video-wrapper:fullscreen,
+.video-wrapper:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+  background: #000;
+}
+.video-wrapper:fullscreen #videoPlayer,
+.video-wrapper:-webkit-full-screen #videoPlayer {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 #videoPlayer {
   width: 100%;
@@ -1204,18 +1296,18 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 
 /********** PC / DESKTOP ANCHO **********/
 @media (min-width: 1440px) {
-  .main-container { grid-template-columns: 190px 340px 1fr; }
+  .main-container { grid-template-columns: minmax(140px, 11%) minmax(480px, 1.4fr) minmax(340px, 0.95fr); }
   .category-btn { font-size: 0.85rem; }
-  .channel-name { font-size: 0.95rem; }
+  .channel-name { font-size: 0.98rem; }
 }
 
 /********** TABLET 769–1200 **********/
 @media (min-width: 769px) and (max-width: 1200px) {
-  .main-container { grid-template-columns: 150px 260px 1fr; }
+  .main-container { grid-template-columns: minmax(120px, 14%) minmax(320px, 1.3fr) minmax(240px, 0.9fr); }
   .header-right span { font-size: 0.75rem; }
   .category-btn { padding: 7px 8px; font-size: 0.78rem; }
-  .channel-item { padding: 8px; }
-  .channel-logo, .channel-logo-fallback { width: 28px; height: 28px; }
+  .channel-item { padding: 6px 8px; }
+  .channel-logo, .channel-logo-fallback { width: 36px; height: 36px; }
 }
 
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
@@ -1282,6 +1374,9 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   display: flex !important;
   margin: 0.25rem 0 0.4rem;
 }
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-engine[hidden] {
+  display: none !important;
+}
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box {
   padding: 0.7rem 0.85rem;
   flex: 0 1 auto;
@@ -1317,12 +1412,10 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   overflow: hidden;
 }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .global-spinner {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  grid-column: auto;
-  grid-row: auto;
-  z-index: 5;
-  background: rgba(2, 6, 23, 0.82);
+  z-index: 5500;
+  background: rgba(2, 6, 23, 0.88);
 }
 @media (max-height: 560px) {
   :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-logo {
@@ -1366,6 +1459,9 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   }
   html:not(.login-portrait) #loginScreen .login-engine {
     display: flex !important;
+  }
+  html:not(.login-portrait) #loginScreen .login-engine[hidden] {
+    display: none !important;
   }
   html:not(.login-portrait) #loginScreen .upload-qr {
     width: min(34vh, 200px);
@@ -1449,7 +1545,7 @@ html.is-native-tv #logoutBtn.cursor {
 /* Tres columnas fijas: categorías | lista ancha | preview pequeño. */
 body.is-tv .main-container,
 body.is-tv.tv-channels-open .main-container {
-  grid-template-columns: minmax(168px, 16%) minmax(420px, 1fr) minmax(250px, 28%);
+  grid-template-columns: minmax(150px, 14%) minmax(460px, 1.45fr) minmax(220px, 26%);
   transition: none;
 }
 body.is-tv .categories-column,
@@ -1502,21 +1598,25 @@ body.is-tv .category-btn {
   overflow: hidden;
 }
 body.is-tv .channel-item {
-  min-height: 56px;
-  height: 56px;
-  max-height: 56px;
+  min-height: 64px;
+  height: 64px;
+  max-height: 64px;
   border-radius: 8px;
   overflow: hidden;
-  padding: 6px 8px;
+  padding: 6px 10px 6px 8px;
 }
 body.is-tv .channel-name {
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 650;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: unset;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
-body.is-tv .channel-chno { font-size: 0.68rem; color: #94a3b8; }
+body.is-tv .channel-chno { font-size: 0.7rem; color: #94a3b8; text-align: left; }
 body.is-tv .fav-btn { width: 26px; height: 26px; padding: 3px; overflow: visible; }
 body.is-tv .category-btn.cursor,
 body.is-tv .channel-item.cursor {
@@ -1525,7 +1625,7 @@ body.is-tv .channel-item.cursor {
   background: rgba(251, 191, 36, 0.12);
 }
 body.is-tv .channel-item.playing { box-shadow: inset 3px 0 0 #22c55e; }
-body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 34px; height: 34px; }
+body.is-tv .channel-logo, body.is-tv .channel-logo-fallback { width: 40px; height: 40px; }
 body.is-tv .debug-overlay { width: min(560px, calc(100vw - 48px)); }
 body.is-tv .channels-column h2 { font-size: 0.78rem; margin-bottom: 0.2rem; }
 body.is-tv .channels-toolbar { margin-bottom: 0.25rem; }
@@ -1653,7 +1753,7 @@ body.is-tv .tv-fav-empty {
     -webkit-overflow-scrolling: touch;
   }
   .channels-grid { grid-template-columns: minmax(0, 1fr); gap: 5px; }
-  .channel-item { min-height: 56px; height: 56px; max-height: 56px; }
+  .channel-item { min-height: 64px; height: 64px; max-height: 64px; }
   .header-right span { display: none; }
 }
 
@@ -1663,7 +1763,7 @@ body.is-tv .tv-fav-empty {
   html.is-native-tv #mainScreen .main-container {
     display: grid !important;
     flex-direction: unset !important;
-    grid-template-columns: minmax(140px, 16%) minmax(280px, 1fr) minmax(200px, 30%) !important;
+    grid-template-columns: minmax(130px, 14%) minmax(300px, 1.45fr) minmax(180px, 26%) !important;
   }
   body.is-tv .player-column,
   body.is-tv .categories-column,
@@ -1715,10 +1815,10 @@ body.is-ios #videoPlayer { object-fit: contain; }
 
 body.ui-large { font-size: 18px; }
 body.ui-large .category-btn,
-body.ui-large .channel-item { font-size: 1.05rem; height: 68px; min-height: 68px; max-height: 68px; }
-body.ui-large .channel-name { font-size: 0.95rem; text-align: left; }
+body.ui-large .channel-item { font-size: 1.05rem; height: 72px; min-height: 72px; max-height: 72px; }
+body.ui-large .channel-name { font-size: 0.98rem; text-align: left; }
 body.ui-large .channel-logo,
-body.ui-large .channel-logo-fallback { width: 40px; height: 40px; }
+body.ui-large .channel-logo-fallback { width: 44px; height: 44px; }
 body.ui-contrast {
   background: #000;
   color: #fff;
