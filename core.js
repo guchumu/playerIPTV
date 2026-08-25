@@ -149,19 +149,11 @@ function detectDevice() {
   const markedTv = /StreamBoxTV|Leanback/i.test(ua);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const noHover = window.matchMedia("(hover: none)").matches;
-  const w = Math.max(window.innerWidth || 0, window.screen && screen.width ? screen.width : 0);
-  const h = Math.max(window.innerHeight || 0, window.screen && screen.height ? screen.height : 0);
-  const wide = w >= 960;
-  const landscape = w >= h && w >= 900;
-  // WebView de TV ≈ Chrome móvil: sin isTv nativo la UA no basta. En teléfono
-  // el plugin pone isTv:false y no forzamos televisor. Si el flag aún no llegó
-  // (inyección tardía), landscape ancho en app nativa / UA marcada cuenta como TV.
-  const heuristicTV =
-    isFireTV ||
-    isAndroidTV ||
-    markedTv ||
-    (coarse && noHover && wide && h >= 500) ||
-    (landscape && (markedTv || isNativeApp() || /Android/i.test(ua)));
+  const wide = Math.max(window.innerWidth, window.screen.width) >= 960;
+  const heuristicTV = isFireTV || isAndroidTV || markedTv || (coarse && noHover && wide && window.innerHeight >= 500);
+  // El WebView de Android TV parece Chrome de móvil: sin StreamBoxNative.isTv
+  // la heurística por UA no basta. En el APK de teléfono isTv es false y no
+  // se fuerza el layout de televisor.
   const isTV = nativeTv === true || (nativeTv !== false && heuristicTV);
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
@@ -169,12 +161,7 @@ function detectDevice() {
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
-  document.documentElement.classList.toggle(
-    "is-native-tv",
-    nativeTv === true || (isTV && (markedTv || isNativeApp() || landscape))
-  );
-  // Layout logo|QR también por CSS landscape (por si is-tv llega tarde).
-  document.documentElement.classList.toggle("login-landscape", landscape);
+  document.documentElement.classList.toggle("is-native-tv", nativeTv === true || (isTV && (markedTv || isNativeApp())));
   if (!isTV) document.body.classList.remove("tv-channels-open");
   applyTvChrome();
 }
@@ -193,18 +180,6 @@ async function refreshNativeTvFlag() {
     });
     detectDevice();
     applyUiMode();
-    showApkVersion(info.versionName);
-  } catch (e) {}
-}
-
-function showApkVersion(versionName) {
-  const tag = document.querySelector(".build-tag");
-  if (!tag) return;
-  const web = "v20260825i";
-  const apk = versionName ? String(versionName) : "";
-  tag.textContent = apk ? web + " · APK " + apk : web;
-  try {
-    if (apk) window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { versionName: apk });
   } catch (e) {}
 }
 
@@ -268,10 +243,7 @@ function assignmentIsStale(data) {
   const logoutAt = getLogoutAt();
   if (!logoutAt) return false;
   const ts = data && data.ts != null ? Number(data.ts) : 0;
-  // Sin ts (asignaciones antiguas) no bloqueamos: si no, la TV "ve" la lista
-  // y nunca entra a cargar canales tras un cierre de sesión.
-  if (!ts) return false;
-  return ts <= logoutAt;
+  return !ts || ts <= logoutAt;
 }
 
 function setTvChannelsOpen(open) {
@@ -814,11 +786,29 @@ async function switchToList(listId) {
 }
 
 function renderListSelector() {
-  // Player M3U: una sola lista activa. El selector/gestor es del restreamer.
   const sel = document.getElementById("listSelect");
-  if (sel) sel.hidden = true;
-  const btn = document.getElementById("listsBtn");
-  if (btn) btn.hidden = true;
+  if (!sel) return;
+  const prev = activeListId;
+  sel.innerHTML = "";
+  savedLists.forEach((entry) => {
+    const opt = document.createElement("option");
+    opt.value = entry.id;
+    opt.textContent = entry.name;
+    sel.appendChild(opt);
+  });
+  if (savedLists.length > 1) {
+    const allOpt = document.createElement("option");
+    allOpt.value = ALL_LISTS_ID;
+    allOpt.textContent = "Todas las listas";
+    sel.appendChild(allOpt);
+  }
+  if (activeListId && (activeListId === ALL_LISTS_ID || savedLists.some((l) => l.id === activeListId))) {
+    sel.value = activeListId;
+  } else if (savedLists.length) {
+    sel.value = savedLists[0].id;
+    setActiveListId(savedLists[0].id);
+  }
+  sel.hidden = savedLists.length < 1;
   updateChannelColumnTitle();
 }
 
@@ -826,24 +816,131 @@ function updateChannelColumnTitle() {
   const title = document.getElementById("channelColumnTitle");
   if (!title) return;
   if (searchQuery) return;
-  if (currentCategory) title.textContent = displayCategoryName(currentCategory);
-  else title.textContent = "Canales";
+  if (activeListId === ALL_LISTS_ID) {
+    title.textContent = "Canales · Todas las listas";
+    return;
+  }
+  const entry = savedLists.find((l) => l.id === activeListId);
+  title.textContent = entry ? "Canales · " + entry.name : "Canales";
 }
 
 function renderListsManagePanel() {
-  // Sin UI de multi-lista en este player.
+  const ul = document.getElementById("listsManageList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  savedLists.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "lists-manage-item";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "lists-rename-input";
+    nameInput.value = entry.name;
+    nameInput.title = "Nombre de la lista";
+    nameInput.addEventListener("change", () => {
+      renameSavedList(entry.id, nameInput.value);
+      renderListSelector();
+    });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "lists-del-btn";
+    delBtn.textContent = "Eliminar";
+    delBtn.title = "Quitar esta lista guardada";
+    delBtn.addEventListener("click", () => {
+      if (savedLists.length <= 1) {
+        showToast("Debe quedar al menos una lista");
+        return;
+      }
+      removeSavedList(entry.id);
+      renderListsManagePanel();
+      renderListSelector();
+      if (activeListId === entry.id || !savedLists.some((l) => l.id === activeListId)) {
+        switchToList(savedLists[0] ? savedLists[0].id : null);
+      }
+    });
+    li.appendChild(nameInput);
+    li.appendChild(delBtn);
+    ul.appendChild(li);
+  });
 }
 
-function showListsOverlay() {
-  // Sin UI de multi-lista en este player.
+function showListsOverlay(show) {
+  const overlay = document.getElementById("listsOverlay");
+  if (!overlay) return;
+  if (show) {
+    renderListsManagePanel();
+    overlay.hidden = false;
+    overlay.classList.add("is-open");
+  } else {
+    overlay.classList.remove("is-open");
+    overlay.hidden = true;
+    stopAddListPolling();
+  }
 }
 
-function startAddListPolling() {}
-function stopAddListPolling() {}
+function stopAddListPolling() {
+  listAddPollGen++;
+  if (listAddPollTimer) {
+    clearInterval(listAddPollTimer);
+    listAddPollTimer = null;
+  }
+}
+
+function startAddListPolling() {
+  stopAddListPolling();
+  const myGen = listAddPollGen;
+  const deviceId = showDeviceId();
+  const qrBox = document.getElementById("listsAddQr");
+  if (qrBox) {
+    const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
+    renderUploadQr(base + "upload.php?id=" + encodeURIComponent(deviceId), "listsAddQr");
+  }
+  async function tick() {
+    if (myGen !== listAddPollGen) return;
+    try {
+      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
+      const data = await res.json();
+      if (myGen !== listAddPollGen) return;
+      if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
+      if (assignmentIsStale(data)) return;
+      stopAddListPolling();
+      showListsOverlay(false);
+      await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      showToast("Lista añadida");
+    } catch (e) {}
+  }
+  tick();
+  listAddPollTimer = setInterval(tick, 5000);
+}
 
 function initListManager() {
   loadSavedListsRegistry();
-  renderListSelector();
+  const sel = document.getElementById("listSelect");
+  if (sel) {
+    sel.addEventListener("change", () => {
+      if (sel.value) switchToList(sel.value);
+    });
+  }
+  const listsBtn = document.getElementById("listsBtn");
+  if (listsBtn) {
+    listsBtn.addEventListener("click", () => showListsOverlay(true));
+  }
+  const closeBtn = document.getElementById("listsCloseBtn");
+  if (closeBtn) closeBtn.addEventListener("click", () => showListsOverlay(false));
+  const addBtn = document.getElementById("listsAddBtn");
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      const addPanel = document.getElementById("listsAddPanel");
+      if (addPanel) addPanel.hidden = !addPanel.hidden;
+      if (addPanel && !addPanel.hidden) startAddListPolling();
+      else stopAddListPolling();
+    });
+  }
+  const overlay = document.getElementById("listsOverlay");
+  if (overlay) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) showListsOverlay(false);
+    });
+  }
 }
 
 async function signedStreamHref(url) {
@@ -1086,16 +1183,6 @@ function enterChannelView(user) {
   } catch (e) {}
 }
 
-let lastRemoteAssignKey = "";
-let lastRemoteFailAt = 0;
-let remoteFailCount = 0;
-let lastLoginError = "";
-let loginMutex = Promise.resolve();
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function startRemotePolling() {
   if (liveSession && channelsData.length && !logoutRequested) return;
   const deviceId = showDeviceId();
@@ -1114,62 +1201,20 @@ function startRemotePolling() {
       const data = await res.json();
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
-      if (remoteLoginBusy) return;
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
-      if (assignmentIsStale(data)) {
-        setLoginStatus("Hay una lista antigua en el servidor. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
-        return;
-      }
-      const assignKey =
-        String(data.ts || "") +
-        "|" +
-        String(data.m3uUrl || "") +
-        "|" +
-        String(data.username || "") +
-        "|" +
-        String(data.serverUrl || "");
-      if (assignKey && assignKey === lastRemoteAssignKey && remoteFailCount > 0) {
-        const wait = Math.min(45000, 12000 * remoteFailCount);
-        if (Date.now() - lastRemoteFailAt < wait) {
-          const why = lastLoginError || "No se pudieron cargar los canales.";
-          setLoginStatus(why + " Reintento en unos segundos…");
-          return;
-        }
-      }
-      if (
-        remoteFailCount >= 2 &&
-        lastLoginError &&
-        /proveedor responde|credenciales|inválid|lista no contiene|no se pudo descargar/i.test(lastLoginError)
-      ) {
-        setLoginStatus(lastLoginError + " Vuelve a enviar la lista desde el móvil (o pulsa Recargar).");
-        stopRemotePolling();
-        return;
-      }
+      if (assignmentIsStale(data)) return;
+      remoteLoginBusy = true;
       try {
-        sessionStorage.removeItem(LOGOUT_AT_KEY);
-      } catch (e) {}
-      lastRemoteAssignKey = assignKey;
-      setLoginStatus("Lista recibida. Cargando canales…");
-      showSpinner(true, "Cargando canales…");
-      const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-      if (ok || liveSession || channelsData.length) {
-        remoteFailCount = 0;
-        lastLoginError = "";
-        stopRemotePolling();
-      } else if (!loginCancelled) {
-        remoteFailCount++;
-        lastRemoteFailAt = Date.now();
-        const why = lastLoginError || "No se pudieron cargar los canales.";
-        setLoginStatus(why + " Reintento en unos segundos…");
+        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      } finally {
+        remoteLoginBusy = false;
+        if (liveSession) stopRemotePolling();
       }
-    } catch (e) {
-      lastLoginError = (e && e.message) || "Error al leer la lista remota.";
-      setLoginStatus(lastLoginError + " Reintentando…");
-    }
+    } catch (e) {}
   }
 
   tick();
-  pollingInterval = setInterval(tick, 4000);
+  pollingInterval = setInterval(tick, 5000);
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -1196,45 +1241,7 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 }
 
 /********** MOTOR CENTRAL DE LOGIN **********/
-async function fetchWithTimeout(url, ms) {
-  const timeoutMs = ms || 120000;
-  if (typeof AbortController === "undefined") return fetch(url);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function describeProxyBody(text, fallback) {
-  const t = String(text || "").trim();
-  if (!t) return fallback;
-  try {
-    const j = JSON.parse(t);
-    if (j && (j.message || j.error)) return String(j.message || j.error);
-  } catch (e) {}
-  if (/Error al cargar/i.test(t)) return "No se pudo descargar la lista M3U.";
-  if (t.length < 220 && !/#EXT/i.test(t) && !/^#/.test(t)) return t;
-  return fallback;
-}
-
 async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
-  const job = loginMutex.then(
-    () => performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts),
-    () => performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts)
-  );
-  loginMutex = job.then(
-    () => undefined,
-    () => undefined
-  );
-  return job;
-}
-
-async function performLoginActionLocked(serverUrl, username, password, m3uUrl, listName, opts) {
-  if (liveSession && channelsData.length && !logoutRequested) return true;
-  remoteLoginBusy = true;
   loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
@@ -1245,9 +1252,9 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
   password = (password || "").trim();
   m3uUrl = (m3uUrl || "").trim();
 
-  // Xtream gana sobre M3U residual del autocompletado. Solo M3U si no hay usuario/clave.
+  // Si hay usuario y clave, es Xtream. La M3U solo se usa cuando NO hay Xtream.
+  // (Antes, un m3uUrl residual o vacío mal leído saltaba el login Xtream.)
   const hasXtream = !!(username && password);
-  const hasM3u = !!m3uUrl && !hasXtream;
   if (hasXtream && !serverUrl) {
     serverUrl = "http://masquecero.net";
   }
@@ -1268,33 +1275,23 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
         }
       }
 
-      let response;
-      try {
-        response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 120000);
-      } catch (netErr) {
-        if (channelsData.length) {
-          showSpinner(false);
-          markSessionLive();
-          showToast("No se pudo actualizar; se usa la lista en caché");
-          return true;
-        }
-        throw new Error("Tiempo agotado al descargar la lista. Comprueba la red o la URL M3U.");
-      }
+      const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
       const m3uContent = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
-      if (response.status === 429) {
-        throw new Error(describeProxyBody(m3uContent, "El servidor está ocupado. Espera y pulsa Recargar."));
-      }
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
         if (channelsData.length) {
           showSpinner(false);
           markSessionLive();
           return true;
         }
-        throw new Error(describeProxyBody(m3uContent, "No se pudo cargar la URL."));
+        throw new Error("No se pudo cargar la URL.");
       }
       if (m3uContent.trim().charAt(0) === "{" || /<!DOCTYPE|<html/i.test(m3uContent)) {
-        const msg = describeProxyBody(m3uContent, "No se pudo cargar la URL.");
+        let msg = "No se pudo cargar la URL.";
+        try {
+          const err = JSON.parse(m3uContent);
+          if (err && err.message) msg = err.message;
+        } catch (e) {}
         if (channelsData.length) {
           showSpinner(false);
           markSessionLive();
@@ -1303,11 +1300,17 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
         throw new Error(msg);
       }
       const listaConError = detectProviderListError(m3uContent);
-      if (!applyListOrKeep(m3uContent)) {
-        throw new Error(
-          listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
-        );
+      if (listaConError) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("El proveedor responde: " + listaConError);
+          return true;
+        }
+        throw new Error("El proveedor responde: " + listaConError);
       }
+
+      if (!applyListOrKeep(m3uContent)) throw new Error("La lista no contiene canales");
       await saveSession(currentUser);
       await writeListCache(currentUser, m3uContent);
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
@@ -1342,23 +1345,9 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
       }
 
       showSpinner(true, "Validando acceso...");
-      let response;
-      try {
-        response = await fetchXtream("player_api.php", { username, password }, serverUrl);
-      } catch (netErr) {
-        if (channelsData.length) {
-          showSpinner(false);
-          markSessionLive();
-          showToast("No se pudo validar; se usa la lista en caché");
-          return true;
-        }
-        throw new Error("Tiempo agotado al conectar con el servidor.");
-      }
+      const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
       const rawText = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
-      if (response.status === 429) {
-        throw new Error(describeProxyBody(rawText, "El servidor está ocupado. Espera y pulsa Recargar."));
-      }
       let data = null;
       try {
         data = JSON.parse(rawText);
@@ -1405,28 +1394,21 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
     pendingListName = null;
     showSpinner(false);
     const msg = (error && error.message) || "Error al iniciar sesión.";
-    lastLoginError = msg;
     setLoginStatus(msg);
     if (liveSession || channelsData.length) {
       showToast(msg);
-      if (channelsData.length) {
+      if (channelsData.length) markSessionLive();
+      const main = document.getElementById("mainScreen");
+      if (main && !main.classList.contains("active") && channelsData.length) {
         try {
-          enterChannelView(currentUser || { username: "Lista", isM3U: true });
-        } catch (e) {
-          try {
-            showScreen("main");
-          } catch (e2) {}
-        }
-        markSessionLive();
-        return true;
+          showScreen("main");
+        } catch (e) {}
       }
       return false;
     }
     showScreen("login");
-    if (!pollingInterval && !liveSession) startRemotePolling();
+    startRemotePolling();
     return false;
-  } finally {
-    remoteLoginBusy = false;
   }
 }
 
@@ -1563,13 +1545,6 @@ window.addEventListener("DOMContentLoaded", () => {
   refreshNativeTvFlag();
   applyUiMode();
   try {
-    const n = window.StreamBoxNative;
-    if (n && n.versionName) showApkVersion(n.versionName);
-    else showApkVersion("");
-  } catch (e) {
-    showApkVersion("");
-  }
-  try {
     const session = localStorage.getItem(SESSION_KEY);
     if (session && !localStorage.getItem(LAST_LIST_KEY)) localStorage.setItem(LAST_LIST_KEY, session);
   } catch (e) {}
@@ -1581,22 +1556,29 @@ window.addEventListener("DOMContentLoaded", () => {
   prepararInstalacion();
   showDeviceId();
   initTvLoginFocus();
-  // Siempre escuchar el QR: si el auto-login se cuelga, la carga remota sigue viva.
-  startRemotePolling();
+  if (!canAutoLoginFromCache()) startRemotePolling();
 
   loadSession().then(async (saved) => {
     await migrateSavedListsFromSession();
-    if (!saved) return;
+    if (!saved) {
+      if (!pollingInterval) startRemotePolling();
+      return;
+    }
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
-    if (!canAutoLogin) return;
+    if (!canAutoLogin) {
+      if (!pollingInterval) startRemotePolling();
+      return;
+    }
 
-    // Dar tiempo al QR a entregar la lista; no competir con la carga remota.
     setTimeout(() => {
-      if (loginCancelled || liveSession || remoteLoginBusy || channelsData.length) return;
+      if (loginCancelled) {
+        startRemotePolling();
+        return;
+      }
       performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
-        if (ok || liveSession) stopRemotePolling();
+        if (!ok && !liveSession) startRemotePolling();
       });
-    }, 1800);
+    }, 400);
   });
 });
 
@@ -1611,9 +1593,8 @@ async function fetchXtream(endpoint, params, serverOverride) {
   const targetServer = serverOverride || currentServer;
   const queryString = new URLSearchParams(params || {}).toString();
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
-  return await fetchWithTimeout(
-    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : ""),
-    120000
+  return await fetch(
+    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "")
   );
 }
 
@@ -1637,9 +1618,6 @@ async function checkAccountExpiryFromChannels() {
 }
 
 function finishLogin(user) {
-  try {
-    dismissSplash(true);
-  } catch (e) {}
   if (document.activeElement) document.activeElement.blur();
   window.scrollTo(0, 0);
   showScreen("main");
@@ -2010,7 +1988,23 @@ function formatChannelLiveStats() {
 }
 
 function refreshVisibleChannelStats() {
-  // Player M3U: sin chips de calidad/lista en las filas.
+  if (!channelsContainer) return;
+  const live = formatChannelLiveStats();
+  channelsContainer.querySelectorAll(".channel-item").forEach((item) => {
+    const statsEl = item.querySelector(".channel-stats");
+    if (!statsEl) return;
+    const meta = statsEl.closest(".channel-meta");
+    const isPlaying = item.dataset.id === currentlyPlayingId;
+    if (isPlaying && live) {
+      statsEl.textContent = live;
+      statsEl.hidden = false;
+      if (meta) meta.hidden = false;
+    } else {
+      statsEl.textContent = "";
+      statsEl.hidden = true;
+      if (meta) meta.hidden = !meta.querySelector(".channel-quality") && !meta.querySelector(".channel-source");
+    }
+  });
 }
 
 function formatTime(date) {
@@ -2019,54 +2013,19 @@ function formatTime(date) {
 }
 
 /********** CARGAR Y PARSEAR M3U **********/
-function extractM3UEntries(content) {
-  const lines = String(content || "").split(/\r\n|\n|\r/);
-  const out = [];
-  let pending = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim().replace(/^["']|["']$/g, "");
-    if (!line) continue;
-    if (line.startsWith("#EXTINF:")) {
-      if (pending) out.push(pending);
-      const nameMatch = line.match(/,(.+)$/);
-      pending = { name: nameMatch ? nameMatch[1].trim() : "Canal", url: "" };
-      continue;
-    }
-    if (line.charAt(0) === "#") continue;
-    if (pending) {
-      pending.url = line;
-      out.push(pending);
-      pending = null;
-    }
-  }
-  if (pending) out.push(pending);
-  return out;
-}
-
-function isProviderErrorChannel(name, url) {
-  const n = String(name || "").trim();
-  const u = String(url || "").trim();
-  if (/^error\s*:/i.test(n)) return true;
-  if (isStreamUrl(u)) return false;
-  if (/^(account|cuenta|usuario|user|subscription|suscripci[oó]n|lista)\b/i.test(n)) return true;
-  if (/\b(expired|caducad[ao]|invalid|inactiv[ao]|suspendid[ao]|bloquead[ao])\b/i.test(n) && n.length < 96) {
-    return true;
-  }
-  return false;
-}
-
 /**
- * Solo avisa cuando la lista parece un único canal-falso de error del panel.
- * Antes rechazaba listas enteras si UN canal tenía "Expirado" en el nombre.
+ * Varios paneles no contestan con un error HTTP cuando la cuenta no vale:
+ * devuelven una lista perfectamente formada con un único canal falso cuyo
+ * nombre es el mensaje de error y cuya URL es inservible. Sin detectarlo, el
+ * player pinta ese canal como si fuera real y desde fuera parece que la lista
+ * no ha cargado, sin explicar el motivo.
  */
 function detectProviderListError(content) {
-  const entries = extractM3UEntries(content);
-  if (!entries.length) return "";
-  const valid = entries.filter((e) => isStreamUrl(e.url) && !isProviderErrorChannel(e.name, e.url));
-  if (valid.length > 0) return "";
-  const err = entries.find((e) => isProviderErrorChannel(e.name, e.url));
-  if (err) return err.name.replace(/^error\s*:\s*/i, "").trim();
-  if (entries.length <= 2) return (entries[0].name || "Lista vacía del proveedor").trim();
+  const m = content.match(/#EXTINF[^,\n]*,\s*(?:Error\s*:\s*)?([^\n\r]*(?:invalid|inactiv|expir|caducad|bloquea|suspend|no\s*activ)[^\n\r]*)/i);
+  if (m) return m[1].trim();
+  if (/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i.test(content)) {
+    return content.match(/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i)[1].trim();
+  }
   return "";
 }
 
@@ -2085,18 +2044,18 @@ async function loadM3UFromXtream() {
   if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
     throw new Error("No se pudo descargar la lista M3U");
   }
+  const providerError = detectProviderListError(trimmed);
+  if (providerError) {
+    throw new Error("El proveedor responde: " + providerError);
+  }
   if (!applyListOrKeep(m3uContent)) {
-    const providerError = detectProviderListError(trimmed);
-    throw new Error(providerError ? "El proveedor responde: " + providerError : "La lista no contiene canales");
+    throw new Error("La lista no contiene canales");
   }
   await writeListCache(currentUser, m3uContent);
 }
 
 function isStreamUrl(line) {
-  if (/^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line)) return true;
-  if (/^\/\/[a-z0-9.-]+\//i.test(line)) return true;
-  // Algunos paneles devuelven rutas relativas /live/user/pass/id.ts
-  return /^\/(?:live|movie|series|play|stream|timeshift)\/[^/]+\/[^/]+\/\d+/i.test(line);
+  return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line);
 }
 
 function parseM3U(content, listMeta) {
@@ -2149,18 +2108,7 @@ function parseM3U(content, listMeta) {
     if (line.charAt(0) === "#") continue;
 
     if (currentChannel && isStreamUrl(line)) {
-      if (isProviderErrorChannel(currentChannel.name, line)) {
-        skippedNoUrl++;
-        currentChannel = null;
-        continue;
-      }
-      let url = line;
-      if (/^\//.test(url) && currentServer) {
-        try {
-          url = new URL(url, currentServer).href;
-        } catch (e) {}
-      }
-      currentChannel.url = url;
+      currentChannel.url = line;
       channels.push(currentChannel);
       if (!categories[currentChannel.category]) categories[currentChannel.category] = [];
       categories[currentChannel.category].push(currentChannel);
@@ -2749,7 +2697,13 @@ function selectCategory(categoryName, opts) {
 
   renderChannels(channelsForCategory(categoryName));
   if (channelColumnTitle) {
-    channelColumnTitle.textContent = displayCategoryName(categoryName);
+    const catLabel = displayCategoryName(categoryName);
+    if (activeListId === ALL_LISTS_ID) {
+      channelColumnTitle.textContent = catLabel + " · Todas las listas";
+    } else {
+      const entry = savedLists.find((l) => l.id === activeListId);
+      channelColumnTitle.textContent = entry ? catLabel + " · " + entry.name : catLabel;
+    }
   }
   if (currentFocus && !(opts && opts.keepFocus)) currentFocus.col = 0;
 }
@@ -2765,9 +2719,7 @@ function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
   fallback.textContent = channelInitials(displayName(channel.name));
-  // En TV no se cargan logos remotos: miles de HTTP al recorrer la lista
-  // saturan el WebView del Streamer.
-  if (!channel.logo || isTvLayout()) return fallback;
+  if (!channel.logo) return fallback;
 
   const img = document.createElement("img");
   img.className = "channel-logo";
@@ -2787,35 +2739,16 @@ function buildChannelThumb(channel) {
 
 function buildChannelRow(channel) {
   const channelDiv = document.createElement("div");
-  channelDiv.className = "channel-item";
+  channelDiv.className = "channel-item channel-card";
   channelDiv.dataset.id = channel.id;
+
+  const header = document.createElement("div");
+  header.className = "channel-card-header";
 
   const chno = document.createElement("span");
   chno.className = "channel-chno";
   chno.textContent = channel.chno || "";
-  channelDiv.appendChild(chno);
-
-  channelDiv.appendChild(buildChannelThumb(channel));
-
-  const info = document.createElement("div");
-  info.className = "channel-info";
-  const nameEl = document.createElement("div");
-  nameEl.className = "channel-name";
-  nameEl.textContent = displayName(channel.name);
-  nameEl.title = channel.name;
-  info.appendChild(nameEl);
-
-  const epgEl = document.createElement("div");
-  epgEl.className = "channel-epg";
-  if (searchQuery && channel.category) {
-    epgEl.textContent = displayCategoryName(channel.category);
-  } else if (hasEPG()) {
-    epgEl.textContent = channelEpgLabel(channel);
-  }
-  epgEl.hidden = !epgEl.textContent;
-  if (epgEl.textContent) info.appendChild(epgEl);
-
-  channelDiv.appendChild(info);
+  header.appendChild(chno);
 
   const favBtn = document.createElement("button");
   favBtn.type = "button";
@@ -2829,11 +2762,61 @@ function buildChannelRow(channel) {
     e.stopPropagation();
     toggleFavorite(channel);
   });
-  channelDiv.appendChild(favBtn);
+  header.appendChild(favBtn);
+  channelDiv.appendChild(header);
+
+  const logoWrap = document.createElement("div");
+  logoWrap.className = "channel-card-logo";
+  logoWrap.appendChild(buildChannelThumb(channel));
+  channelDiv.appendChild(logoWrap);
+
+  const info = document.createElement("div");
+  info.className = "channel-info";
+  const nameEl = document.createElement("div");
+  nameEl.className = "channel-name";
+  nameEl.textContent = displayName(channel.name);
+  nameEl.title = channel.name;
+  info.appendChild(nameEl);
+
+  const quality = channel.qualityHint || extractQualityHint(channel.name);
+  const meta = document.createElement("div");
+  meta.className = "channel-meta";
+  if (quality) {
+    const qEl = document.createElement("span");
+    qEl.className = "channel-quality";
+    qEl.textContent = quality;
+    meta.appendChild(qEl);
+  }
+  if (channel.listName) {
+    const srcEl = document.createElement("span");
+    srcEl.className = "channel-source";
+    srcEl.textContent = channel.listName;
+    srcEl.title = "Lista: " + channel.listName;
+    meta.appendChild(srcEl);
+  }
+  const statsEl = document.createElement("span");
+  statsEl.className = "channel-stats";
+  statsEl.hidden = true;
+  meta.appendChild(statsEl);
+  info.appendChild(meta);
+  meta.hidden = !quality && !channel.listName && statsEl.hidden;
+
+  const epgEl = document.createElement("div");
+  epgEl.className = "channel-epg";
+  if (searchQuery && channel.category) {
+    epgEl.textContent = displayCategoryName(channel.category);
+  } else if (hasEPG()) {
+    epgEl.textContent = channelEpgLabel(channel);
+  }
+  epgEl.hidden = !epgEl.textContent;
+  if (epgEl.textContent) info.appendChild(epgEl);
+
+  channelDiv.appendChild(info);
 
   channelDiv.addEventListener("click", () => {
     if (isTvLayout()) {
-      selectChannel(channel);
+      if (currentlyPlayingId === channel.id) enterNativeFullscreen();
+      else selectChannel(channel);
       return;
     }
     if (currentlyPlayingId === channel.id) {
@@ -2845,16 +2828,30 @@ function buildChannelRow(channel) {
   if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
   else if (peekLastChannelId() === channel.id) channelDiv.classList.add("last");
 
+  if (currentlyPlayingId === channel.id) {
+    const live = formatChannelLiveStats();
+    if (live) {
+      statsEl.textContent = live;
+      statsEl.hidden = false;
+      meta.hidden = false;
+    }
+  }
+
   return channelDiv;
 }
 
 function channelGridCols() {
+  if (document.body.classList.contains("is-tv")) return 1;
+  const w = channelsContainer ? channelsContainer.clientWidth : 320;
+  if (w >= 560) return 3;
+  if (w >= 360) return 2;
   return 1;
 }
 
 function channelCardHeight() {
-  if (document.body.classList.contains("ui-large")) return 72;
-  return 64;
+  if (document.body.classList.contains("is-tv")) return 108;
+  if (document.body.classList.contains("ui-large")) return 156;
+  return 140;
 }
 
 function channelGridGap() {
@@ -2887,50 +2884,44 @@ function renderChannels(channels) {
 
 function paintVirtualWindow(force) {
   if (!channelsContainer) return;
-  try {
-    const cols = channelGridCols();
-    const rowH = channelGridRowHeight();
-    const total = virtualList.length;
-    const totalRows = Math.ceil(total / cols) || 0;
-    const view = Math.max(channelsContainer.clientHeight || 0, 180);
-    const startRow = Math.max(0, Math.floor(channelsContainer.scrollTop / rowH) - 3);
-    const endRow = Math.min(totalRows, Math.ceil((channelsContainer.scrollTop + view) / rowH) + 3);
-    const start = startRow * cols;
-    const end = Math.min(total, endRow * cols);
-    if (!force && startRow === virtualRange.start && endRow === virtualRange.end && cols === virtualRange.cols) {
-      markTvCursor();
-      return;
-    }
-    virtualRange = { start: startRow, end: endRow, cols: cols };
-
-    const frag = document.createDocumentFragment();
-    const head = document.createElement("div");
-    head.className = "channels-spacer";
-    head.style.height = startRow * rowH + "px";
-    frag.appendChild(head);
-    if (!total && currentCategory === FAV_NAME) {
-      const empty = document.createElement("p");
-      empty.className = "tv-fav-empty";
-      empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
-      frag.appendChild(empty);
-    }
-    const grid = document.createElement("div");
-    grid.className = "channels-grid";
-    grid.style.setProperty("--channel-cols", String(cols));
-    for (let i = start; i < end; i++) grid.appendChild(buildChannelRow(virtualList[i]));
-    frag.appendChild(grid);
-    const tail = document.createElement("div");
-    tail.className = "channels-spacer";
-    tail.style.height = Math.max(0, (totalRows - endRow) * rowH) + "px";
-    frag.appendChild(tail);
-    channelsContainer.innerHTML = "";
-    channelsContainer.appendChild(frag);
+  const cols = channelGridCols();
+  const rowH = channelGridRowHeight();
+  const total = virtualList.length;
+  const totalRows = Math.ceil(total / cols) || 0;
+  const view = Math.max(channelsContainer.clientHeight || 0, 180);
+  const startRow = Math.max(0, Math.floor(channelsContainer.scrollTop / rowH) - 3);
+  const endRow = Math.min(totalRows, Math.ceil((channelsContainer.scrollTop + view) / rowH) + 3);
+  const start = startRow * cols;
+  const end = Math.min(total, endRow * cols);
+  if (!force && startRow === virtualRange.start && endRow === virtualRange.end && cols === virtualRange.cols) {
     markTvCursor();
-  } catch (e) {
-    try {
-      logPlayback("lista", String((e && e.message) || e));
-    } catch (err) {}
+    return;
   }
+  virtualRange = { start: startRow, end: endRow, cols: cols };
+
+  const frag = document.createDocumentFragment();
+  const head = document.createElement("div");
+  head.className = "channels-spacer";
+  head.style.height = startRow * rowH + "px";
+  frag.appendChild(head);
+  if (!total && currentCategory === FAV_NAME) {
+    const empty = document.createElement("p");
+    empty.className = "tv-fav-empty";
+    empty.textContent = "Mantén OK sobre un canal para marcarlo como favorito.";
+    frag.appendChild(empty);
+  }
+  const grid = document.createElement("div");
+  grid.className = "channels-grid";
+  grid.style.setProperty("--channel-cols", String(cols));
+  for (let i = start; i < end; i++) grid.appendChild(buildChannelRow(virtualList[i]));
+  frag.appendChild(grid);
+  const tail = document.createElement("div");
+  tail.className = "channels-spacer";
+  tail.style.height = Math.max(0, (totalRows - endRow) * rowH) + "px";
+  frag.appendChild(tail);
+  channelsContainer.innerHTML = "";
+  channelsContainer.appendChild(frag);
+  markTvCursor();
 }
 
 function runChannelSearch(query) {
@@ -3354,11 +3345,6 @@ function enterNativeFullscreen() {
 }
 
 function exitNativeFullscreen() {
-  if (isTvLayout()) {
-    nativeFullscreen = false;
-    nativePlaybackActive = false;
-    return false;
-  }
   if (nativePlayerPlugin() && nativePlaybackActive && nativeFullscreen) {
     const plugin = nativePlayerPlugin();
     nativeFullscreen = false;
@@ -3397,7 +3383,7 @@ async function startNativePlayback(channel, opts) {
   }
   if (gen !== playGen) return true;
 
-  const fullscreen = true;
+  const fullscreen = !isTvLayout() || !!(opts && opts.fullscreen);
   nativeFullscreen = fullscreen;
   try {
     const ret = await plugin.play(
@@ -4373,10 +4359,6 @@ function doLogout() {
   liveSession = false;
   remoteLoginBusy = false;
   loginCancelled = false;
-  lastRemoteAssignKey = "";
-  lastRemoteFailAt = 0;
-  remoteFailCount = 0;
-  lastLoginError = "";
   try {
     sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
   } catch (e) {}
@@ -4435,12 +4417,16 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825i");
+  url.searchParams.set("v", "20260819c");
   window.location.replace(url.toString());
 }
 
 async function doRefresh() {
   if (!currentUser) return;
+  if (currentUser.isMerged || activeListId === ALL_LISTS_ID) {
+    showToast("Elige una lista concreta para actualizarla");
+    return;
+  }
   const ok = await performLoginAction(
     currentUser.server,
     currentUser.username,
@@ -4592,7 +4578,8 @@ function toggleTvFavorite() {
 function activateTvChannel() {
   const ch = tvFocusedChannel();
   if (!ch) return;
-  selectChannel(ch);
+  if (currentlyPlayingId === ch.id) enterNativeFullscreen();
+  else selectChannel(ch);
 }
 
 let tvOkHoldTimer = null;
@@ -4790,7 +4777,9 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "ArrowDown") {
     if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) {
       currentFocus.row++;
-      // En TV solo se mueve el cursor; OK carga la categoría (menos trabajo en el WebView).
+      if (isTvLayout() && categories[currentFocus.row]) {
+        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
+      }
     } else if (currentFocus.col === 1) {
       if (isTvLayout()) {
         if (currentFocus.row < virtualList.length - 1) {
@@ -4802,6 +4791,9 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "ArrowUp") {
     if (currentFocus.col === 0 && currentFocus.row > 0) {
       currentFocus.row--;
+      if (isTvLayout() && categories[currentFocus.row]) {
+        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
+      }
     } else if (currentFocus.col === 0 && currentFocus.row <= 0 && isTvLayout()) {
       focusTvHeader(0);
       updateCursorVisuals();
@@ -4818,12 +4810,8 @@ document.addEventListener("keydown", (e) => {
     }
   } else if (isConfirmKey(e)) {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
-      const catName = categories[currentFocus.row].dataset.category;
-      if (isTvLayout()) {
-        selectCategory(catName, { keepFocus: true });
-        enterTvChannelsColumn();
-      } else {
-        selectCategory(catName);
+      if (isTvLayout()) enterTvChannelsColumn();
+      else {
         currentFocus.col = 1;
         currentFocus.row = 0;
       }
@@ -4846,48 +4834,44 @@ document.addEventListener("keyup", (e) => {
 });
 
 function updateCursorVisuals() {
-  try {
-    document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
-    getTvHeaderActions().forEach((el) => el.classList.remove("cursor"));
-    let target = null;
-    if (currentFocus.col === TV_HEADER_COL) {
-      const actions = getTvHeaderActions();
-      target = actions[currentFocus.row] || actions[0];
-      if (target) {
-        target.classList.add("cursor");
-        if (document.activeElement !== target) {
-          try {
-            target.focus({ preventScroll: true });
-          } catch (e) {
-            target.focus();
-          }
-        }
-      }
-      if (video) video.style.outline = "none";
-      return;
-    }
-    if (currentFocus.col === 0) {
-      target = document.querySelectorAll(".category-btn")[currentFocus.row];
-    } else if (currentFocus.col === 1) {
-      const ch = virtualList[currentFocus.row];
-      if (ch && channelsContainer) {
-        target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
-      }
-      if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
-    }
-    if (video) video.style.outline = "none";
-    const headerActive = document.activeElement;
-    if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
+  document.querySelectorAll(".category-btn, .channel-item").forEach((el) => el.classList.remove("cursor"));
+  getTvHeaderActions().forEach((el) => el.classList.remove("cursor"));
+  let target = null;
+  if (currentFocus.col === TV_HEADER_COL) {
+    const actions = getTvHeaderActions();
+    target = actions[currentFocus.row] || actions[0];
     if (target) {
       target.classList.add("cursor");
-      try {
-        target.scrollIntoView({ block: "nearest", behavior: "auto" });
-      } catch (e) {}
-      if (currentFocus.col === 0 && !isTvLayout()) {
-        selectCategory(target.dataset.category);
+      if (document.activeElement !== target) {
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          target.focus();
+        }
       }
     }
-  } catch (e) {}
+    if (video) video.style.outline = "none";
+    return;
+  }
+  if (currentFocus.col === 0) {
+    target = document.querySelectorAll(".category-btn")[currentFocus.row];
+  } else if (currentFocus.col === 1) {
+    const ch = virtualList[currentFocus.row];
+    if (ch && channelsContainer) {
+      target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+    }
+    if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
+  }
+  if (video) video.style.outline = "none";
+  const headerActive = document.activeElement;
+  if (headerActive && getTvHeaderActions().indexOf(headerActive) >= 0) headerActive.blur();
+  if (target) {
+    target.classList.add("cursor");
+    target.scrollIntoView({ block: "nearest", behavior: "auto" });
+    if (currentFocus.col === 0 && !isTvLayout()) {
+      selectCategory(target.dataset.category);
+    }
+  }
 }
 
 const debugProbeBtn = document.getElementById("debugProbeBtn");
