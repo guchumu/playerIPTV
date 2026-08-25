@@ -186,9 +186,11 @@ async function refreshNativeTvFlag() {
       isTv: !!info.isTv,
       hasExo: true,
       exo: true,
+      hasVlc: true,
     });
     detectDevice();
     applyUiMode();
+    initNativeEnginePicker();
   } catch (e) {}
 }
 
@@ -446,6 +448,7 @@ function canAutoLoginFromCache() {
 const VAULT_KEY = "streambox_vk";
 const SESSION_KEY = "xtream_user";
 const UI_KEY = "streambox_ui";
+const ENGINE_KEY = "streambox_native_engine";
 const signCache = new Map();
 let playGen = 0;
 let virtualList = [];
@@ -1542,6 +1545,7 @@ window.addEventListener("DOMContentLoaded", () => {
   detectDevice();
   refreshNativeTvFlag();
   applyUiMode();
+  initNativeEnginePicker();
   try {
     const session = localStorage.getItem(SESSION_KEY);
     if (session && !localStorage.getItem(LAST_LIST_KEY)) localStorage.setItem(LAST_LIST_KEY, session);
@@ -3217,11 +3221,74 @@ function playChannel(channel) {
 
 function nativePlayerEngine() {
   try {
+    const pref = getPreferredNativeEngine();
+    if (pref) return pref;
     const n = window.StreamBoxNative;
     if (n && n.engine) return String(n.engine);
     if (isTvLayout()) return "vlc";
   } catch (e) {}
   return "exo";
+}
+
+function getPreferredNativeEngine() {
+  try {
+    const v = localStorage.getItem(ENGINE_KEY);
+    if (v === "exo" || v === "vlc") return v;
+  } catch (e) {}
+  return "";
+}
+
+function setPreferredNativeEngine(engine, opts) {
+  const e = engine === "exo" ? "exo" : "vlc";
+  try {
+    localStorage.setItem(ENGINE_KEY, e);
+  } catch (err) {}
+  try {
+    window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, { engine: e });
+  } catch (err) {}
+  syncEngineSelects(e);
+  if (!(opts && opts.silent)) {
+    showToast(e === "vlc" ? "Reproductor: LibVLC" : "Reproductor: ExoPlayer");
+  }
+  return e;
+}
+
+function syncEngineSelects(engine) {
+  const e = engine || nativePlayerEngine();
+  ["engineSelect", "loginEngineSelect"].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (sel) sel.value = e === "exo" ? "exo" : "vlc";
+  });
+}
+
+function initNativeEnginePicker() {
+  const native = isNativeApp() || nativeTvFlag() === true || document.documentElement.classList.contains("is-native-tv");
+  const loginWrap = document.getElementById("loginEngineControl");
+  const headerWrap = document.getElementById("engineControl");
+  if (loginWrap) loginWrap.hidden = !native;
+  if (headerWrap) headerWrap.hidden = !native;
+  if (!native) return;
+
+  if (!getPreferredNativeEngine()) {
+    setPreferredNativeEngine(isTvLayout() || nativeTvFlag() === true ? "vlc" : "exo", { silent: true });
+  } else {
+    syncEngineSelects(getPreferredNativeEngine());
+  }
+
+  const onChange = (ev) => {
+    const val = ev && ev.target ? ev.target.value : "vlc";
+    setPreferredNativeEngine(val);
+  };
+  const loginSel = document.getElementById("loginEngineSelect");
+  const headerSel = document.getElementById("engineSelect");
+  if (loginSel && !loginSel.dataset.bound) {
+    loginSel.dataset.bound = "1";
+    loginSel.addEventListener("change", onChange);
+  }
+  if (headerSel && !headerSel.dataset.bound) {
+    headerSel.dataset.bound = "1";
+    headerSel.addEventListener("change", onChange);
+  }
 }
 
 function nativePlayerPlugin() {
@@ -3292,7 +3359,7 @@ function enterNativeFullscreen() {
     const plugin = nativePlayerPlugin();
     nativeFullscreen = true;
     if (typeof plugin.setFullscreen === "function") {
-      plugin.setFullscreen({ fullscreen: true }).catch(() => {});
+      plugin.setFullscreen(Object.assign({ fullscreen: true, engine: nativePlayerEngine() }, nativeEmbedRect())).catch(() => {});
       return;
     }
     if (currentChannelRef) startNativePlayback(currentChannelRef, { fullscreen: true });
@@ -3345,7 +3412,13 @@ async function startNativePlayback(channel, opts) {
   try {
     const ret = await plugin.play(
       Object.assign(
-        { url: playUrl, title: displayName(channel.name), mime: mime, fullscreen: fullscreen },
+        {
+          url: playUrl,
+          title: displayName(channel.name),
+          mime: mime,
+          fullscreen: fullscreen,
+          engine: nativePlayerEngine(),
+        },
         nativeEmbedRect()
       )
     );
@@ -4374,7 +4447,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824c");
+  url.searchParams.set("v", "20260824d");
   window.location.replace(url.toString());
 }
 

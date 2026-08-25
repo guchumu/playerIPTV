@@ -52,6 +52,15 @@ public class NativePlayerPlugin extends Plugin {
     private String lastUrl = "";
     private String lastTitle = "";
     private String lastMime = "";
+    private String lastEngine = "exo";
+
+    private static String normalizarEngine(String raw, boolean tvDefaultVlc) {
+        if (raw == null || raw.trim().isEmpty()) return tvDefaultVlc ? "vlc" : "exo";
+        String e = raw.trim().toLowerCase();
+        if ("exo".equals(e) || "exoplayer".equals(e) || "media3".equals(e)) return "exo";
+        if ("vlc".equals(e) || "libvlc".equals(e)) return "vlc";
+        return tvDefaultVlc ? "vlc" : "exo";
+    }
 
     @PluginMethod
     public void play(PluginCall call) {
@@ -68,23 +77,24 @@ public class NativePlayerPlugin extends Plugin {
             call.reject("Sin actividad");
             return;
         }
+        boolean tv = StreamBoxPlugin.esTelevisor(act);
+        lastEngine = normalizarEngine(call.getString("engine", lastEngine), tv);
         act.runOnUiThread(() -> {
             try {
                 rememberBox(call);
                 lastUrl = url;
                 lastTitle = title == null ? "" : title;
                 lastMime = mime == null ? "" : mime;
-                if (StreamBoxPlugin.esTelevisor(act)) {
-                    useVlc = true;
+                useVlc = "vlc".equals(lastEngine);
+                if (tv || useVlc) {
                     soltar();
-                    lanzarActivity(url, lastTitle, lastMime);
+                    lanzarActivity(url, lastTitle, lastMime, lastEngine);
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
                 }
-                useVlc = false;
                 if (!ensureOverlay()) {
-                    lanzarActivity(url, lastTitle, lastMime);
+                    lanzarActivity(url, lastTitle, lastMime, "exo");
                     call.resolve(ok(true, wantFs));
                     return;
                 }
@@ -94,7 +104,7 @@ public class NativePlayerPlugin extends Plugin {
                 call.resolve(ok(true, wantFs));
             } catch (Throwable t) {
                 try {
-                    lanzarActivity(url, title, mime);
+                    lanzarActivity(url, title, mime, lastEngine);
                     call.resolve(ok(true, wantFs));
                 } catch (Throwable ignored) {
                     String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
@@ -114,15 +124,20 @@ public class NativePlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             rememberBox(call);
-            if (StreamBoxPlugin.esTelevisor(act)) {
+            if (StreamBoxPlugin.esTelevisor(act) || useVlc || "vlc".equals(lastEngine)) {
                 if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
-                    useVlc = true;
-                    lanzarActivity(lastUrl, lastTitle, lastMime);
+                    lastEngine = normalizarEngine(call.getString("engine", lastEngine), true);
+                    useVlc = "vlc".equals(lastEngine);
+                    lanzarActivity(lastUrl, lastTitle, lastMime, lastEngine);
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
                 }
-                if (!wantFs) stopVlcProcess();
+                if (!wantFs) {
+                    stopVlcProcess();
+                    stopExoProcess();
+                    PlayerActivity.stopNow();
+                }
                 call.resolve(ok(true, false));
                 return;
             }
@@ -155,6 +170,7 @@ public class NativePlayerPlugin extends Plugin {
         Activity act = getActivity();
         PlayerActivity.stopNow();
         stopVlcProcess();
+        stopExoProcess();
         if (act == null) {
             call.resolve();
             return;
@@ -170,8 +186,10 @@ public class NativePlayerPlugin extends Plugin {
     public void getEngine(PluginCall call) {
         JSObject ret = new JSObject();
         boolean tv = StreamBoxPlugin.esTelevisor(getContext());
-        ret.put("engine", tv ? "vlc" : "exo");
+        ret.put("engine", lastEngine != null && !lastEngine.isEmpty() ? lastEngine : (tv ? "vlc" : "exo"));
         ret.put("isTv", tv);
+        ret.put("hasExo", true);
+        ret.put("hasVlc", true);
         call.resolve(ret);
     }
 
@@ -180,7 +198,7 @@ public class NativePlayerPlugin extends Plugin {
         ret.put("ok", true);
         ret.put("playing", playing);
         ret.put("fullscreen", fs);
-        ret.put("engine", useVlc ? "vlc" : "exo");
+        ret.put("engine", useVlc || "vlc".equals(lastEngine) ? "vlc" : "exo");
         return ret;
     }
 
@@ -188,7 +206,7 @@ public class NativePlayerPlugin extends Plugin {
         JSObject ev = new JSObject();
         ev.put("stopped", stopped);
         ev.put("fullscreen", fs);
-        ev.put("engine", useVlc ? "vlc" : "exo");
+        ev.put("engine", useVlc || "vlc".equals(lastEngine) ? "vlc" : "exo");
         notifyListeners("nativePlayer", ev);
     }
 
@@ -366,11 +384,22 @@ public class NativePlayerPlugin extends Plugin {
         } catch (Throwable ignored) {}
     }
 
-    private void lanzarActivity(String url, String title, String mime) {
+    private void stopExoProcess() {
+        android.content.Context ctx = getContext();
+        if (ctx == null) return;
+        try {
+            Intent i = new Intent(ctx.getPackageName() + ".STOP_EXO");
+            i.setPackage(ctx.getPackageName());
+            ctx.sendBroadcast(i);
+        } catch (Throwable ignored) {}
+    }
+
+    private void lanzarActivity(String url, String title, String mime, String engine) {
         Activity act = getActivity();
-        boolean tv = act != null && StreamBoxPlugin.esTelevisor(act);
-        if (tv) {
-            android.content.Context ctx = getContext();
+        android.content.Context ctx = getContext();
+        if (ctx == null) return;
+        boolean wantVlc = "vlc".equals(normalizarEngine(engine, StreamBoxPlugin.esTelevisor(ctx)));
+        if (wantVlc) {
             Intent intent = new Intent();
             intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
             intent.putExtra("url", url);
@@ -383,15 +412,23 @@ public class NativePlayerPlugin extends Plugin {
             }
             return;
         }
-        if (PlayerActivity.isRunning()) {
+        // Exo en proceso aparte en TV; en móvil se puede reutilizar la Activity viva.
+        boolean tv = StreamBoxPlugin.esTelevisor(ctx);
+        if (!tv && PlayerActivity.isRunning()) {
             PlayerActivity.playNow(url, title, mime);
             return;
         }
-        Intent intent = new Intent(getContext(), PlayerActivity.class);
+        Intent intent = new Intent();
+        intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".PlayerActivity");
         intent.putExtra(PlayerActivity.EXTRA_URL, url);
         intent.putExtra(PlayerActivity.EXTRA_TITLE, title == null ? "" : title);
         intent.putExtra(PlayerActivity.EXTRA_MIME, mime == null ? "" : mime);
-        getActivity().startActivity(intent);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (act != null) act.startActivity(intent);
+        else {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(intent);
+        }
     }
 
     private void soltar() {

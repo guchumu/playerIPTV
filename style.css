@@ -120,12 +120,37 @@ html.is-native-tv .splash-hint-tv { display: inline; }
 }
 .login-container h1 { font-size: 1.8rem; margin-bottom: 0.35rem; text-align: center; }
 .login-tv-hint { display: none; }
-.build-tag {
-  text-align: center;
-  font-size: 0.7rem;
-  color: #64748b;
-  margin-bottom: 1.2rem;
-  font-family: monospace;
+.engine-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+.engine-control select {
+  background: #1e293b;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  min-height: 32px;
+}
+.login-engine {
+  display: flex;
+  margin: 0.35rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+.login-engine[hidden],
+.engine-control[hidden] { display: none !important; }
+body.is-tv .engine-control,
+html.is-native-tv .engine-control {
+  font-size: 0.78rem;
+}
+body.is-tv .engine-control select,
+html.is-native-tv .engine-control select {
+  min-height: 40px;
+  font-size: 0.9rem;
 }
 
 .install-btn {
@@ -1253,6 +1278,10 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
   display: none !important;
 }
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-engine {
+  display: flex !important;
+  margin: 0.25rem 0 0.4rem;
+}
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box {
   padding: 0.7rem 0.85rem;
   flex: 0 1 auto;
@@ -1334,6 +1363,9 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   html:not(.login-portrait) #loginScreen .install-btn,
   html:not(.login-portrait) #loginScreen .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
     display: none !important;
+  }
+  html:not(.login-portrait) #loginScreen .login-engine {
+    display: flex !important;
   }
   html:not(.login-portrait) #loginScreen .upload-qr {
     width: min(34vh, 200px);

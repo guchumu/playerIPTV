@@ -1,6 +1,10 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -27,8 +31,8 @@ import java.lang.ref.WeakReference;
 /**
  * Reproductor a pantalla completa con Media3/ExoPlayer.
  *
- * Fire Stick y el WebView de Amazon no decodifican bien MPEG-TS con mse;
- * aquí el hardware sí lo hace. El mando: OK pausa/reanuda, Atrás cierra.
+ * En TV corre en el proceso :exo para no cargar Media3 junto al WebView
+ * (en Google Streamer eso abortaba el menú).
  */
 @UnstableApi
 public class PlayerActivity extends Activity {
@@ -43,6 +47,15 @@ public class PlayerActivity extends Activity {
     private ExoPlayer player;
     private PlayerView playerView;
     private TextView titleView;
+    private String stopAction;
+    private boolean receiverOn;
+
+    private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            finish();
+        }
+    };
 
     public static boolean isRunning() {
         return viva != null && viva.get() != null;
@@ -67,6 +80,17 @@ public class PlayerActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_player);
         ocultarBarras();
+
+        stopAction = getPackageName() + ".STOP_EXO";
+        try {
+            IntentFilter filter = new IntentFilter(stopAction);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(stopReceiver, filter);
+            }
+            receiverOn = true;
+        } catch (Throwable ignored) {}
 
         playerView = findViewById(R.id.player_view);
         titleView = findViewById(R.id.player_title);
@@ -109,9 +133,13 @@ public class PlayerActivity extends Activity {
     }
 
     @Override
-    protected void onNewIntent(android.content.Intent intent) {
+    protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent != null && stopAction != null && stopAction.equals(intent.getAction())) {
+            finish();
+            return;
+        }
         if (intent != null) {
             playUrl(
                 intent.getStringExtra(EXTRA_URL),
@@ -209,12 +237,23 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (receiverOn) {
+            try {
+                unregisterReceiver(stopReceiver);
+            } catch (Throwable ignored) {}
+            receiverOn = false;
+        }
         if (viva != null && viva.get() == this) viva = null;
         if (playerView != null) playerView.setPlayer(null);
         if (player != null) {
             player.release();
             player = null;
         }
+        try {
+            Intent done = new Intent(getPackageName() + ".EXO_FINISHED");
+            done.setPackage(getPackageName());
+            sendBroadcast(done);
+        } catch (Throwable ignored) {}
         super.onDestroy();
     }
 }

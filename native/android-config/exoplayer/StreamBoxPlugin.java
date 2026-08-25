@@ -66,6 +66,8 @@ public class StreamBoxPlugin extends Plugin {
 
     static String scriptNativo(Context ctx, boolean isTv) {
         String engine = isTv ? "vlc" : "exo";
+        // Preferencia de la web (localStorage vía StreamBoxNative.engine ya inyectado).
+        // El motor definitivo lo decide cada play() con el parámetro engine.
         String ver = versionName(ctx).replace("'", "").replace("\\", "");
         return "(function(){try{"
             + "window.StreamBoxNative=Object.assign({},window.StreamBoxNative||{},{isTv:"

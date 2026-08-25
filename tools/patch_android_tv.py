@@ -162,9 +162,12 @@ def parchear_manifest(ruta):
             app.set(f"{A}{clave}", valor)
             cambios.append(f"application {clave}")
 
-    # 4. Activities de ExoPlayer (móvil) y LibVLC (TV).
-    # VLC va en :vlc para que un aborto nativo no mate el menú del WebView.
-    asegurar_actividad(app, "PlayerActivity", cambios)
+    # 4. Activities de ExoPlayer y LibVLC en procesos aparte.
+    # Así un aborto nativo no mata el menú del WebView en TV.
+    asegurar_actividad(app, "PlayerActivity", cambios, {
+        f"{A}process": ":exo",
+        f"{A}excludeFromRecents": "true",
+    })
     asegurar_actividad(app, "VlcPlayerActivity", cambios, {
         f"{A}process": ":vlc",
         f"{A}excludeFromRecents": "true",

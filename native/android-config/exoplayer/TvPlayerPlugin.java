@@ -13,17 +13,16 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Reproductor nativo en TV: solo lanza VlcPlayerActivity en el proceso :vlc.
- *
- * No importa Media3 ni LibVLC. En Google Streamer, cargar ExoPlayer/LibVLC
- * en el mismo proceso que el WebView abortaba al mover el mando aunque no
- * se estuviera reproduciendo nada.
+ * Reproductor nativo en TV: lanza VlcPlayerActivity (:vlc) o PlayerActivity (:exo)
+ * según el motor que elija la web. No importa Media3/LibVLC en este proceso.
  */
 @CapacitorPlugin(name = "NativePlayer")
 public class TvPlayerPlugin extends Plugin {
 
     private String lastUrl = "";
     private String lastTitle = "";
+    private String lastMime = "";
+    private String lastEngine = "vlc";
     private boolean receiverOn;
 
     private final BroadcastReceiver finishedReceiver = new BroadcastReceiver() {
@@ -42,8 +41,10 @@ public class TvPlayerPlugin extends Plugin {
         if (receiverOn) return;
         Context ctx = getContext();
         if (ctx == null) return;
-        IntentFilter filter = new IntentFilter(ctx.getPackageName() + ".VLC_FINISHED");
         try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(ctx.getPackageName() + ".VLC_FINISHED");
+            filter.addAction(ctx.getPackageName() + ".EXO_FINISHED");
             if (Build.VERSION.SDK_INT >= 33) {
                 ctx.registerReceiver(finishedReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
             } else {
@@ -51,6 +52,13 @@ public class TvPlayerPlugin extends Plugin {
             }
             receiverOn = true;
         } catch (Throwable ignored) {}
+    }
+
+    private static String normalizarEngine(String raw) {
+        if (raw == null) return "vlc";
+        String e = raw.trim().toLowerCase();
+        if ("exo".equals(e) || "exoplayer".equals(e) || "media3".equals(e)) return "exo";
+        return "vlc";
     }
 
     @PluginMethod
@@ -61,8 +69,11 @@ public class TvPlayerPlugin extends Plugin {
             return;
         }
         String title = call.getString("title", "");
+        String mime = call.getString("mime", "");
         lastUrl = url;
         lastTitle = title == null ? "" : title;
+        lastMime = mime == null ? "" : mime;
+        lastEngine = normalizarEngine(call.getString("engine", lastEngine));
         Activity act = getActivity();
         if (act == null) {
             call.reject("Sin actividad");
@@ -70,7 +81,7 @@ public class TvPlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             try {
-                lanzarVlc(act, lastUrl, lastTitle);
+                lanzar(act, lastUrl, lastTitle, lastMime, lastEngine);
                 call.resolve(ok(true, true));
                 emit(false, true);
             } catch (Throwable t) {
@@ -86,13 +97,14 @@ public class TvPlayerPlugin extends Plugin {
         Activity act = getActivity();
         if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
             try {
-                lanzarVlc(act, lastUrl, lastTitle);
+                lastEngine = normalizarEngine(call.getString("engine", lastEngine));
+                lanzar(act, lastUrl, lastTitle, lastMime, lastEngine);
             } catch (Throwable ignored) {}
             call.resolve(ok(true, true));
             emit(false, true);
             return;
         }
-        if (!wantFs) stopVlc();
+        if (!wantFs) stopPlayers();
         call.resolve(ok(true, false));
     }
 
@@ -103,7 +115,7 @@ public class TvPlayerPlugin extends Plugin {
 
     @PluginMethod
     public void stop(PluginCall call) {
-        stopVlc();
+        stopPlayers();
         emit(true, false);
         call.resolve();
     }
@@ -111,8 +123,10 @@ public class TvPlayerPlugin extends Plugin {
     @PluginMethod
     public void getEngine(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("engine", "vlc");
+        ret.put("engine", lastEngine);
         ret.put("isTv", true);
+        ret.put("hasExo", true);
+        ret.put("hasVlc", true);
         call.resolve(ret);
     }
 
@@ -121,7 +135,7 @@ public class TvPlayerPlugin extends Plugin {
         ret.put("ok", true);
         ret.put("playing", playing);
         ret.put("fullscreen", fs);
-        ret.put("engine", "vlc");
+        ret.put("engine", lastEngine);
         return ret;
     }
 
@@ -129,28 +143,38 @@ public class TvPlayerPlugin extends Plugin {
         JSObject ev = new JSObject();
         ev.put("stopped", stopped);
         ev.put("fullscreen", fs);
-        ev.put("engine", "vlc");
+        ev.put("engine", lastEngine);
         notifyListeners("nativePlayer", ev);
     }
 
-    private void stopVlc() {
+    private void stopPlayers() {
         Context ctx = getContext();
         if (ctx == null) return;
         try {
-            Intent i = new Intent(ctx.getPackageName() + ".STOP_VLC");
-            i.setPackage(ctx.getPackageName());
-            ctx.sendBroadcast(i);
+            Intent vlc = new Intent(ctx.getPackageName() + ".STOP_VLC");
+            vlc.setPackage(ctx.getPackageName());
+            ctx.sendBroadcast(vlc);
+        } catch (Throwable ignored) {}
+        try {
+            Intent exo = new Intent(ctx.getPackageName() + ".STOP_EXO");
+            exo.setPackage(ctx.getPackageName());
+            ctx.sendBroadcast(exo);
         } catch (Throwable ignored) {}
     }
 
-    private void lanzarVlc(Activity act, String url, String title) {
+    private void lanzar(Activity act, String url, String title, String mime, String engine) {
         Context ctx = getContext();
         if (ctx == null) throw new IllegalStateException("Sin contexto");
+        // Cerrar el otro motor si estaba abierto.
+        stopPlayers();
         Intent intent = new Intent();
-        // setClassName evita cargar VlcPlayerActivity / LibVLC en este proceso.
-        intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
+        String cls = "exo".equals(engine) ? ".PlayerActivity" : ".VlcPlayerActivity";
+        intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + cls);
         intent.putExtra("url", url);
         intent.putExtra("title", title == null ? "" : title);
+        if ("exo".equals(engine)) {
+            intent.putExtra("mime", mime == null ? "" : mime);
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         if (act != null) {
             act.startActivity(intent);
