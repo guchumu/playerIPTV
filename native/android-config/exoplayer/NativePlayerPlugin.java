@@ -27,20 +27,14 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import org.videolan.libvlc.LibVLC;
-import org.videolan.libvlc.Media;
-import org.videolan.libvlc.MediaPlayer;
-import org.videolan.libvlc.util.VLCVideoLayout;
 
 /**
- * Reproductor nativo encima del WebView.
+ * Reproductor nativo.
  *
- * En TV (Google Streamer, Fire Stick, etc.) usa LibVLC: ExoPlayer/Media3
- * congela el vídeo en el decoder MediaTek y el audio sigue. En móvil sigue
- * ExoPlayer, que ahí va bien.
- *
- * En TV la primera reproducción va en la ventana pequeña. OK otra vez
- * (fullscreen=true) cubre toda la pantalla. Atrás vuelve a la ventana.
+ * En el teléfono: ExoPlayer encima del WebView.
+ * En TV: nunca se monta LibVLC sobre el WebView. Eso abortaba el proceso al
+ * mover el mando (misma GPU que el WebView). El canal abre VlcPlayerActivity
+ * en el proceso :vlc; si VLC peta, el menú sigue vivo.
  */
 @UnstableApi
 @CapacitorPlugin(name = "NativePlayer")
@@ -50,17 +44,14 @@ public class NativePlayerPlugin extends Plugin {
 
     private ExoPlayer exoPlayer;
     private PlayerView exoView;
-
-    private LibVLC libVLC;
-    private MediaPlayer vlcPlayer;
-    private View vlcRoot;
-    private VLCVideoLayout vlcLayout;
-
     private View overlay;
     private boolean useVlc;
     private boolean fullscreen = false;
     private int boxX, boxY, boxW, boxH;
     private OnBackPressedCallback backCallback;
+    private String lastUrl = "";
+    private String lastTitle = "";
+    private String lastMime = "";
 
     @PluginMethod
     public void play(PluginCall call) {
@@ -80,25 +71,35 @@ public class NativePlayerPlugin extends Plugin {
         act.runOnUiThread(() -> {
             try {
                 rememberBox(call);
-                useVlc = StreamBoxPlugin.esTelevisor(act);
-                if (useVlc && !ensureOverlay()) {
-                    useVlc = false;
+                lastUrl = url;
+                lastTitle = title == null ? "" : title;
+                lastMime = mime == null ? "" : mime;
+                if (StreamBoxPlugin.esTelevisor(act)) {
+                    useVlc = true;
+                    soltar();
+                    lanzarActivity(url, lastTitle, lastMime);
+                    emit(false, true);
+                    call.resolve(ok(true, true));
+                    return;
                 }
-                if (!useVlc && !ensureOverlay()) {
-                    lanzarActivity(url, title, mime);
+                useVlc = false;
+                if (!ensureOverlay()) {
+                    lanzarActivity(url, lastTitle, lastMime);
                     call.resolve(ok(true, wantFs));
                     return;
                 }
-                if (useVlc && overlay != null) {
-                    overlay.post(() -> startVlcWhenReady(call, url, mime, wantFs, 0));
-                    return;
-                }
-                playUrl(url, mime);
+                playExo(url, mime);
                 applyLayout(wantFs);
                 emit(false, wantFs);
                 call.resolve(ok(true, wantFs));
             } catch (Throwable t) {
-                fallbackExoOrActivity(call, url, title, mime, wantFs, t);
+                try {
+                    lanzarActivity(url, title, mime);
+                    call.resolve(ok(true, wantFs));
+                } catch (Throwable ignored) {
+                    String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
+                    call.reject(msg);
+                }
             }
         });
     }
@@ -113,6 +114,18 @@ public class NativePlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             rememberBox(call);
+            if (StreamBoxPlugin.esTelevisor(act)) {
+                if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
+                    useVlc = true;
+                    lanzarActivity(lastUrl, lastTitle, lastMime);
+                    emit(false, true);
+                    call.resolve(ok(true, true));
+                    return;
+                }
+                if (!wantFs) VlcPlayerActivity.stopNow(getContext());
+                call.resolve(ok(true, false));
+                return;
+            }
             if (overlay == null) {
                 call.resolve(ok(false, wantFs));
                 return;
@@ -126,7 +139,7 @@ public class NativePlayerPlugin extends Plugin {
     @PluginMethod
     public void layout(PluginCall call) {
         Activity act = getActivity();
-        if (act == null) {
+        if (act == null || StreamBoxPlugin.esTelevisor(act)) {
             call.resolve();
             return;
         }
@@ -140,16 +153,14 @@ public class NativePlayerPlugin extends Plugin {
     @PluginMethod
     public void stop(PluginCall call) {
         Activity act = getActivity();
+        PlayerActivity.stopNow();
+        VlcPlayerActivity.stopNow(getContext());
         if (act == null) {
-            PlayerActivity.stopNow();
-            VlcPlayerActivity.stopNow();
             call.resolve();
             return;
         }
         act.runOnUiThread(() -> {
             soltar();
-            PlayerActivity.stopNow();
-            VlcPlayerActivity.stopNow();
             emit(true, false);
             call.resolve();
         });
@@ -212,92 +223,9 @@ public class NativePlayerPlugin extends Plugin {
         if (act == null || web == null) return false;
         ViewGroup parent = (ViewGroup) web.getParent();
         if (parent == null) return false;
-
-        if (overlay != null) {
-            if (useVlc && vlcPlayer != null) return true;
-            if (!useVlc && exoPlayer != null) return true;
-            soltar();
-        }
-
-        if (useVlc) {
-            return ensureVlc(act, parent);
-        }
+        if (overlay != null && exoPlayer != null) return true;
+        if (overlay != null) soltar();
         return ensureExo(act, parent);
-    }
-
-    private boolean ensureVlc(Activity act, ViewGroup parent) {
-        try {
-            vlcRoot = act.getLayoutInflater().inflate(R.layout.overlay_vlc, parent, false);
-            vlcRoot.setBackgroundColor(Color.BLACK);
-            vlcRoot.setFocusable(false);
-            vlcRoot.setFocusableInTouchMode(false);
-            vlcLayout = vlcRoot.findViewById(R.id.overlay_vlc_layout);
-            if (vlcLayout == null) return false;
-
-            libVLC = new LibVLC(act, VlcOptions.base());
-            vlcPlayer = new MediaPlayer(libVLC);
-
-            overlay = vlcRoot;
-            parent.addView(overlay, new FrameLayout.LayoutParams(boxW, boxH));
-            overlay.bringToFront();
-            wireOverlayKeys();
-            wireBackCallback(act);
-            return true;
-        } catch (Throwable t) {
-            soltar();
-            return false;
-        }
-    }
-
-    private void startVlcWhenReady(PluginCall call, String url, String mime, boolean wantFs, int tries) {
-        try {
-            if (vlcPlayer == null || vlcLayout == null || overlay == null) {
-                throw new IllegalStateException("sin VLC");
-            }
-            if (!overlay.isAttachedToWindow() || overlay.getWidth() < 2 || overlay.getHeight() < 2) {
-                if (tries > 30) throw new IllegalStateException("VLC sin superficie");
-                overlay.postDelayed(() -> startVlcWhenReady(call, url, mime, wantFs, tries + 1), 32);
-                return;
-            }
-            boolean attached = vlcPlayer.getVLCVout() != null && vlcPlayer.getVLCVout().areViewsAttached();
-            if (!attached) {
-                try {
-                    vlcPlayer.attachViews(vlcLayout, null, false, false);
-                    attached = true;
-                } catch (Throwable ignored) {}
-            }
-            if (!attached) {
-                vlcPlayer.attachViews(vlcLayout, null, false, true);
-            }
-            playVlc(url);
-            applyLayout(wantFs);
-            emit(false, wantFs);
-            call.resolve(ok(true, wantFs));
-        } catch (Throwable t) {
-            fallbackExoOrActivity(call, url, "", mime, wantFs, t);
-        }
-    }
-
-    private void fallbackExoOrActivity(PluginCall call, String url, String title, String mime, boolean wantFs, Throwable t) {
-        try {
-            soltar();
-            useVlc = false;
-            Activity act = getActivity();
-            WebView web = getBridge() != null ? getBridge().getWebView() : null;
-            ViewGroup parent = web != null ? (ViewGroup) web.getParent() : null;
-            if (act != null && parent != null && ensureExo(act, parent)) {
-                playExo(url, mime);
-                applyLayout(wantFs);
-                emit(false, wantFs);
-                call.resolve(ok(true, wantFs));
-                return;
-            }
-            lanzarActivity(url, title, mime);
-            call.resolve(ok(true, wantFs));
-        } catch (Throwable ignored) {
-            String msg = t != null && t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
-            call.reject(msg);
-        }
     }
 
     private boolean ensureExo(Activity act, ViewGroup parent) {
@@ -391,10 +319,6 @@ public class NativePlayerPlugin extends Plugin {
                 exoView.setFocusable(true);
                 exoView.setFocusableInTouchMode(true);
                 exoView.requestFocus();
-            } else {
-                overlay.setFocusable(true);
-                overlay.setFocusableInTouchMode(true);
-                overlay.requestFocus();
             }
         } else {
             lp.width = boxW;
@@ -405,9 +329,6 @@ public class NativePlayerPlugin extends Plugin {
                 exoView.setUseController(false);
                 exoView.setFocusable(false);
                 exoView.clearFocus();
-            } else {
-                overlay.setFocusable(false);
-                overlay.clearFocus();
             }
             WebView web = getBridge() != null ? getBridge().getWebView() : null;
             if (web != null) web.requestFocus();
@@ -415,45 +336,7 @@ public class NativePlayerPlugin extends Plugin {
         overlay.setLayoutParams(lp);
         overlay.bringToFront();
         overlay.setVisibility(View.VISIBLE);
-        if (vlcPlayer != null) {
-            overlay.post(() -> {
-                try {
-                    if (vlcPlayer != null) vlcPlayer.updateVideoSurfaces();
-                } catch (Exception ignored) {}
-            });
-        }
         if (backCallback != null) backCallback.setEnabled(fs);
-    }
-
-    private void playUrl(String url, String mime) {
-        if (url == null) return;
-        if (useVlc) {
-            playVlc(url);
-            return;
-        }
-        playExo(url, mime);
-    }
-
-    private void playVlc(String url) {
-        if (vlcPlayer == null || libVLC == null) return;
-        Media media = new Media(libVLC, Uri.parse(url));
-        try {
-            media.setHWDecoderEnabled(true, false);
-            media.addOption(":network-caching=2000");
-            media.addOption(":live-caching=2000");
-            media.addOption(":http-user-agent=" + UA);
-            vlcPlayer.setMedia(media);
-            vlcPlayer.play();
-        } finally {
-            media.release();
-        }
-        if (overlay != null) {
-            overlay.post(() -> {
-                try {
-                    if (vlcPlayer != null) vlcPlayer.updateVideoSurfaces();
-                } catch (Exception ignored) {}
-            });
-        }
     }
 
     private void playExo(String url, String mime) {
@@ -477,14 +360,11 @@ public class NativePlayerPlugin extends Plugin {
         Activity act = getActivity();
         boolean tv = act != null && StreamBoxPlugin.esTelevisor(act);
         if (tv) {
-            if (VlcPlayerActivity.isRunning()) {
-                VlcPlayerActivity.playNow(url, title);
-                return;
-            }
             Intent intent = new Intent(getContext(), VlcPlayerActivity.class);
             intent.putExtra(VlcPlayerActivity.EXTRA_URL, url);
             intent.putExtra(VlcPlayerActivity.EXTRA_TITLE, title == null ? "" : title);
-            getActivity().startActivity(intent);
+            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
             return;
         }
         if (PlayerActivity.isRunning()) {
@@ -512,20 +392,6 @@ public class NativePlayerPlugin extends Plugin {
         if (exoPlayer != null) {
             exoPlayer.release();
             exoPlayer = null;
-        }
-        if (vlcPlayer != null) {
-            try {
-                vlcPlayer.stop();
-                vlcPlayer.detachViews();
-            } catch (Exception ignored) {}
-            vlcPlayer.release();
-            vlcPlayer = null;
-        }
-        vlcLayout = null;
-        vlcRoot = null;
-        if (libVLC != null) {
-            libVLC.release();
-            libVLC = null;
         }
         if (backCallback != null) backCallback.setEnabled(false);
     }

@@ -2740,36 +2740,15 @@ function buildChannelThumb(channel) {
 
 function buildChannelRow(channel) {
   const channelDiv = document.createElement("div");
-  channelDiv.className = "channel-item channel-card";
+  channelDiv.className = "channel-item";
   channelDiv.dataset.id = channel.id;
-
-  const header = document.createElement("div");
-  header.className = "channel-card-header";
 
   const chno = document.createElement("span");
   chno.className = "channel-chno";
   chno.textContent = channel.chno || "";
-  header.appendChild(chno);
+  channelDiv.appendChild(chno);
 
-  const favBtn = document.createElement("button");
-  favBtn.type = "button";
-  favBtn.className = "fav-btn" + (isFavorite(channel.id) ? " is-on" : "");
-  favBtn.dataset.id = channel.id;
-  favBtn.title = "Favorito";
-  favBtn.setAttribute("aria-label", "Marcar favorito");
-  if (isTvLayout()) favBtn.tabIndex = -1;
-  favBtn.innerHTML = STAR_SVG;
-  favBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleFavorite(channel);
-  });
-  header.appendChild(favBtn);
-  channelDiv.appendChild(header);
-
-  const logoWrap = document.createElement("div");
-  logoWrap.className = "channel-card-logo";
-  logoWrap.appendChild(buildChannelThumb(channel));
-  channelDiv.appendChild(logoWrap);
+  channelDiv.appendChild(buildChannelThumb(channel));
 
   const info = document.createElement("div");
   info.className = "channel-info";
@@ -2799,8 +2778,7 @@ function buildChannelRow(channel) {
   statsEl.className = "channel-stats";
   statsEl.hidden = true;
   meta.appendChild(statsEl);
-  info.appendChild(meta);
-  meta.hidden = !quality && !channel.listName && statsEl.hidden;
+  if (quality || channel.listName) info.appendChild(meta);
 
   const epgEl = document.createElement("div");
   epgEl.className = "channel-epg";
@@ -2814,10 +2792,23 @@ function buildChannelRow(channel) {
 
   channelDiv.appendChild(info);
 
+  const favBtn = document.createElement("button");
+  favBtn.type = "button";
+  favBtn.className = "fav-btn" + (isFavorite(channel.id) ? " is-on" : "");
+  favBtn.dataset.id = channel.id;
+  favBtn.title = "Favorito";
+  favBtn.setAttribute("aria-label", "Marcar favorito");
+  if (isTvLayout()) favBtn.tabIndex = -1;
+  favBtn.innerHTML = STAR_SVG;
+  favBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(channel);
+  });
+  channelDiv.appendChild(favBtn);
+
   channelDiv.addEventListener("click", () => {
     if (isTvLayout()) {
-      if (currentlyPlayingId === channel.id) enterNativeFullscreen();
-      else selectChannel(channel);
+      selectChannel(channel);
       return;
     }
     if (currentlyPlayingId === channel.id) {
@@ -2834,6 +2825,7 @@ function buildChannelRow(channel) {
     if (live) {
       statsEl.textContent = live;
       statsEl.hidden = false;
+      if (!meta.parentNode) info.insertBefore(meta, nameEl.nextSibling);
       meta.hidden = false;
     }
   }
@@ -2842,17 +2834,12 @@ function buildChannelRow(channel) {
 }
 
 function channelGridCols() {
-  if (document.body.classList.contains("is-tv")) return 1;
-  const w = channelsContainer ? channelsContainer.clientWidth : 320;
-  if (w >= 560) return 3;
-  if (w >= 360) return 2;
   return 1;
 }
 
 function channelCardHeight() {
-  if (document.body.classList.contains("is-tv")) return 108;
-  if (document.body.classList.contains("ui-large")) return 156;
-  return 140;
+  if (document.body.classList.contains("ui-large")) return 72;
+  return 64;
 }
 
 function channelGridGap() {
@@ -3346,6 +3333,11 @@ function enterNativeFullscreen() {
 }
 
 function exitNativeFullscreen() {
+  if (isTvLayout()) {
+    nativeFullscreen = false;
+    nativePlaybackActive = false;
+    return false;
+  }
   if (nativePlayerPlugin() && nativePlaybackActive && nativeFullscreen) {
     const plugin = nativePlayerPlugin();
     nativeFullscreen = false;
@@ -3384,7 +3376,7 @@ async function startNativePlayback(channel, opts) {
   }
   if (gen !== playGen) return true;
 
-  const fullscreen = !isTvLayout() || !!(opts && opts.fullscreen);
+  const fullscreen = true;
   nativeFullscreen = fullscreen;
   try {
     const ret = await plugin.play(
@@ -4579,8 +4571,7 @@ function toggleTvFavorite() {
 function activateTvChannel() {
   const ch = tvFocusedChannel();
   if (!ch) return;
-  if (currentlyPlayingId === ch.id) enterNativeFullscreen();
-  else selectChannel(ch);
+  selectChannel(ch);
 }
 
 let tvOkHoldTimer = null;
