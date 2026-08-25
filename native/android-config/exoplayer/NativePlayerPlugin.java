@@ -286,6 +286,7 @@ public class NativePlayerPlugin extends Plugin {
 
     private void wireBackCallback(Activity act) {
         if (backCallback == null && act instanceof ComponentActivity) {
+            ComponentActivity ca = (ComponentActivity) act;
             backCallback = new OnBackPressedCallback(false) {
                 @Override
                 public void handleOnBackPressed() {
@@ -295,7 +296,7 @@ public class NativePlayerPlugin extends Plugin {
                     }
                 }
             };
-            ((ComponentActivity) act).getOnBackPressedDispatcher().addCallback(act, backCallback);
+            ca.getOnBackPressedDispatcher().addCallback(ca, backCallback);
         }
     }
 

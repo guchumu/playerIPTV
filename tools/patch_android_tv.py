@@ -287,19 +287,23 @@ def parchear_gradle(ruta: Path) -> list:
         )
         hechos.append("gradle: Media3 añadido para móvil")
 
-    # Evitar conflictos de libc++_shared.so entre Media3/VLC y Capacitor.
+    # Evitar conflictos de libc++_shared.so entre Media3/VLC y Capacitor (AGP 8).
     if "libc++_shared.so" not in texto:
-        if "android {" in texto and "packagingOptions" not in texto and "packaging {" not in texto:
+        if "android {" in texto and "packaging {" not in texto and "packagingOptions" not in texto:
             texto = texto.replace(
                 "android {",
                 "android {\n"
-                "    packagingOptions {\n"
-                "        pickFirst 'lib/**/libc++_shared.so'\n"
-                "        pickFirst 'lib/**/libvlc.so'\n"
+                "    packaging {\n"
+                "        jniLibs {\n"
+                "            pickFirsts += ['lib/**/libc++_shared.so', 'lib/**/libvlc.so']\n"
+                "        }\n"
+                "        resources {\n"
+                "            pickFirsts += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES']\n"
+                "        }\n"
                 "    }",
                 1,
             )
-            hechos.append("gradle: packagingOptions libc++/libvlc")
+            hechos.append("gradle: packaging jniLibs pickFirst")
 
     # El APK de TV no necesita x86; reduce tamaño (LibVLC es gordo).
     if "abiFilters" not in texto and "defaultConfig" in texto:

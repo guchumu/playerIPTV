@@ -16,6 +16,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
     paths:
       - "native/**"
       - "tools/patch_android_tv.py"
