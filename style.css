@@ -1230,45 +1230,48 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 :is(body.is-tv, html.is-native-tv) .login-container {
   display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(340px, 1.1fr);
-  column-gap: 1.6rem;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(360px, 1.15fr);
+  column-gap: 2rem;
   align-items: center;
-  width: min(1100px, calc(100vw - 40px));
-  min-width: min(720px, calc(100vw - 40px));
-  max-width: 1100px;
+  width: min(1180px, calc(100vw - 48px));
+  min-width: min(780px, calc(100vw - 48px));
+  max-width: 1180px;
   max-height: calc(100dvh - 36px);
-  padding: 1.3rem 1.5rem 1.2rem;
+  padding: 1.5rem 1.7rem 1.4rem;
   overflow: hidden;
 }
 :is(body.is-tv, html.is-native-tv) .login-head {
   grid-column: 1;
   min-width: 0;
   align-self: center;
+  text-align: left;
 }
 :is(body.is-tv, html.is-native-tv) .login-col-side {
   grid-column: 2;
   min-width: 0;
 }
 :is(body.is-tv, html.is-native-tv) .login-logo {
-  width: 72px;
-  height: 72px;
-  margin: 0 0 0.55rem;
+  display: block !important;
+  width: 160px;
+  height: 160px;
+  margin: 0 0 0.75rem;
 }
 :is(body.is-tv, html.is-native-tv) .login-container h1 {
-  font-size: 1.85rem;
+  font-size: 2.1rem;
   margin-bottom: 0.15rem;
   text-align: left;
 }
 :is(body.is-tv, html.is-native-tv) .build-tag {
   text-align: left;
   margin-bottom: 0.55rem;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 :is(body.is-tv, html.is-native-tv) .login-tv-hint {
   display: block;
   font-size: 1.05rem;
   color: #cbd5e1;
   line-height: 1.45;
+  max-width: 22rem;
 }
 :is(body.is-tv, html.is-native-tv) .install-btn { min-height: 48px; margin-bottom: 0; font-size: 0.95rem; }
 :is(body.is-tv, html.is-native-tv) .reload-btn {
@@ -1285,8 +1288,8 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 :is(body.is-tv, html.is-native-tv) .remote-upload-box p { font-size: 0.95rem; margin: 6px 0; }
 :is(body.is-tv, html.is-native-tv) .qr-wrap { margin: 10px 0; }
 :is(body.is-tv, html.is-native-tv) .upload-qr {
-  width: 240px;
-  height: 240px;
+  width: 260px;
+  height: 260px;
   max-width: 100%;
   padding: 8px;
 }
@@ -1298,21 +1301,29 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 :is(body.is-tv, html.is-native-tv) .error { font-size: 0.9rem; margin-top: 0.6rem; }
 :is(body.is-tv, html.is-native-tv) .global-spinner {
-  grid-column: 1 / -1;
-  grid-row: 1 / -1;
+  position: absolute;
+  inset: 0;
+  grid-column: auto;
+  grid-row: auto;
+  z-index: 5;
+  background: rgba(2, 6, 23, 0.82);
 }
-@media (max-height: 800px) {
-  :is(body.is-tv, html.is-native-tv) .login-logo { display: none; }
-  :is(body.is-tv, html.is-native-tv) .upload-qr { width: 180px; height: 180px; }
+@media (max-height: 720px) {
+  :is(body.is-tv, html.is-native-tv) .login-logo { width: 110px; height: 110px; }
+  :is(body.is-tv, html.is-native-tv) .upload-qr { width: 200px; height: 200px; }
   :is(body.is-tv, html.is-native-tv) .device-id { font-size: 1.45rem; }
 }
+/* En TV nunca apilar logo encima del QR: se pierde la composición a dos columnas. */
 @media (max-width: 800px) {
   :is(body.is-tv, html.is-native-tv) .login-container {
-    display: flex;
-    flex-direction: column;
+    grid-template-columns: minmax(200px, 0.85fr) minmax(260px, 1.15fr);
+    width: calc(100vw - 24px);
     min-width: unset;
-    width: min(560px, calc(100vw - 40px));
+    column-gap: 1rem;
+    padding: 1rem;
   }
+  :is(body.is-tv, html.is-native-tv) .login-logo { width: 96px; height: 96px; }
+  :is(body.is-tv, html.is-native-tv) .upload-qr { width: 180px; height: 180px; }
 }
 body.is-tv .compact-header,
 html.is-native-tv .compact-header {

@@ -187,7 +187,7 @@ async function refreshNativeTvFlag() {
 function showApkVersion(versionName) {
   const tag = document.querySelector(".build-tag");
   if (!tag) return;
-  const web = "v20260825e";
+  const web = "v20260825f";
   const apk = versionName ? String(versionName) : "";
   tag.textContent = apk ? web + " · APK " + apk : web;
   try {
@@ -255,7 +255,10 @@ function assignmentIsStale(data) {
   const logoutAt = getLogoutAt();
   if (!logoutAt) return false;
   const ts = data && data.ts != null ? Number(data.ts) : 0;
-  return !ts || ts <= logoutAt;
+  // Sin ts (asignaciones antiguas) no bloqueamos: si no, la TV "ve" la lista
+  // y nunca entra a cargar canales tras un cierre de sesión.
+  if (!ts) return false;
+  return ts <= logoutAt;
 }
 
 function setTvChannelsOpen(open) {
@@ -1089,19 +1092,27 @@ function startRemotePolling() {
       if (myGen !== remotePollGen) return;
       if (liveSession && channelsData.length && !logoutRequested) return;
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
-      if (assignmentIsStale(data)) return;
-      remoteLoginBusy = true;
-      try {
-        await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-      } finally {
-        remoteLoginBusy = false;
-        if (liveSession) stopRemotePolling();
+      if (assignmentIsStale(data)) {
+        setLoginStatus("Hay una lista antigua en el servidor. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
+        return;
       }
-    } catch (e) {}
+      try {
+        sessionStorage.removeItem(LOGOUT_AT_KEY);
+      } catch (e) {}
+      setLoginStatus("Lista recibida. Cargando canales…");
+      showSpinner(true, "Cargando canales…");
+      const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      if (ok || liveSession) stopRemotePolling();
+      else if (!loginCancelled) {
+        setLoginStatus("No se pudieron cargar los canales. Reintentando…");
+      }
+    } catch (e) {
+      setLoginStatus("Error al leer la lista remota. Reintentando…");
+    }
   }
 
   tick();
-  pollingInterval = setInterval(tick, 5000);
+  pollingInterval = setInterval(tick, 4000);
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -1128,7 +1139,21 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 }
 
 /********** MOTOR CENTRAL DE LOGIN **********/
+async function fetchWithTimeout(url, ms) {
+  const timeoutMs = ms || 90000;
+  if (typeof AbortController === "undefined") return fetch(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
+  if (remoteLoginBusy) return !!(liveSession && channelsData.length);
+  remoteLoginBusy = true;
   loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
@@ -1163,7 +1188,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
         }
       }
 
-      const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
+      let response;
+      try {
+        response = await fetchWithTimeout("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), 90000);
+      } catch (netErr) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("No se pudo actualizar; se usa la lista en caché");
+          return true;
+        }
+        throw new Error("Tiempo agotado al descargar la lista. Comprueba la red o la URL M3U.");
+      }
       const m3uContent = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
@@ -1233,7 +1269,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
 
       showSpinner(true, "Validando acceso...");
-      const response = await fetchXtream("player_api.php", { username, password }, serverUrl);
+      let response;
+      try {
+        response = await fetchXtream("player_api.php", { username, password }, serverUrl);
+      } catch (netErr) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          showToast("No se pudo validar; se usa la lista en caché");
+          return true;
+        }
+        throw new Error("Tiempo agotado al conectar con el servidor.");
+      }
       const rawText = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
       let data = null;
@@ -1297,6 +1344,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     showScreen("login");
     startRemotePolling();
     return false;
+  } finally {
+    remoteLoginBusy = false;
   }
 }
 
@@ -1451,27 +1500,19 @@ window.addEventListener("DOMContentLoaded", () => {
   prepararInstalacion();
   showDeviceId();
   initTvLoginFocus();
-  if (!canAutoLoginFromCache()) startRemotePolling();
+  // Siempre escuchar el QR: si el auto-login se cuelga, la carga remota sigue viva.
+  startRemotePolling();
 
   loadSession().then(async (saved) => {
     await migrateSavedListsFromSession();
-    if (!saved) {
-      if (!pollingInterval) startRemotePolling();
-      return;
-    }
+    if (!saved) return;
     const canAutoLogin = !!((saved.username && saved.password) || saved.m3uUrl);
-    if (!canAutoLogin) {
-      if (!pollingInterval) startRemotePolling();
-      return;
-    }
+    if (!canAutoLogin) return;
 
     setTimeout(() => {
-      if (loginCancelled) {
-        startRemotePolling();
-        return;
-      }
+      if (loginCancelled || liveSession) return;
       performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
-        if (!ok && !liveSession) startRemotePolling();
+        if (ok || liveSession) stopRemotePolling();
       });
     }, 400);
   });
@@ -1488,8 +1529,9 @@ async function fetchXtream(endpoint, params, serverOverride) {
   const targetServer = serverOverride || currentServer;
   const queryString = new URLSearchParams(params || {}).toString();
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
-  return await fetch(
-    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "")
+  return await fetchWithTimeout(
+    "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : ""),
+    90000
   );
 }
 
@@ -1513,6 +1555,9 @@ async function checkAccountExpiryFromChannels() {
 }
 
 function finishLogin(user) {
+  try {
+    dismissSplash(true);
+  } catch (e) {}
   if (document.activeElement) document.activeElement.blur();
   window.scrollTo(0, 0);
   showScreen("main");
@@ -4258,7 +4303,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825e");
+  url.searchParams.set("v", "20260825f");
   window.location.replace(url.toString());
 }
 
