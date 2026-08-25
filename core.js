@@ -149,11 +149,19 @@ function detectDevice() {
   const markedTv = /StreamBoxTV|Leanback/i.test(ua);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const noHover = window.matchMedia("(hover: none)").matches;
-  const wide = Math.max(window.innerWidth, window.screen.width) >= 960;
-  const heuristicTV = isFireTV || isAndroidTV || markedTv || (coarse && noHover && wide && window.innerHeight >= 500);
-  // El WebView de Android TV parece Chrome de móvil: sin StreamBoxNative.isTv
-  // la heurística por UA no basta. En el APK de teléfono isTv es false y no
-  // se fuerza el layout de televisor.
+  const w = Math.max(window.innerWidth || 0, window.screen && screen.width ? screen.width : 0);
+  const h = Math.max(window.innerHeight || 0, window.screen && screen.height ? screen.height : 0);
+  const wide = w >= 960;
+  const landscape = w >= h && w >= 900;
+  // WebView de TV ≈ Chrome móvil: sin isTv nativo la UA no basta. En teléfono
+  // el plugin pone isTv:false y no forzamos televisor. Si el flag aún no llegó
+  // (inyección tardía), landscape ancho en app nativa / UA marcada cuenta como TV.
+  const heuristicTV =
+    isFireTV ||
+    isAndroidTV ||
+    markedTv ||
+    (coarse && noHover && wide && h >= 500) ||
+    (landscape && (markedTv || isNativeApp() || /Android/i.test(ua)));
   const isTV = nativeTv === true || (nativeTv !== false && heuristicTV);
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
@@ -161,7 +169,12 @@ function detectDevice() {
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
-  document.documentElement.classList.toggle("is-native-tv", nativeTv === true || (isTV && (markedTv || isNativeApp())));
+  document.documentElement.classList.toggle(
+    "is-native-tv",
+    nativeTv === true || (isTV && (markedTv || isNativeApp() || landscape))
+  );
+  // Layout logo|QR también por CSS landscape (por si is-tv llega tarde).
+  document.documentElement.classList.toggle("login-landscape", landscape);
   if (!isTV) document.body.classList.remove("tv-channels-open");
   applyTvChrome();
 }
@@ -187,7 +200,7 @@ async function refreshNativeTvFlag() {
 function showApkVersion(versionName) {
   const tag = document.querySelector(".build-tag");
   if (!tag) return;
-  const web = "v20260825f";
+  const web = "v20260825g";
   const apk = versionName ? String(versionName) : "";
   tag.textContent = apk ? web + " · APK " + apk : web;
   try {
@@ -1073,6 +1086,10 @@ function enterChannelView(user) {
   } catch (e) {}
 }
 
+let lastRemoteAssignKey = "";
+let lastRemoteFailAt = 0;
+let remoteFailCount = 0;
+
 function startRemotePolling() {
   if (liveSession && channelsData.length && !logoutRequested) return;
   const deviceId = showDeviceId();
@@ -1096,15 +1113,36 @@ function startRemotePolling() {
         setLoginStatus("Hay una lista antigua en el servidor. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
         return;
       }
+      const assignKey =
+        String(data.ts || "") +
+        "|" +
+        String(data.m3uUrl || "") +
+        "|" +
+        String(data.username || "") +
+        "|" +
+        String(data.serverUrl || "");
+      // Tras un fallo, no martillar la misma asignación cada 4s (ni en bucle inmediato).
+      if (assignKey && assignKey === lastRemoteAssignKey && remoteFailCount > 0) {
+        const wait = Math.min(60000, 8000 * remoteFailCount);
+        if (Date.now() - lastRemoteFailAt < wait) {
+          setLoginStatus("No se pudieron cargar los canales. Reintento en unos segundos…");
+          return;
+        }
+      }
       try {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
+      lastRemoteAssignKey = assignKey;
       setLoginStatus("Lista recibida. Cargando canales…");
       showSpinner(true, "Cargando canales…");
       const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-      if (ok || liveSession) stopRemotePolling();
-      else if (!loginCancelled) {
-        setLoginStatus("No se pudieron cargar los canales. Reintentando…");
+      if (ok || liveSession) {
+        remoteFailCount = 0;
+        stopRemotePolling();
+      } else if (!loginCancelled) {
+        remoteFailCount++;
+        lastRemoteFailAt = Date.now();
+        setLoginStatus("No se pudieron cargar los canales. Reintento en unos segundos…");
       }
     } catch (e) {
       setLoginStatus("Error al leer la lista remota. Reintentando…");
@@ -1342,7 +1380,9 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       return false;
     }
     showScreen("login");
-    startRemotePolling();
+    // No llamar startRemotePolling() aquí: reinicia el timer y hace tick() al
+    // instante → bucle infinito Lista recibida → fallo → otra vez.
+    if (!pollingInterval && !liveSession) startRemotePolling();
     return false;
   } finally {
     remoteLoginBusy = false;
@@ -4303,7 +4343,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825f");
+  url.searchParams.set("v", "20260825g");
   window.location.replace(url.toString());
 }
 

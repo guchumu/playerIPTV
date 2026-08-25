@@ -6,6 +6,9 @@
       (function () {
         document.documentElement.classList.add("needs-splash");
         try {
+          var w = Math.max(window.innerWidth || 0, screen.width || 0);
+          var h = Math.max(window.innerHeight || 0, screen.height || 0);
+          if (w >= h && w >= 900) document.documentElement.classList.add("login-landscape");
           var n = window.StreamBoxNative;
           if (n && n.isTv) {
             document.documentElement.classList.add("is-native-tv");
@@ -29,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260825f" />
+      <link rel="stylesheet" href="style.css?v=20260825g" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -50,7 +53,7 @@
             <div class="login-head">
                 <img src="logo.png" alt="" class="login-logo" />
                 <h1>StreamBox IPTV</h1>
-                <p class="build-tag">v20260825f</p>
+                <p class="build-tag">v20260825g</p>
                 <p class="login-tv-hint">En la tele: el código QR queda a la derecha. Con el móvil, ábrelo y carga la lista.</p>
             </div>
 
@@ -226,6 +229,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260825f"></script>
+    <script src="core.js?v=20260825g"></script>
 </body>
 </html>
