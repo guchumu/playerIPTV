@@ -23,9 +23,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = isset($_POST['username']) ? trim((string) $_POST['username']) : '';
     $password = isset($_POST['password']) ? trim((string) $_POST['password']) : '';
     $m3uUrl = isset($_POST['m3uUrl']) ? trim((string) $_POST['m3uUrl']) : '';
-    // El móvil a menudo rellena usuario/clave por autocompletado aunque solo
-    // peguen la M3U. Sin servidor Xtream, esa pareja no cuenta.
-    if ($m3uUrl !== '' && $serverUrl === '') {
+    // Xtream manda usuario+clave: ignorar M3U residual del autocompletado del móvil.
+    if ($username !== '' && $password !== '') {
+        if ($serverUrl === '') {
+            $serverUrl = 'http://masquecero.net';
+        }
+        $m3uUrl = '';
+    } elseif ($m3uUrl !== '' && $serverUrl === '') {
         $username = '';
         $password = '';
     }

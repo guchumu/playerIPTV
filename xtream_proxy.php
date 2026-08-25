@@ -45,6 +45,21 @@ function xtream_rate_or_fail()
     exit;
 }
 
+function xtream_m3u_is_cacheable($body)
+{
+    if (!$body || strlen($body) < 48) {
+        return false;
+    }
+    $n = preg_match_all('/#EXTINF:/i', $body);
+    if ($n < 3) {
+        return false;
+    }
+    if (preg_match('/#EXTINF[^,\n]*,\s*Error\s*:/i', $body) && $n <= 2) {
+        return false;
+    }
+    return true;
+}
+
 const M3U_CACHE_TTL = 480;
 
 // 1. MODO LISTA M3U DIRECTA
@@ -64,8 +79,10 @@ if (isset($_GET['direct_url'])) {
     }
     xtream_rate_or_fail();
     list($response, $httpCode, $err) = xtream_fetch($url);
-    if ($response) {
+    if ($response && xtream_m3u_is_cacheable($response)) {
         player_cache_set($cacheName, $response);
+        echo $response;
+    } elseif ($response) {
         echo $response;
     } else {
         player_log('m3u directa fallo ' . $httpCode . ' ' . $err);
@@ -137,7 +154,7 @@ if ($endpointBase === 'player_api.php') {
 } else {
     header('Content-Type: text/plain; charset=utf-8');
 }
-if ($isList && $response) {
+if ($isList && $response && xtream_m3u_is_cacheable($response)) {
     player_cache_set($cacheName, $response);
 }
 echo $response;

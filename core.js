@@ -200,7 +200,7 @@ async function refreshNativeTvFlag() {
 function showApkVersion(versionName) {
   const tag = document.querySelector(".build-tag");
   if (!tag) return;
-  const web = "v20260825h";
+  const web = "v20260825i";
   const apk = versionName ? String(versionName) : "";
   tag.textContent = apk ? web + " · APK " + apk : web;
   try {
@@ -1136,6 +1136,15 @@ function startRemotePolling() {
           return;
         }
       }
+      if (
+        remoteFailCount >= 2 &&
+        lastLoginError &&
+        /proveedor responde|credenciales|inválid|lista no contiene|no se pudo descargar/i.test(lastLoginError)
+      ) {
+        setLoginStatus(lastLoginError + " Vuelve a enviar la lista desde el móvil (o pulsa Recargar).");
+        stopRemotePolling();
+        return;
+      }
       try {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
@@ -1236,10 +1245,9 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
   password = (password || "").trim();
   m3uUrl = (m3uUrl || "").trim();
 
-  // Lista M3U gana: el formulario del móvil a menudo rellena usuario/clave/servidor
-  // por autocompletado y entonces la TV intentaba Xtream y nunca descargaba la M3U.
-  const hasM3u = !!m3uUrl;
-  const hasXtream = !hasM3u && !!(username && password);
+  // Xtream gana sobre M3U residual del autocompletado. Solo M3U si no hay usuario/clave.
+  const hasXtream = !!(username && password);
+  const hasM3u = !!m3uUrl && !hasXtream;
   if (hasXtream && !serverUrl) {
     serverUrl = "http://masquecero.net";
   }
@@ -1295,17 +1303,11 @@ async function performLoginActionLocked(serverUrl, username, password, m3uUrl, l
         throw new Error(msg);
       }
       const listaConError = detectProviderListError(m3uContent);
-      if (listaConError) {
-        if (channelsData.length) {
-          showSpinner(false);
-          markSessionLive();
-          showToast("El proveedor responde: " + listaConError);
-          return true;
-        }
-        throw new Error("El proveedor responde: " + listaConError);
+      if (!applyListOrKeep(m3uContent)) {
+        throw new Error(
+          listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
+        );
       }
-
-      if (!applyListOrKeep(m3uContent)) throw new Error("La lista no contiene canales");
       await saveSession(currentUser);
       await writeListCache(currentUser, m3uContent);
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
@@ -2017,19 +2019,54 @@ function formatTime(date) {
 }
 
 /********** CARGAR Y PARSEAR M3U **********/
+function extractM3UEntries(content) {
+  const lines = String(content || "").split(/\r\n|\n|\r/);
+  const out = [];
+  let pending = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim().replace(/^["']|["']$/g, "");
+    if (!line) continue;
+    if (line.startsWith("#EXTINF:")) {
+      if (pending) out.push(pending);
+      const nameMatch = line.match(/,(.+)$/);
+      pending = { name: nameMatch ? nameMatch[1].trim() : "Canal", url: "" };
+      continue;
+    }
+    if (line.charAt(0) === "#") continue;
+    if (pending) {
+      pending.url = line;
+      out.push(pending);
+      pending = null;
+    }
+  }
+  if (pending) out.push(pending);
+  return out;
+}
+
+function isProviderErrorChannel(name, url) {
+  const n = String(name || "").trim();
+  const u = String(url || "").trim();
+  if (/^error\s*:/i.test(n)) return true;
+  if (isStreamUrl(u)) return false;
+  if (/^(account|cuenta|usuario|user|subscription|suscripci[oó]n|lista)\b/i.test(n)) return true;
+  if (/\b(expired|caducad[ao]|invalid|inactiv[ao]|suspendid[ao]|bloquead[ao])\b/i.test(n) && n.length < 96) {
+    return true;
+  }
+  return false;
+}
+
 /**
- * Varios paneles no contestan con un error HTTP cuando la cuenta no vale:
- * devuelven una lista perfectamente formada con un único canal falso cuyo
- * nombre es el mensaje de error y cuya URL es inservible. Sin detectarlo, el
- * player pinta ese canal como si fuera real y desde fuera parece que la lista
- * no ha cargado, sin explicar el motivo.
+ * Solo avisa cuando la lista parece un único canal-falso de error del panel.
+ * Antes rechazaba listas enteras si UN canal tenía "Expirado" en el nombre.
  */
 function detectProviderListError(content) {
-  const m = content.match(/#EXTINF[^,\n]*,\s*(?:Error\s*:\s*)?([^\n\r]*(?:invalid|inactiv|expir|caducad|bloquea|suspend|no\s*activ)[^\n\r]*)/i);
-  if (m) return m[1].trim();
-  if (/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i.test(content)) {
-    return content.match(/#EXTINF[^,\n]*,\s*Error\s*:\s*([^\n\r]+)/i)[1].trim();
-  }
+  const entries = extractM3UEntries(content);
+  if (!entries.length) return "";
+  const valid = entries.filter((e) => isStreamUrl(e.url) && !isProviderErrorChannel(e.name, e.url));
+  if (valid.length > 0) return "";
+  const err = entries.find((e) => isProviderErrorChannel(e.name, e.url));
+  if (err) return err.name.replace(/^error\s*:\s*/i, "").trim();
+  if (entries.length <= 2) return (entries[0].name || "Lista vacía del proveedor").trim();
   return "";
 }
 
@@ -2048,18 +2085,18 @@ async function loadM3UFromXtream() {
   if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
     throw new Error("No se pudo descargar la lista M3U");
   }
-  const providerError = detectProviderListError(trimmed);
-  if (providerError) {
-    throw new Error("El proveedor responde: " + providerError);
-  }
   if (!applyListOrKeep(m3uContent)) {
-    throw new Error("La lista no contiene canales");
+    const providerError = detectProviderListError(trimmed);
+    throw new Error(providerError ? "El proveedor responde: " + providerError : "La lista no contiene canales");
   }
   await writeListCache(currentUser, m3uContent);
 }
 
 function isStreamUrl(line) {
-  return /^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line) || /^\/\/[a-z0-9.-]+\//i.test(line);
+  if (/^(https?|rtmp[es]?|rtsps?|udp|rtp):\/\//i.test(line)) return true;
+  if (/^\/\/[a-z0-9.-]+\//i.test(line)) return true;
+  // Algunos paneles devuelven rutas relativas /live/user/pass/id.ts
+  return /^\/(?:live|movie|series|play|stream|timeshift)\/[^/]+\/[^/]+\/\d+/i.test(line);
 }
 
 function parseM3U(content, listMeta) {
@@ -2112,7 +2149,18 @@ function parseM3U(content, listMeta) {
     if (line.charAt(0) === "#") continue;
 
     if (currentChannel && isStreamUrl(line)) {
-      currentChannel.url = line;
+      if (isProviderErrorChannel(currentChannel.name, line)) {
+        skippedNoUrl++;
+        currentChannel = null;
+        continue;
+      }
+      let url = line;
+      if (/^\//.test(url) && currentServer) {
+        try {
+          url = new URL(url, currentServer).href;
+        } catch (e) {}
+      }
+      currentChannel.url = url;
       channels.push(currentChannel);
       if (!categories[currentChannel.category]) categories[currentChannel.category] = [];
       categories[currentChannel.category].push(currentChannel);
@@ -4387,7 +4435,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260825h");
+  url.searchParams.set("v", "20260825i");
   window.location.replace(url.toString());
 }
 
