@@ -375,8 +375,12 @@ public class NativePlayerPlugin extends Plugin {
             intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
             intent.putExtra("url", url);
             intent.putExtra("title", title == null ? "" : title);
-            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(intent);
+            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            if (act != null) act.startActivity(intent);
+            else {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(intent);
+            }
             return;
         }
         if (PlayerActivity.isRunning()) {

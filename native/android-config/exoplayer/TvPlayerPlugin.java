@@ -1,8 +1,11 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -21,6 +24,34 @@ public class TvPlayerPlugin extends Plugin {
 
     private String lastUrl = "";
     private String lastTitle = "";
+    private boolean receiverOn;
+
+    private final BroadcastReceiver finishedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            emit(true, false);
+        }
+    };
+
+    @Override
+    public void load() {
+        registrarFinished();
+    }
+
+    private void registrarFinished() {
+        if (receiverOn) return;
+        Context ctx = getContext();
+        if (ctx == null) return;
+        IntentFilter filter = new IntentFilter(ctx.getPackageName() + ".VLC_FINISHED");
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                ctx.registerReceiver(finishedReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                ctx.registerReceiver(finishedReceiver, filter);
+            }
+            receiverOn = true;
+        } catch (Throwable ignored) {}
+    }
 
     @PluginMethod
     public void play(PluginCall call) {
@@ -39,7 +70,7 @@ public class TvPlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             try {
-                lanzarVlc(lastUrl, lastTitle);
+                lanzarVlc(act, lastUrl, lastTitle);
                 call.resolve(ok(true, true));
                 emit(false, true);
             } catch (Throwable t) {
@@ -52,9 +83,10 @@ public class TvPlayerPlugin extends Plugin {
     @PluginMethod
     public void setFullscreen(PluginCall call) {
         boolean wantFs = Boolean.TRUE.equals(call.getBoolean("fullscreen", false));
+        Activity act = getActivity();
         if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
             try {
-                lanzarVlc(lastUrl, lastTitle);
+                lanzarVlc(act, lastUrl, lastTitle);
             } catch (Throwable ignored) {}
             call.resolve(ok(true, true));
             emit(false, true);
@@ -111,7 +143,7 @@ public class TvPlayerPlugin extends Plugin {
         } catch (Throwable ignored) {}
     }
 
-    private void lanzarVlc(String url, String title) {
+    private void lanzarVlc(Activity act, String url, String title) {
         Context ctx = getContext();
         if (ctx == null) throw new IllegalStateException("Sin contexto");
         Intent intent = new Intent();
@@ -119,7 +151,12 @@ public class TvPlayerPlugin extends Plugin {
         intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
         intent.putExtra("url", url);
         intent.putExtra("title", title == null ? "" : title);
-        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-        ctx.startActivity(intent);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (act != null) {
+            act.startActivity(intent);
+        } else {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(intent);
+        }
     }
 }
