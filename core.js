@@ -1252,9 +1252,10 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
   password = (password || "").trim();
   m3uUrl = (m3uUrl || "").trim();
 
-  // Si hay usuario y clave, es Xtream. La M3U solo se usa cuando NO hay Xtream.
-  // (Antes, un m3uUrl residual o vacío mal leído saltaba el login Xtream.)
-  const hasXtream = !!(username && password);
+  // Si el formulario de carga (o el autocompletado del móvil) manda usuario/clave
+  // SIN servidor, pero sí hay URL M3U, es una lista M3U: no inventar Xtream.
+  const hasM3u = !!m3uUrl;
+  const hasXtream = !!(username && password && (serverUrl || !hasM3u));
   if (hasXtream && !serverUrl) {
     serverUrl = "http://masquecero.net";
   }
@@ -4417,7 +4418,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260819c");
+  url.searchParams.set("v", "20260825b");
   window.location.replace(url.toString());
 }
 

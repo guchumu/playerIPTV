@@ -11,11 +11,21 @@ if (!preg_match('/^[A-Z0-9-]{4,16}$/', $idPrevio)) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $deviceId = strtoupper(trim(isset($_POST['device_id']) ? $_POST['device_id'] : ''));
+    $serverUrl = isset($_POST['serverUrl']) ? trim((string) $_POST['serverUrl']) : '';
+    $username = isset($_POST['username']) ? trim((string) $_POST['username']) : '';
+    $password = isset($_POST['password']) ? trim((string) $_POST['password']) : '';
+    $m3uUrl = isset($_POST['m3uUrl']) ? trim((string) $_POST['m3uUrl']) : '';
+    // El móvil a menudo rellena usuario/clave por autocompletado aunque solo
+    // peguen la M3U. Sin servidor Xtream, esa pareja no cuenta.
+    if ($m3uUrl !== '' && $serverUrl === '') {
+        $username = '';
+        $password = '';
+    }
     $data = array(
-        'serverUrl' => isset($_POST['serverUrl']) ? $_POST['serverUrl'] : '',
-        'username' => isset($_POST['username']) ? $_POST['username'] : '',
-        'password' => isset($_POST['password']) ? $_POST['password'] : '',
-        'm3uUrl' => isset($_POST['m3uUrl']) ? $_POST['m3uUrl'] : '',
+        'serverUrl' => $serverUrl,
+        'username' => $username,
+        'password' => $password,
+        'm3uUrl' => $m3uUrl,
         'listName' => isset($_POST['listName']) ? trim($_POST['listName']) : '',
         'ts' => (int) round(microtime(true) * 1000),
         'status' => 'listo',
@@ -65,11 +75,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="text" name="listName" placeholder="Ej: Casa, Trabajo, Proveedor X" maxlength="64">
 
             <label>Servidor Xtream Codes</label>
-            <input type="text" name="serverUrl" placeholder="http://servidor.com:8080">
+            <input type="text" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="off">
             <label>Usuario</label>
-            <input type="text" name="username">
+            <input type="text" name="username" autocomplete="username">
             <label>Contraseña</label>
-            <input type="password" name="password">
+            <input type="password" name="password" autocomplete="current-password">
 
             <div class="divider">— O SI TIENES LISTA M3U —</div>
 
