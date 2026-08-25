@@ -27,7 +27,6 @@ import org.videolan.libvlc.util.VLCVideoLayout;
 public class VlcPlayerActivity extends Activity {
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
-    public static final String ACTION_STOP = "PACKAGE_NAME.STOP_VLC";
 
     private static final String UA = "VLC/3.0.16 LibVLC/3.0.16";
 
@@ -37,6 +36,7 @@ public class VlcPlayerActivity extends Activity {
     private TextView titleView;
     private boolean paused;
     private boolean receiverOn;
+    private String stopAction;
 
     private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
         @Override
@@ -48,7 +48,7 @@ public class VlcPlayerActivity extends Activity {
     public static void stopNow(Context ctx) {
         if (ctx == null) return;
         try {
-            Intent i = new Intent(ACTION_STOP);
+            Intent i = new Intent(ctx.getPackageName() + ".STOP_VLC");
             i.setPackage(ctx.getPackageName());
             ctx.sendBroadcast(i);
         } catch (Throwable ignored) {}
@@ -57,8 +57,9 @@ public class VlcPlayerActivity extends Activity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        stopAction = getPackageName() + ".STOP_VLC";
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if (ACTION_STOP.equals(getIntent() != null ? getIntent().getAction() : null)) {
+        if (stopAction.equals(getIntent() != null ? getIntent().getAction() : null)) {
             finish();
             return;
         }
@@ -88,7 +89,8 @@ public class VlcPlayerActivity extends Activity {
 
     private void registrarStop() {
         if (receiverOn) return;
-        IntentFilter filter = new IntentFilter(ACTION_STOP);
+        if (stopAction == null) stopAction = getPackageName() + ".STOP_VLC";
+        IntentFilter filter = new IntentFilter(stopAction);
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -128,7 +130,7 @@ public class VlcPlayerActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+        if (intent != null && stopAction != null && stopAction.equals(intent.getAction())) {
             finish();
             return;
         }

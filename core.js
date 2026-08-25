@@ -786,29 +786,11 @@ async function switchToList(listId) {
 }
 
 function renderListSelector() {
+  // Player M3U: una sola lista activa. El selector/gestor es del restreamer.
   const sel = document.getElementById("listSelect");
-  if (!sel) return;
-  const prev = activeListId;
-  sel.innerHTML = "";
-  savedLists.forEach((entry) => {
-    const opt = document.createElement("option");
-    opt.value = entry.id;
-    opt.textContent = entry.name;
-    sel.appendChild(opt);
-  });
-  if (savedLists.length > 1) {
-    const allOpt = document.createElement("option");
-    allOpt.value = ALL_LISTS_ID;
-    allOpt.textContent = "Todas las listas";
-    sel.appendChild(allOpt);
-  }
-  if (activeListId && (activeListId === ALL_LISTS_ID || savedLists.some((l) => l.id === activeListId))) {
-    sel.value = activeListId;
-  } else if (savedLists.length) {
-    sel.value = savedLists[0].id;
-    setActiveListId(savedLists[0].id);
-  }
-  sel.hidden = savedLists.length < 1;
+  if (sel) sel.hidden = true;
+  const btn = document.getElementById("listsBtn");
+  if (btn) btn.hidden = true;
   updateChannelColumnTitle();
 }
 
@@ -816,131 +798,24 @@ function updateChannelColumnTitle() {
   const title = document.getElementById("channelColumnTitle");
   if (!title) return;
   if (searchQuery) return;
-  if (activeListId === ALL_LISTS_ID) {
-    title.textContent = "Canales · Todas las listas";
-    return;
-  }
-  const entry = savedLists.find((l) => l.id === activeListId);
-  title.textContent = entry ? "Canales · " + entry.name : "Canales";
+  if (currentCategory) title.textContent = displayCategoryName(currentCategory);
+  else title.textContent = "Canales";
 }
 
 function renderListsManagePanel() {
-  const ul = document.getElementById("listsManageList");
-  if (!ul) return;
-  ul.innerHTML = "";
-  savedLists.forEach((entry) => {
-    const li = document.createElement("li");
-    li.className = "lists-manage-item";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "lists-rename-input";
-    nameInput.value = entry.name;
-    nameInput.title = "Nombre de la lista";
-    nameInput.addEventListener("change", () => {
-      renameSavedList(entry.id, nameInput.value);
-      renderListSelector();
-    });
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "lists-del-btn";
-    delBtn.textContent = "Eliminar";
-    delBtn.title = "Quitar esta lista guardada";
-    delBtn.addEventListener("click", () => {
-      if (savedLists.length <= 1) {
-        showToast("Debe quedar al menos una lista");
-        return;
-      }
-      removeSavedList(entry.id);
-      renderListsManagePanel();
-      renderListSelector();
-      if (activeListId === entry.id || !savedLists.some((l) => l.id === activeListId)) {
-        switchToList(savedLists[0] ? savedLists[0].id : null);
-      }
-    });
-    li.appendChild(nameInput);
-    li.appendChild(delBtn);
-    ul.appendChild(li);
-  });
+  // Sin UI de multi-lista en este player.
 }
 
-function showListsOverlay(show) {
-  const overlay = document.getElementById("listsOverlay");
-  if (!overlay) return;
-  if (show) {
-    renderListsManagePanel();
-    overlay.hidden = false;
-    overlay.classList.add("is-open");
-  } else {
-    overlay.classList.remove("is-open");
-    overlay.hidden = true;
-    stopAddListPolling();
-  }
+function showListsOverlay() {
+  // Sin UI de multi-lista en este player.
 }
 
-function stopAddListPolling() {
-  listAddPollGen++;
-  if (listAddPollTimer) {
-    clearInterval(listAddPollTimer);
-    listAddPollTimer = null;
-  }
-}
-
-function startAddListPolling() {
-  stopAddListPolling();
-  const myGen = listAddPollGen;
-  const deviceId = showDeviceId();
-  const qrBox = document.getElementById("listsAddQr");
-  if (qrBox) {
-    const base = (window.location.origin + window.location.pathname).replace(/[^/]*$/, "");
-    renderUploadQr(base + "upload.php?id=" + encodeURIComponent(deviceId), "listsAddQr");
-  }
-  async function tick() {
-    if (myGen !== listAddPollGen) return;
-    try {
-      const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
-      const data = await res.json();
-      if (myGen !== listAddPollGen) return;
-      if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
-      if (assignmentIsStale(data)) return;
-      stopAddListPolling();
-      showListsOverlay(false);
-      await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
-      showToast("Lista añadida");
-    } catch (e) {}
-  }
-  tick();
-  listAddPollTimer = setInterval(tick, 5000);
-}
+function startAddListPolling() {}
+function stopAddListPolling() {}
 
 function initListManager() {
   loadSavedListsRegistry();
-  const sel = document.getElementById("listSelect");
-  if (sel) {
-    sel.addEventListener("change", () => {
-      if (sel.value) switchToList(sel.value);
-    });
-  }
-  const listsBtn = document.getElementById("listsBtn");
-  if (listsBtn) {
-    listsBtn.addEventListener("click", () => showListsOverlay(true));
-  }
-  const closeBtn = document.getElementById("listsCloseBtn");
-  if (closeBtn) closeBtn.addEventListener("click", () => showListsOverlay(false));
-  const addBtn = document.getElementById("listsAddBtn");
-  if (addBtn) {
-    addBtn.addEventListener("click", () => {
-      const addPanel = document.getElementById("listsAddPanel");
-      if (addPanel) addPanel.hidden = !addPanel.hidden;
-      if (addPanel && !addPanel.hidden) startAddListPolling();
-      else stopAddListPolling();
-    });
-  }
-  const overlay = document.getElementById("listsOverlay");
-  if (overlay) {
-    overlay.addEventListener("click", (ev) => {
-      if (ev.target === overlay) showListsOverlay(false);
-    });
-  }
+  renderListSelector();
 }
 
 async function signedStreamHref(url) {
@@ -1989,23 +1864,7 @@ function formatChannelLiveStats() {
 }
 
 function refreshVisibleChannelStats() {
-  if (!channelsContainer) return;
-  const live = formatChannelLiveStats();
-  channelsContainer.querySelectorAll(".channel-item").forEach((item) => {
-    const statsEl = item.querySelector(".channel-stats");
-    if (!statsEl) return;
-    const meta = statsEl.closest(".channel-meta");
-    const isPlaying = item.dataset.id === currentlyPlayingId;
-    if (isPlaying && live) {
-      statsEl.textContent = live;
-      statsEl.hidden = false;
-      if (meta) meta.hidden = false;
-    } else {
-      statsEl.textContent = "";
-      statsEl.hidden = true;
-      if (meta) meta.hidden = !meta.querySelector(".channel-quality") && !meta.querySelector(".channel-source");
-    }
-  });
+  // Player M3U: sin chips de calidad/lista en las filas.
 }
 
 function formatTime(date) {
@@ -2698,13 +2557,7 @@ function selectCategory(categoryName, opts) {
 
   renderChannels(channelsForCategory(categoryName));
   if (channelColumnTitle) {
-    const catLabel = displayCategoryName(categoryName);
-    if (activeListId === ALL_LISTS_ID) {
-      channelColumnTitle.textContent = catLabel + " · Todas las listas";
-    } else {
-      const entry = savedLists.find((l) => l.id === activeListId);
-      channelColumnTitle.textContent = entry ? catLabel + " · " + entry.name : catLabel;
-    }
+    channelColumnTitle.textContent = displayCategoryName(categoryName);
   }
   if (currentFocus && !(opts && opts.keepFocus)) currentFocus.col = 0;
 }
@@ -2720,7 +2573,9 @@ function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
   fallback.textContent = channelInitials(displayName(channel.name));
-  if (!channel.logo) return fallback;
+  // En TV no se cargan logos remotos: miles de HTTP al recorrer la lista
+  // saturan el WebView del Streamer.
+  if (!channel.logo || isTvLayout()) return fallback;
 
   const img = document.createElement("img");
   img.className = "channel-logo";
@@ -2757,28 +2612,6 @@ function buildChannelRow(channel) {
   nameEl.textContent = displayName(channel.name);
   nameEl.title = channel.name;
   info.appendChild(nameEl);
-
-  const quality = channel.qualityHint || extractQualityHint(channel.name);
-  const meta = document.createElement("div");
-  meta.className = "channel-meta";
-  if (quality) {
-    const qEl = document.createElement("span");
-    qEl.className = "channel-quality";
-    qEl.textContent = quality;
-    meta.appendChild(qEl);
-  }
-  if (channel.listName) {
-    const srcEl = document.createElement("span");
-    srcEl.className = "channel-source";
-    srcEl.textContent = channel.listName;
-    srcEl.title = "Lista: " + channel.listName;
-    meta.appendChild(srcEl);
-  }
-  const statsEl = document.createElement("span");
-  statsEl.className = "channel-stats";
-  statsEl.hidden = true;
-  meta.appendChild(statsEl);
-  if (quality || channel.listName) info.appendChild(meta);
 
   const epgEl = document.createElement("div");
   epgEl.className = "channel-epg";
@@ -2819,16 +2652,6 @@ function buildChannelRow(channel) {
   });
   if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
   else if (peekLastChannelId() === channel.id) channelDiv.classList.add("last");
-
-  if (currentlyPlayingId === channel.id) {
-    const live = formatChannelLiveStats();
-    if (live) {
-      statsEl.textContent = live;
-      statsEl.hidden = false;
-      if (!meta.parentNode) info.insertBefore(meta, nameEl.nextSibling);
-      meta.hidden = false;
-    }
-  }
 
   return channelDiv;
 }
@@ -4769,9 +4592,7 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "ArrowDown") {
     if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) {
       currentFocus.row++;
-      if (isTvLayout() && categories[currentFocus.row]) {
-        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
-      }
+      // En TV solo se mueve el cursor; OK carga la categoría (menos trabajo en el WebView).
     } else if (currentFocus.col === 1) {
       if (isTvLayout()) {
         if (currentFocus.row < virtualList.length - 1) {
@@ -4783,9 +4604,6 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "ArrowUp") {
     if (currentFocus.col === 0 && currentFocus.row > 0) {
       currentFocus.row--;
-      if (isTvLayout() && categories[currentFocus.row]) {
-        selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
-      }
     } else if (currentFocus.col === 0 && currentFocus.row <= 0 && isTvLayout()) {
       focusTvHeader(0);
       updateCursorVisuals();
@@ -4802,8 +4620,12 @@ document.addEventListener("keydown", (e) => {
     }
   } else if (isConfirmKey(e)) {
     if (currentFocus.col === 0 && categories[currentFocus.row]) {
-      if (isTvLayout()) enterTvChannelsColumn();
-      else {
+      const catName = categories[currentFocus.row].dataset.category;
+      if (isTvLayout()) {
+        selectCategory(catName, { keepFocus: true });
+        enterTvChannelsColumn();
+      } else {
+        selectCategory(catName);
         currentFocus.col = 1;
         currentFocus.row = 0;
       }
