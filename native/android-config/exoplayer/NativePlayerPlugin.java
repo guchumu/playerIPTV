@@ -122,7 +122,7 @@ public class NativePlayerPlugin extends Plugin {
                     call.resolve(ok(true, true));
                     return;
                 }
-                if (!wantFs) VlcPlayerActivity.stopNow(getContext());
+                if (!wantFs) stopVlcProcess();
                 call.resolve(ok(true, false));
                 return;
             }
@@ -154,7 +154,7 @@ public class NativePlayerPlugin extends Plugin {
     public void stop(PluginCall call) {
         Activity act = getActivity();
         PlayerActivity.stopNow();
-        VlcPlayerActivity.stopNow(getContext());
+        stopVlcProcess();
         if (act == null) {
             call.resolve();
             return;
@@ -356,15 +356,27 @@ public class NativePlayerPlugin extends Plugin {
         exoPlayer.setPlayWhenReady(true);
     }
 
+    private void stopVlcProcess() {
+        android.content.Context ctx = getContext();
+        if (ctx == null) return;
+        try {
+            Intent i = new Intent(ctx.getPackageName() + ".STOP_VLC");
+            i.setPackage(ctx.getPackageName());
+            ctx.sendBroadcast(i);
+        } catch (Throwable ignored) {}
+    }
+
     private void lanzarActivity(String url, String title, String mime) {
         Activity act = getActivity();
         boolean tv = act != null && StreamBoxPlugin.esTelevisor(act);
         if (tv) {
-            Intent intent = new Intent(getContext(), VlcPlayerActivity.class);
-            intent.putExtra(VlcPlayerActivity.EXTRA_URL, url);
-            intent.putExtra(VlcPlayerActivity.EXTRA_TITLE, title == null ? "" : title);
+            android.content.Context ctx = getContext();
+            Intent intent = new Intent();
+            intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
+            intent.putExtra("url", url);
+            intent.putExtra("title", title == null ? "" : title);
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(intent);
+            ctx.startActivity(intent);
             return;
         }
         if (PlayerActivity.isRunning()) {

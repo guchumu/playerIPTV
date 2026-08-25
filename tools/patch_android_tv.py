@@ -74,6 +74,7 @@ ATRIBUTOS_APP = {
 
 JAVA_PLUGINS = (
     "NativePlayerPlugin.java",
+    "TvPlayerPlugin.java",
     "PlayerActivity.java",
     "VlcPlayerActivity.java",
     "VlcOptions.java",
@@ -236,7 +237,13 @@ def copiar_exoplayer(base: Path) -> list:
             "class MainActivity : BridgeActivity() {\n"
             "    override fun onCreate(savedInstanceState: Bundle?) {\n"
             "        registerPlugin(StreamBoxPlugin::class.java)\n"
-            "        registerPlugin(NativePlayerPlugin::class.java)\n"
+            "        // En TV no se registra Media3: cargar ExoPlayer en el mismo\n"
+            "        // proceso que el WebView abortaba el Streamer al mover el mando.\n"
+            "        if (StreamBoxPlugin.esTelevisor(this)) {\n"
+            "            registerPlugin(TvPlayerPlugin::class.java)\n"
+            "        } else {\n"
+            "            registerPlugin(NativePlayerPlugin::class.java)\n"
+            "        }\n"
             "        super.onCreate(savedInstanceState)\n"
             "    }\n"
             "}\n",
@@ -251,13 +258,19 @@ def copiar_exoplayer(base: Path) -> list:
             "    @Override\n"
             "    public void onCreate(Bundle savedInstanceState) {\n"
             "        registerPlugin(StreamBoxPlugin.class);\n"
-            "        registerPlugin(NativePlayerPlugin.class);\n"
+            "        // En TV no se registra Media3: cargar ExoPlayer en el mismo\n"
+            "        // proceso que el WebView abortaba el Streamer al mover el mando.\n"
+            "        if (StreamBoxPlugin.esTelevisor(this)) {\n"
+            "            registerPlugin(TvPlayerPlugin.class);\n"
+            "        } else {\n"
+            "            registerPlugin(NativePlayerPlugin.class);\n"
+            "        }\n"
             "        super.onCreate(savedInstanceState);\n"
             "    }\n"
             "}\n",
             encoding="utf-8",
         )
-    hechos.append(str(main.relative_to(base)) + " (plugins StreamBox + NativePlayer)")
+    hechos.append(str(main.relative_to(base)) + " (plugins StreamBox + NativePlayer/TV)")
     return hechos
 
 
