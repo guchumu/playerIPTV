@@ -85,17 +85,18 @@ public class NativePlayerPlugin extends Plugin {
             return;
         }
         boolean tv = StreamBoxPlugin.esTelevisor(act);
-        lastEngine = tv ? "vlc" : "exo";
+        String motor = StreamBoxPlugin.motorReproductor(act);
+        lastEngine = motor;
         act.runOnUiThread(() -> {
             try {
                 rememberBox(call);
                 lastUrl = url;
                 lastTitle = title == null ? "" : title;
                 lastMime = mime == null ? "" : mime;
-                useVlc = tv;
+                useVlc = "vlc".equals(motor);
                 if (tv) {
                     soltar();
-                    lanzarActivity(url, lastTitle, lastMime, "vlc");
+                    lanzarActivity(url, lastTitle, lastMime, motor);
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
@@ -112,7 +113,7 @@ public class NativePlayerPlugin extends Plugin {
             } catch (Throwable t) {
                 try {
                     if (!tv) lanzarActivity(url, title, mime, "exo");
-                    else lanzarActivity(url, title, mime, "vlc");
+                    else lanzarActivity(url, title, mime, motor);
                     call.resolve(ok(true, wantFs));
                 } catch (Throwable ignored) {
                     String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
@@ -159,9 +160,10 @@ public class NativePlayerPlugin extends Plugin {
             rememberBox(call);
             if (StreamBoxPlugin.esTelevisor(act)) {
                 if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
-                    lastEngine = "vlc";
-                    useVlc = true;
-                    lanzarActivity(lastUrl, lastTitle, lastMime, "vlc");
+                    String motor = StreamBoxPlugin.motorReproductor(act);
+                    lastEngine = motor;
+                    useVlc = "vlc".equals(motor);
+                    lanzarActivity(lastUrl, lastTitle, lastMime, motor);
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;

@@ -3697,18 +3697,15 @@ function playChannel(channel) {
 }
 
 function nativePlayerEngine() {
-  // APK móvil: siempre ExoPlayer. LibVLC en el teléfono aborta el proceso.
+  // Móvil: ExoPlayer. TV: ExoPlayer, salvo Google Streamer (LibVLC).
   try {
     const n = window.StreamBoxNative;
-    if (n && (n.flavor === "mobile" || n.engine === "exo" || n.isTv === false)) return "exo";
+    if (n && (n.flavor === "mobile" || n.isTv === false)) return "exo";
+    if (n && n.googleStreamer) return "vlc";
+    if (n && n.flavor === "tv") return n.engine === "vlc" ? "vlc" : "exo";
   } catch (e) {}
   try {
     if (isNativeApp() && !isTvLayout() && nativeTvFlag() !== true) return "exo";
-  } catch (e) {}
-  try {
-    if (isTvLayout() || nativeTvFlag() === true || document.documentElement.classList.contains("is-native-tv")) {
-      return "vlc";
-    }
   } catch (e) {}
   return "exo";
 }
@@ -5041,7 +5038,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830e");
+  url.searchParams.set("v", "20260830f");
   window.location.replace(url.toString());
 }
 

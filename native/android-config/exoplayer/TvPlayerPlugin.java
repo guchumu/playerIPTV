@@ -22,7 +22,7 @@ public class TvPlayerPlugin extends Plugin {
     private String lastUrl = "";
     private String lastTitle = "";
     private String lastMime = "";
-    private String lastEngine = "vlc";
+    private String lastEngine = "exo";
     private boolean receiverOn;
 
     private final BroadcastReceiver finishedReceiver = new BroadcastReceiver() {
@@ -54,11 +54,16 @@ public class TvPlayerPlugin extends Plugin {
         } catch (Throwable ignored) {}
     }
 
-    private static String normalizarEngine(String raw) {
-        if (raw == null) return "vlc";
+    private static String motorDe(Context ctx, String raw) {
+        String fijo = StreamBoxPlugin.motorReproductor(ctx);
+        if ("vlc".equals(fijo)) return "vlc";
+        if (raw == null) return "exo";
         String e = raw.trim().toLowerCase();
-        if ("exo".equals(e) || "exoplayer".equals(e) || "media3".equals(e)) return "exo";
-        return "vlc";
+        if ("vlc".equals(e) || "libvlc".equals(e)) {
+            // Solo el Streamer usa VLC; el resto de TV ignora lo que mande la web.
+            return fijo;
+        }
+        return "exo";
     }
 
     @PluginMethod
@@ -73,7 +78,7 @@ public class TvPlayerPlugin extends Plugin {
         lastUrl = url;
         lastTitle = title == null ? "" : title;
         lastMime = mime == null ? "" : mime;
-        lastEngine = normalizarEngine(call.getString("engine", lastEngine));
+        lastEngine = motorDe(getContext(), call.getString("engine", lastEngine));
         Double boostRaw = call.getDouble("audioBoost");
         if (boostRaw != null) AudioBoost.last = AudioBoost.clamp(boostRaw.floatValue());
         Activity act = getActivity();
@@ -116,7 +121,7 @@ public class TvPlayerPlugin extends Plugin {
         Activity act = getActivity();
         if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
             try {
-                lastEngine = normalizarEngine(call.getString("engine", lastEngine));
+                lastEngine = motorDe(getContext(), call.getString("engine", lastEngine));
                 lanzar(act, lastUrl, lastTitle, lastMime, lastEngine);
             } catch (Throwable ignored) {}
             call.resolve(ok(true, true));
@@ -142,10 +147,11 @@ public class TvPlayerPlugin extends Plugin {
     @PluginMethod
     public void getEngine(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("engine", lastEngine);
+        ret.put("engine", StreamBoxPlugin.motorReproductor(getContext()));
         ret.put("isTv", true);
         ret.put("hasExo", true);
         ret.put("hasVlc", true);
+        ret.put("googleStreamer", StreamBoxPlugin.esGoogleStreamer());
         call.resolve(ret);
     }
 

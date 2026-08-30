@@ -32,6 +32,33 @@ public class StreamBoxPlugin extends Plugin {
 
     private static final String UA_MARCA = " StreamBoxTV/1.0 Leanback";
 
+    static boolean esGoogleStreamer() {
+        // Google TV Streamer 4K (2024), código kirkwood / GRS6B, SoC MediaTek.
+        // Ahí ExoPlayer + WebView abortan; el resto de teles van con Exo.
+        String blob = (
+            val(Build.DEVICE) + " " +
+            val(Build.MODEL) + " " +
+            val(Build.PRODUCT) + " " +
+            val(Build.BOARD) + " " +
+            val(Build.HARDWARE) + " " +
+            val(Build.FINGERPRINT)
+        ).toLowerCase();
+        if (blob.contains("kirkwood") || blob.contains("grs6b")) return true;
+        if (blob.contains("streamer") && blob.contains("google") && !blob.contains("chromecast")) {
+            return true;
+        }
+        return false;
+    }
+
+    static String motorReproductor(Context ctx) {
+        if (!esTelevisor(ctx)) return "exo";
+        return esGoogleStreamer() ? "vlc" : "exo";
+    }
+
+    private static String val(String s) {
+        return s == null ? "" : s;
+    }
+
     static boolean esTelevisor(Context ctx) {
         // El flavor del APK manda: la de TV siempre es TV (Google Streamer a veces
         // no declara leanback a tiempo). La de móvil nunca se trata como televisor.
@@ -72,14 +99,17 @@ public class StreamBoxPlugin extends Plugin {
 
     static String scriptNativo(Context ctx, boolean isTv) {
         String flavor = isTv ? "tv" : "mobile";
-        String engine = isTv ? "vlc" : "exo";
+        boolean streamer = isTv && esGoogleStreamer();
+        String engine = streamer ? "vlc" : "exo";
         String ver = versionName(ctx).replace("'", "").replace("\\", "");
         return "(function(){try{"
             + "window.StreamBoxNative=Object.assign({},window.StreamBoxNative||{},{isTv:"
             + (isTv ? "true" : "false")
             + ",flavor:'"
             + flavor
-            + "',hasExo:true,exo:true,hasVlc:true,engine:'"
+            + "',hasExo:true,exo:true,hasVlc:true,googleStreamer:"
+            + (streamer ? "true" : "false")
+            + ",engine:'"
             + engine
             + "',versionName:'"
             + ver
@@ -170,12 +200,14 @@ public class StreamBoxPlugin extends Plugin {
     public void getInfo(PluginCall call) {
         JSObject ret = new JSObject();
         boolean isTv = esTelevisor(getContext());
+        boolean streamer = isTv && esGoogleStreamer();
         ret.put("isTv", isTv);
         ret.put("flavor", isTv ? "tv" : "mobile");
         ret.put("hasExo", true);
         ret.put("exo", true);
         ret.put("hasVlc", true);
-        ret.put("engine", isTv ? "vlc" : "exo");
+        ret.put("googleStreamer", streamer);
+        ret.put("engine", streamer ? "vlc" : "exo");
         ret.put("versionName", versionName(getContext()));
         call.resolve(ret);
     }
