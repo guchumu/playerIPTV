@@ -164,6 +164,10 @@ function isNativeApp() {
 function detectDevice() {
   const ua = navigator.userAgent || "";
   const nativeTv = nativeTvFlag();
+  let flavor = "";
+  try {
+    flavor = (window.StreamBoxNative && window.StreamBoxNative.flavor) || "";
+  } catch (e) {}
   const isFireTV = /AFT|AmazonWebAppPlatform|Silk/i.test(ua);
   const isAndroidTV = /Android/i.test(ua) && /(TV|AOSP)/i.test(ua);
   const markedTv = /StreamBoxTV|Leanback/i.test(ua);
@@ -174,12 +178,16 @@ function detectDevice() {
   const wide = w >= 960;
   const landscape = w >= h && w >= 900;
   const heuristicTV =
-    isFireTV ||
-    isAndroidTV ||
-    markedTv ||
-    (coarse && noHover && wide && h >= 500) ||
-    (landscape && (markedTv || isNativeApp() || /Android/i.test(ua)));
-  const isTV = nativeTv === true || (nativeTv !== false && heuristicTV);
+    flavor !== "mobile" &&
+    (flavor === "tv" ||
+      isFireTV ||
+      isAndroidTV ||
+      markedTv ||
+      (coarse && noHover && wide && h >= 500) ||
+      (landscape && (markedTv || isNativeApp() || /Android/i.test(ua))));
+  const isTV =
+    flavor === "tv" ||
+    (flavor !== "mobile" && (nativeTv === true || (nativeTv !== false && heuristicTV)));
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
   document.body.classList.toggle("is-tv", isTV);
@@ -188,7 +196,7 @@ function detectDevice() {
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
   document.documentElement.classList.toggle(
     "is-native-tv",
-    nativeTv === true || (isTV && (markedTv || isNativeApp() || landscape))
+    flavor === "tv" || nativeTv === true || (isTV && (markedTv || isNativeApp() || landscape) && flavor !== "mobile")
   );
   document.documentElement.classList.toggle("login-landscape", landscape);
   if (!isTV) document.body.classList.remove("tv-channels-open");
@@ -202,8 +210,10 @@ async function refreshNativeTvFlag() {
     if (!plugin || typeof plugin.getInfo !== "function") return;
     const info = await plugin.getInfo();
     if (!info) return;
+    const flavor = info.flavor || (info.isTv ? "tv" : "mobile");
     window.StreamBoxNative = Object.assign({}, window.StreamBoxNative || {}, info, {
-      isTv: !!info.isTv,
+      isTv: flavor === "tv" ? true : flavor === "mobile" ? false : !!info.isTv,
+      flavor: flavor,
       hasExo: true,
       exo: true,
       hasVlc: true,
@@ -224,8 +234,17 @@ function getTvHeaderActions() {
   return [document.getElementById("refreshBtn"), document.getElementById("logoutBtn")].filter(Boolean);
 }
 
+function isTvChrome() {
+  try {
+    const n = window.StreamBoxNative;
+    if (n && n.flavor === "mobile") return false;
+    if (n && (n.flavor === "tv" || n.isTv)) return true;
+  } catch (e) {}
+  return isTvLayout() || document.documentElement.classList.contains("is-native-tv");
+}
+
 function applyTvChrome() {
-  const tv = isTvLayout();
+  const tv = isTvChrome();
   const hideIds = ["displayBtn", "pipBtn", "airplayBtn", "castButton", "bufferSelect", "channelSearch", "sortBtn", "stopBtn", "goLiveBtn"];
   hideIds.forEach((id) => {
     const el = document.getElementById(id);
@@ -234,6 +253,8 @@ function applyTvChrome() {
   });
   const bufferLabel = document.querySelector(".buffer-control");
   if (bufferLabel) bufferLabel.setAttribute("aria-hidden", tv ? "true" : "false");
+  const form = document.getElementById("loginForm");
+  if (form) form.hidden = tv;
   getTvHeaderActions().forEach((btn) => {
     btn.tabIndex = 0;
   });
@@ -1631,6 +1652,25 @@ function adSlotVisibleHere() {
   return window.matchMedia("(min-width: 1201px)").matches;
 }
 
+function initManualLogin() {
+  const form = document.getElementById("loginForm");
+  if (!form || form.dataset.bound === "1") return;
+  form.dataset.bound = "1";
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (isTvChrome()) return;
+    const server = (document.getElementById("loginServer") || {}).value || "";
+    const user = (document.getElementById("loginUser") || {}).value || "";
+    const pass = (document.getElementById("loginPass") || {}).value || "";
+    const m3u = (document.getElementById("loginM3u") || {}).value || "";
+    if (!(user && pass) && !String(m3u).trim()) {
+      setLoginStatus("Escribe usuario y contraseña, o un enlace M3U.");
+      return;
+    }
+    performLoginAction(server, user, pass, m3u);
+  });
+}
+
 function initAdSlot() {
   const slot = document.getElementById("adSlot");
   const img = document.getElementById("adSlotImg");
@@ -1708,6 +1748,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initChannelTools();
   initListManager();
   initAdSlot();
+  initManualLogin();
   bindFullscreenButtons();
   registrarServiceWorker();
   prepararInstalacion();
@@ -3578,6 +3619,7 @@ async function startNativePlayback(channel, opts) {
       )
     );
     nativePlaybackActive = true;
+    if (video) video.setAttribute("data-active-url", playUrl);
     showVideoSpinner(false);
     const engine = (ret && ret.engine) || nativePlayerEngine();
     const label = engine === "vlc" ? "LibVLC" : "ExoPlayer";
@@ -4244,15 +4286,37 @@ if (subtitleTrackSelect) {
 
 /********** PICTURE-IN-PICTURE Y AIRPLAY **********/
 const pipBtn = document.getElementById("pipBtn");
-if (pipBtn && document.pictureInPictureEnabled) {
-  pipBtn.hidden = false;
-  pipBtn.addEventListener("click", async () => {
-    try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await video.requestPictureInPicture();
-    } catch (e) {
-      showToast("Picture-in-Picture no disponible");
+
+async function enterPictureInPicture() {
+  if (isTvChrome()) {
+    showToast("Picture-in-Picture no está en la TV");
+    return;
+  }
+  try {
+    const plugin = nativePlayerPlugin();
+    if (plugin && typeof plugin.enterPip === "function") {
+      await plugin.enterPip();
+      return;
     }
+  } catch (e) {}
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      return;
+    }
+    if (video && document.pictureInPictureEnabled) {
+      await video.requestPictureInPicture();
+      return;
+    }
+  } catch (e) {}
+  showToast("Picture-in-Picture no disponible");
+}
+
+if (pipBtn && !isTvChrome()) {
+  const canHtmlPip = !!(video && document.pictureInPictureEnabled);
+  if (canHtmlPip || isNativeApp()) pipBtn.hidden = false;
+  pipBtn.addEventListener("click", () => {
+    enterPictureInPicture();
   });
 }
 
@@ -4285,6 +4349,10 @@ const castButton = document.getElementById("castButton");
 let castReady = false;
 
 function setupCast() {
+  if (isTvChrome()) {
+    if (castButton) castButton.hidden = true;
+    return false;
+  }
   if (castReady) return true;
   if (!window.cast || !window.cast.framework || !window.chrome || !chrome.cast) return false;
   try {
@@ -4691,7 +4759,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260824i");
+  url.searchParams.set("v", "20260830a");
   window.location.replace(url.toString());
 }
 

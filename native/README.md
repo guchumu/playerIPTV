@@ -15,12 +15,17 @@ servidores de GitHub, que ya traen el SDK de Android:
 
 1. Entra en el repositorio en GitHub → pestaña **Actions**.
 2. Elige el flujo **APK Android TV** → botón **Run workflow**.
-3. Cuando termine (unos 5 minutos), el archivo para instalar es **siempre**
-   el mismo, aunque la versión de dentro cambie:
+3. Cuando termine (unos 5 minutos), hay **dos** archivos. Las URLs no cambian:
 
+   **Android TV / Google Streamer / Fire Stick**
    **https://acortador.vip/player/downloads/tv.apk**
+   Solo QR + Device ID. LibVLC en el proceso `:vlc` (el menú no se congela).
 
-   En Downloader del Fire Stick se escribe esa dirección. No uses
+   **Android teléfono / tablet**
+   **https://acortador.vip/player/downloads/android.apk**
+   Formulario de lista o QR, PiP y Chromecast. ExoPlayer.
+
+   En Downloader del Fire Stick se escribe la URL de **tv.apk**. No uses
    `streambox-tv-1.0.N.apk` ni la URL de GitHub Releases.
 
 La primera ejecución también publica un artefacto llamado
@@ -37,18 +42,12 @@ solo a la Release:
 git tag v1.0.3 && git push origin v1.0.3
 ```
 
-## Cómo se instala (Fire Stick y móvil Android)
-
-El mismo APK sirve para Fire Stick / Android TV y para el teléfono. En el
-televisor leanback es opcional, así que también aparece en el cajón del móvil.
+## Cómo se instala
 
 1. Permitir apps de origen desconocido (Ajustes → Seguridad).
-2. En Fire Stick, instala **Downloader** desde la tienda de Amazon.
-3. En Downloader (o en el móvil, descargando el archivo) abre **siempre**
+2. En Fire Stick / Google TV, instala **Downloader** y abre
    `https://acortador.vip/player/downloads/tv.apk`.
-
-   Esa URL no cambia al publicar otra versión. Vuelve a descargar el mismo
-   enlace; no hace falta buscar un APK nuevo con otro nombre.
+3. En el teléfono, descarga `https://acortador.vip/player/downloads/android.apk`.
 
 No hace falta Android Studio ni Java en tu ordenador: el APK lo firma GitHub
 Actions. Con un PC cerca y el televisor en modo desarrollador también sirve
@@ -88,19 +87,15 @@ cd native/android && ./gradlew assembleDebug
 # salida: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Reproducción: LibVLC o ExoPlayer (elegible)
+## Reproducción
 
-En la APK puedes elegir el motor en el login o en la cabecera (Motor):
+- **APK TV:** LibVLC en `VlcPlayerActivity` (proceso `:vlc`). No se carga Media3
+  junto al WebView; eso congelaba Google Streamer 4K. Sin PiP ni Chromecast.
+- **APK móvil:** ExoPlayer encima del WebView, PiP nativo y Chromecast de la web.
+- **Navegador / PWA:** `<video>` + mpegts.js / hls.js.
 
-- **LibVLC** (recomendado en TV / Streamer): proceso `:vlc`.
-- **ExoPlayer**: proceso `:exo` en TV; en móvil puede ir encima del WebView.
-
-Por defecto: LibVLC en televisor, ExoPlayer en teléfono. En navegador/PWA sigue
-`<video>` + mpegts.js.
-
-`tools/patch_android_tv.py` copia el plugin `NativePlayer`, el plugin
-`StreamBox` (detecta leanback), las Activities y las dependencias Media3 + LibVLC
-justo después de `npx cap add android`.
+`tools/patch_android_tv.py native/android tv` o `... mobile` copia plugins,
+Activities y dependencias justo después de `npx cap add android`.
 
 ## iOS
 

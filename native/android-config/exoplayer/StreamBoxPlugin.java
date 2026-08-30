@@ -33,6 +33,12 @@ public class StreamBoxPlugin extends Plugin {
     private static final String UA_MARCA = " StreamBoxTV/1.0 Leanback";
 
     static boolean esTelevisor(Context ctx) {
+        // El flavor del APK manda: la de TV siempre es TV (Google Streamer a veces
+        // no declara leanback a tiempo). La de móvil nunca se trata como televisor.
+        try {
+            if (BuildConfig.STREAMBOX_TV) return true;
+            return false;
+        } catch (Throwable ignored) {}
         if (ctx == null) return false;
         PackageManager pm = ctx.getPackageManager();
         if (pm != null) {
@@ -65,14 +71,15 @@ public class StreamBoxPlugin extends Plugin {
     }
 
     static String scriptNativo(Context ctx, boolean isTv) {
+        String flavor = isTv ? "tv" : "mobile";
         String engine = isTv ? "vlc" : "exo";
-        // Preferencia de la web (localStorage vía StreamBoxNative.engine ya inyectado).
-        // El motor definitivo lo decide cada play() con el parámetro engine.
         String ver = versionName(ctx).replace("'", "").replace("\\", "");
         return "(function(){try{"
             + "window.StreamBoxNative=Object.assign({},window.StreamBoxNative||{},{isTv:"
             + (isTv ? "true" : "false")
-            + ",hasExo:true,exo:true,hasVlc:true,engine:'"
+            + ",flavor:'"
+            + flavor
+            + "',hasExo:true,exo:true,hasVlc:true,engine:'"
             + engine
             + "',versionName:'"
             + ver
@@ -82,7 +89,9 @@ public class StreamBoxPlugin extends Plugin {
                     + "function a(){if(document.body)document.body.classList.add('is-tv');}"
                     + "a();"
                     + "if(!document.body)document.addEventListener('DOMContentLoaded',a);"
-                : "document.documentElement.classList.remove('is-native-tv');")
+                : "document.documentElement.classList.remove('is-native-tv');"
+                    + "function b(){if(document.body)document.body.classList.remove('is-tv');}"
+                    + "b();")
             + "}catch(e){}})();";
     }
 
@@ -162,6 +171,7 @@ public class StreamBoxPlugin extends Plugin {
         JSObject ret = new JSObject();
         boolean isTv = esTelevisor(getContext());
         ret.put("isTv", isTv);
+        ret.put("flavor", isTv ? "tv" : "mobile");
         ret.put("hasExo", true);
         ret.put("exo", true);
         ret.put("hasVlc", true);

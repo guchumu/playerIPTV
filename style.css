@@ -241,9 +241,37 @@ html.is-native-tv .engine-control select {
 }
 
 .login-divider { text-align: center; margin: 15px 0; opacity: 0.4; }
-.input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
-.input-group label { font-size: 0.75rem; color: #6366f1; font-weight: bold; text-transform: uppercase; }
-#loginForm input {
+.login-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0.4rem 0 1rem;
+  text-align: left;
+}
+.login-manual-lead {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #a5b4fc;
+}
+.login-manual label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.login-manual .login-divider {
+  margin: 6px 0 2px;
+  font-size: 0.75rem;
+  text-transform: none;
+  font-weight: 600;
+  color: #64748b;
+}
+#loginForm input,
+.login-manual input {
   width: 100%;
   padding: 0.6rem 0.8rem;
   border-radius: 10px;
@@ -251,8 +279,10 @@ html.is-native-tv .engine-control select {
   background: #020617;
   color: #f9fafb;
   font-size: 16px;
+  box-sizing: border-box;
 }
-#loginForm button {
+#loginForm button,
+.login-manual button {
   width: 100%;
   padding: 0.7rem;
   border-radius: 10px;
@@ -262,7 +292,16 @@ html.is-native-tv .engine-control select {
   font-weight: 600;
   cursor: pointer;
   margin-top: 0.2rem;
+  min-height: 44px;
 }
+body.is-tv #loginForm,
+html.is-native-tv #loginForm,
+body.is-tv .login-manual,
+html.is-native-tv .login-manual {
+  display: none !important;
+}
+.input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
+.input-group label { font-size: 0.75rem; color: #6366f1; font-weight: bold; text-transform: uppercase; }
 
 .app-download-row {
   display: flex;
@@ -1329,12 +1368,22 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-head {
   grid-column: 1;
+  grid-row: 1;
   min-width: 0;
   align-self: center;
   text-align: left;
 }
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-manual {
+  grid-column: 1;
+  grid-row: 2;
+  margin: 0.2rem 0 0;
+  max-height: calc(100dvh - 220px);
+  overflow: auto;
+  align-self: start;
+}
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-col-side {
   grid-column: 2;
+  grid-row: 1 / span 2;
   min-width: 0;
   max-height: calc(100dvh - 40px);
   overflow: hidden;
@@ -1366,9 +1415,13 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
   display: none !important;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-engine {
-  display: flex !important;
-  margin: 0.25rem 0 0.4rem;
+body.is-tv .login-manual,
+html.is-native-tv .login-manual { display: none !important; }
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-manual {
+  grid-column: 1;
+  margin: 0.2rem 0 0;
+  max-height: calc(100dvh - 220px);
+  overflow: auto;
 }
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-engine[hidden] {
   display: none !important;
@@ -1453,8 +1506,12 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   html:not(.login-portrait) #loginScreen .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
     display: none !important;
   }
-  html:not(.login-portrait) #loginScreen .login-engine {
-    display: flex !important;
+  html:not(.login-portrait) #loginScreen .login-manual {
+    grid-column: 1;
+  }
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-manual,
+  body.is-tv #loginScreen .login-manual {
+    display: none !important;
   }
   html:not(.login-portrait) #loginScreen .login-engine[hidden] {
     display: none !important;

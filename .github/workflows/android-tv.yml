@@ -1,15 +1,15 @@
-name: APK Android TV
+name: APK Android TV y Android
 
-# Compila el APK en los servidores de GitHub, que ya traen el SDK de Android.
-# Así no hace falta instalar Java, Node ni Android Studio en ningún ordenador.
+# Compila DOS APKs en GitHub (sin Android Studio local):
+#   downloads/tv.apk      → Android TV / Google Streamer (LibVLC en :vlc)
+#   downloads/android.apk → teléfono (ExoPlayer, PiP, Chromecast)
 #
-# Lanzarlo a mano: pestaña Actions -> "APK Android TV" -> "Run workflow".
-# El APK queda en los artefactos de la ejecución. Si se lanza con una etiqueta
-# vNNN también se publica como Release descargable.
+# Lanzarlo a mano: Actions → "APK Android TV y Android" → Run workflow.
+# Con etiqueta vNNN se adjunta a la Release.
 #
-# La URL pública NUNCA cambia de versión:
+# URLs públicas fijas:
 #   https://acortador.vip/player/downloads/tv.apk
-# El versionCode interno sí sube para que Android acepte la actualización.
+#   https://acortador.vip/player/downloads/android.apk
 
 on:
   workflow_dispatch:
@@ -56,15 +56,10 @@ jobs:
         working-directory: native
         run: npx cap add android
 
-      - name: Aplicar la configuración de Android TV
-        run: python3 tools/patch_android_tv.py native/android
-
       - name: Numerar la versión
         id: ver
         working-directory: native/android/app
         run: |
-          # versionCode siempre crece (run_number). versionName usa la etiqueta
-          # v1.0.3 si existe; si no, 1.0.<run>.
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             NAME="${GITHUB_REF_NAME#v}"
           else
@@ -87,8 +82,6 @@ jobs:
             echo "usando la clave guardada en los secretos"
             echo "generada=no" >> "$GITHUB_OUTPUT"
           else
-            # Primera vez: se crea una clave y se publica para guardarla como
-            # secreto. Las actualizaciones necesitan SIEMPRE la misma clave.
             keytool -genkeypair -v -keystore "$RUTA" \
               -alias streambox -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass streambox -keypass streambox \
@@ -99,42 +92,61 @@ jobs:
           fi
           echo "ruta=$RUTA" >> "$GITHUB_OUTPUT"
 
-      - name: Compilar el APK firmado
-        working-directory: native/android
+      - name: Compilar APK TV (LibVLC, proceso :vlc)
+        working-directory: native
         env:
           CLAVE: ${{ steps.firma.outputs.ruta }}
           CLAVE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'streambox' }}
           CLAVE_ALIAS: ${{ secrets.KEY_ALIAS || 'streambox' }}
           CLAVE_ALIAS_PASS: ${{ secrets.KEY_PASSWORD || 'streambox' }}
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon \
+          python3 ../tools/patch_android_tv.py android tv
+          chmod +x android/gradlew
+          (cd android && ./gradlew assembleRelease --no-daemon \
             -Pandroid.injected.signing.store.file="$CLAVE" \
             -Pandroid.injected.signing.store.password="$CLAVE_PASS" \
             -Pandroid.injected.signing.key.alias="$CLAVE_ALIAS" \
-            -Pandroid.injected.signing.key.password="$CLAVE_ALIAS_PASS"
+            -Pandroid.injected.signing.key.password="$CLAVE_ALIAS_PASS")
+          mkdir -p "$RUNNER_TEMP/apks"
+          cp android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apks/tv.apk"
 
-      - name: Copiar a tv.apk (nombre estable)
+      - name: Compilar APK Android (ExoPlayer, PiP)
+        working-directory: native
+        env:
+          CLAVE: ${{ steps.firma.outputs.ruta }}
+          CLAVE_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'streambox' }}
+          CLAVE_ALIAS: ${{ secrets.KEY_ALIAS || 'streambox' }}
+          CLAVE_ALIAS_PASS: ${{ secrets.KEY_PASSWORD || 'streambox' }}
+        run: |
+          python3 ../tools/patch_android_tv.py android mobile
+          chmod +x android/gradlew
+          (cd android && ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$CLAVE" \
+            -Pandroid.injected.signing.store.password="$CLAVE_PASS" \
+            -Pandroid.injected.signing.key.alias="$CLAVE_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CLAVE_ALIAS_PASS")
+          cp android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/apks/android.apk"
+
+      - name: Copiar a nombres estables
         id: apk
         run: |
           set -e
-          ORIGEN=native/android/app/build/outputs/apk/release/app-release.apk
           mkdir -p downloads
-          # URL pública: siempre downloads/tv.apk. El nombre versionado solo
-          # sirve como artefacto interno de CI, no se lo des al usuario.
-          cp "$ORIGEN" tv.apk
-          cp "$ORIGEN" android.apk
-          cp "$ORIGEN" downloads/tv.apk
-          cp "$ORIGEN" downloads/android.apk
+          cp "$RUNNER_TEMP/apks/tv.apk" tv.apk
+          cp "$RUNNER_TEMP/apks/android.apk" android.apk
+          cp tv.apk downloads/tv.apk
+          cp android.apk downloads/android.apk
           DESTINO="streambox-tv-${{ steps.ver.outputs.name }}.apk"
-          cp "$ORIGEN" "$DESTINO"
-          ls -lh tv.apk downloads/tv.apk "$DESTINO"
+          cp tv.apk "$DESTINO"
           echo "nombre=$DESTINO" >> "$GITHUB_OUTPUT"
+          ls -lh tv.apk android.apk downloads/tv.apk downloads/android.apk
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          echo "===== TV ====="
           "$AAPT" dump badging tv.apk | grep -Ei "leanback|banner|package:|sdkVersion" || true
-          unzip -l tv.apk | grep -Ei "exoplayer|media3|libvlc|VlcPlayer|PlayerActivity|StreamBoxPlugin" || true
+          echo "===== ANDROID ====="
+          "$AAPT" dump badging android.apk | grep -Ei "leanback|banner|package:|sdkVersion|pip" || true
 
-      - name: Publicar el APK como artefacto
+      - name: Publicar los APK como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.apk.outputs.nombre }}
@@ -142,26 +154,28 @@ jobs:
             tv.apk
             android.apk
             downloads/tv.apk
+            downloads/android.apk
           retention-days: 90
 
-      - name: Guardar downloads/tv.apk en main
+      - name: Guardar APKs en main
         continue-on-error: true
         run: |
           set -e
           cp tv.apk "$RUNNER_TEMP/tv.apk"
+          cp android.apk "$RUNNER_TEMP/android.apk"
           git fetch origin main
           git checkout -B apk-slot origin/main
           mkdir -p downloads
           cp "$RUNNER_TEMP/tv.apk" downloads/tv.apk
-          cp "$RUNNER_TEMP/tv.apk" downloads/android.apk
+          cp "$RUNNER_TEMP/android.apk" downloads/android.apk
           git add downloads/tv.apk downloads/android.apk
           if git diff --cached --quiet; then
-            echo "APK idéntico, no hay commit"
+            echo "APKs idénticos, no hay commit"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Actualizar downloads/tv.apk (URL estable) [skip ci]"
+          git commit -m "Actualizar downloads/tv.apk y android.apk (URLs estables) [skip ci]"
           git push origin HEAD:main
 
       - name: Publicar la clave nueva (guárdala como secreto KEYSTORE_BASE64)
@@ -172,7 +186,7 @@ jobs:
           path: ${{ runner.temp }}/keystore-base64.txt
           retention-days: 7
 
-      - name: Adjuntar el APK a la Release
+      - name: Adjuntar los APK a la Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -180,9 +194,12 @@ jobs:
             tv.apk
             android.apk
           body: |
-            Instalar siempre desde la misma URL (Downloader en Fire Stick):
+            Dos APKs. Las URLs no cambian al publicar otra versión:
 
-            **https://acortador.vip/player/downloads/tv.apk**
+            **Android TV / Google Streamer / Fire Stick**
+            https://acortador.vip/player/downloads/tv.apk
+            Solo carga remota (QR + Device ID). LibVLC en proceso aparte (no congela el Streamer).
 
-            No uses el nombre versionado de GitHub. El APK de dentro cambia de versión; la dirección no.
-            El mismo archivo sirve para Fire Stick / Android TV y para el móvil Android (ExoPlayer).
+            **Android teléfono / tablet**
+            https://acortador.vip/player/downloads/android.apk
+            Lista a mano o QR, PiP y Chromecast. ExoPlayer.

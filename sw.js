@@ -12,7 +12,7 @@
  * seguiría viendo código viejo sin entender por qué. Aquí la caché es solo una
  * red de seguridad para cuando la red falla.
  */
-const VERSION = "streambox-20260824i";
+const VERSION = "streambox-20260830a";
 
 // Nunca se toca: los .php son el relé de vídeo, los proxies y las APIs de
 // estado. Guardar o reutilizar cualquiera de esas respuestas rompería la

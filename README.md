@@ -24,10 +24,14 @@ Publica esta carpeta en un PHP + MySQL (Apache/nginx).
 
 Ver `native/README.md` (Capacitor: `com.guchumu.playeriptv`).
 
-Instalación en Fire Stick / Android TV / Android: **siempre** la misma URL,
-aunque el APK de dentro cambie de versión:
+Hay **dos APKs**. Las URLs no cambian al publicar otra versión:
 
-**https://acortador.vip/player/downloads/tv.apk**
+- **Android TV / Google Streamer / Fire Stick:** https://acortador.vip/player/downloads/tv.apk  
+  Solo carga remota (QR o Device ID). LibVLC en un proceso aparte para no congelar el Streamer 4K.
+- **Android teléfono / tablet:** https://acortador.vip/player/downloads/android.apk  
+  Lista a mano o por QR, Picture-in-Picture y Chromecast. ExoPlayer.
+
+**Navegador:** https://acortador.vip/player/ — puedes escribir usuario/clave o M3U, o cargar con QR/código.
 
 IPA de iOS (mismo nombre siempre; sin certificado de Apple no se instala en un iPhone):
 

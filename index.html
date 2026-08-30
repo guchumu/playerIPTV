@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260824i" />
+      <link rel="stylesheet" href="style.css?v=20260830a" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -53,9 +53,31 @@
             <div class="login-head">
                 <img src="logo.png" alt="" class="login-logo" />
                 <h1>StreamBox IPTV</h1>
-                <p class="build-tag">v20260824i</p>
+                <p class="build-tag">v20260830a</p>
                 <p class="login-tv-hint">En la tele: el código QR queda a la derecha. Con el móvil, ábrelo y carga la lista.</p>
             </div>
+
+            <form id="loginForm" class="login-manual" autocomplete="on">
+                <p class="login-manual-lead">Entra con tu lista</p>
+                <label>
+                    Servidor Xtream
+                    <input type="text" id="loginServer" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" inputmode="url" />
+                </label>
+                <label>
+                    Usuario
+                    <input type="text" id="loginUser" name="username" placeholder="Usuario" autocomplete="username" enterkeyhint="next" />
+                </label>
+                <label>
+                    Contraseña
+                    <input type="password" id="loginPass" name="password" placeholder="Contraseña" autocomplete="current-password" enterkeyhint="next" />
+                </label>
+                <p class="login-divider">— o lista M3U —</p>
+                <label>
+                    Enlace M3U
+                    <input type="url" id="loginM3u" name="m3uUrl" placeholder="http://…/lista.m3u" autocomplete="off" inputmode="url" enterkeyhint="go" />
+                </label>
+                <button type="submit" id="loginSubmitBtn">Entrar</button>
+            </form>
 
             <div class="login-col-side">
                 <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
@@ -252,6 +274,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260824i"></script>
+    <script src="core.js?v=20260830a"></script>
 </body>
 </html>

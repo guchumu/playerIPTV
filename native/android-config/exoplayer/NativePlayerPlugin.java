@@ -1,9 +1,12 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
+import android.util.Rational;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -162,6 +165,31 @@ public class NativePlayerPlugin extends Plugin {
             rememberBox(call);
             if (overlay != null && !fullscreen) applyLayout(false);
             call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void enterPip(PluginCall call) {
+        Activity act = getActivity();
+        if (act == null) {
+            call.reject("Sin actividad");
+            return;
+        }
+        if (StreamBoxPlugin.esTelevisor(act) || Build.VERSION.SDK_INT < 26) {
+            call.reject("PiP no disponible");
+            return;
+        }
+        act.runOnUiThread(() -> {
+            try {
+                applyLayout(true);
+                PictureInPictureParams.Builder b = new PictureInPictureParams.Builder()
+                    .setAspectRatio(new Rational(16, 9));
+                boolean ok = act.enterPictureInPictureMode(b.build());
+                if (ok) call.resolve(ok(true, true));
+                else call.reject("El sistema rechazó PiP");
+            } catch (Throwable t) {
+                call.reject(t.getMessage() != null ? t.getMessage() : "PiP no disponible");
+            }
         });
     }
 
