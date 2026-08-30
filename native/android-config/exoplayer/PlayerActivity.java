@@ -27,6 +27,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.ui.PlayerView;
 import android.media.audiofx.LoudnessEnhancer;
+import java.lang.ref.WeakReference;
 
 /**
  * Reproductor a pantalla completa con Media3/ExoPlayer.

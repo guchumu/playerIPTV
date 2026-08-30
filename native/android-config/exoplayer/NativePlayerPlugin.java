@@ -11,6 +11,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
 import android.media.audiofx.LoudnessEnhancer;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
