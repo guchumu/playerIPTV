@@ -386,7 +386,7 @@ def parchear_gradle(ruta: Path, flavor: str) -> list:
     if "STREAMBOX_TV" not in texto:
         texto = re.sub(
             r"(defaultConfig\s*\{)",
-            r"\1\n        buildConfigField \"boolean\", \"STREAMBOX_TV\", \"" + tv_flag + r"\"",
+            r'\1\n        buildConfigField "boolean", "STREAMBOX_TV", "' + tv_flag + '"',
             texto,
             count=1,
         )
