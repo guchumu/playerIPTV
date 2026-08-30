@@ -78,6 +78,7 @@ JAVA_PLUGINS = (
     "PlayerActivity.java",
     "VlcPlayerActivity.java",
     "VlcOptions.java",
+    "AudioBoost.java",
     "StreamBoxPlugin.java",
 )
 

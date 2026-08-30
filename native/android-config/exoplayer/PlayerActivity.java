@@ -26,7 +26,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.ui.PlayerView;
-import java.lang.ref.WeakReference;
+import android.media.audiofx.LoudnessEnhancer;
 
 /**
  * Reproductor a pantalla completa con Media3/ExoPlayer.
@@ -39,6 +39,7 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_MIME = "mime";
+    public static final String EXTRA_BOOST = "audioBoost";
 
     private static final String UA = "VLC/3.0.16 LibVLC/3.0.16";
 
@@ -47,12 +48,20 @@ public class PlayerActivity extends Activity {
     private ExoPlayer player;
     private PlayerView playerView;
     private TextView titleView;
+    private LoudnessEnhancer exoBoost;
     private String stopAction;
+    private String boostAction;
     private boolean receiverOn;
 
     private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (intent != null && boostAction != null && boostAction.equals(intent.getAction())) {
+                float boost = intent.getFloatExtra(EXTRA_BOOST, AudioBoost.last);
+                AudioBoost.last = AudioBoost.clamp(boost);
+                aplicarBoost();
+                return;
+            }
             finish();
         }
     };
@@ -82,8 +91,11 @@ public class PlayerActivity extends Activity {
         ocultarBarras();
 
         stopAction = getPackageName() + ".STOP_EXO";
+        boostAction = getPackageName() + ".AUDIO_BOOST";
         try {
-            IntentFilter filter = new IntentFilter(stopAction);
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(stopAction);
+            filter.addAction(boostAction);
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
             } else {
@@ -121,9 +133,15 @@ public class PlayerActivity extends Activity {
                     if (!isFinishing()) finish();
                 }, 2800);
             }
+
+            @Override
+            public void onAudioSessionIdChanged(int audioSessionId) {
+                aplicarBoost();
+            }
         });
 
         if (getIntent() != null) {
+            leerBoost(getIntent());
             playUrl(
                 getIntent().getStringExtra(EXTRA_URL),
                 getIntent().getStringExtra(EXTRA_TITLE),
@@ -141,6 +159,7 @@ public class PlayerActivity extends Activity {
             return;
         }
         if (intent != null) {
+            leerBoost(intent);
             playUrl(
                 intent.getStringExtra(EXTRA_URL),
                 intent.getStringExtra(EXTRA_TITLE),
@@ -175,6 +194,16 @@ public class PlayerActivity extends Activity {
         player.setMediaItem(item);
         player.prepare();
         player.setPlayWhenReady(true);
+        aplicarBoost();
+    }
+
+    private void leerBoost(Intent intent) {
+        if (intent == null || !intent.hasExtra(EXTRA_BOOST)) return;
+        AudioBoost.last = AudioBoost.clamp(intent.getFloatExtra(EXTRA_BOOST, AudioBoost.last));
+    }
+
+    private void aplicarBoost() {
+        exoBoost = AudioBoost.attach(player, exoBoost, AudioBoost.last);
     }
 
     private void ocultarBarras() {
@@ -245,6 +274,12 @@ public class PlayerActivity extends Activity {
         }
         if (viva != null && viva.get() == this) viva = null;
         if (playerView != null) playerView.setPlayer(null);
+        if (exoBoost != null) {
+            try {
+                exoBoost.release();
+            } catch (Throwable ignored) {}
+            exoBoost = null;
+        }
         if (player != null) {
             player.release();
             player = null;

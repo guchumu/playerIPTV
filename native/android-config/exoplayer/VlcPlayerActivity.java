@@ -37,10 +37,17 @@ public class VlcPlayerActivity extends Activity {
     private boolean paused;
     private boolean receiverOn;
     private String stopAction;
+    private String boostAction;
 
     private final BroadcastReceiver stopReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (intent != null && boostAction != null && boostAction.equals(intent.getAction())) {
+                float boost = intent.getFloatExtra("audioBoost", AudioBoost.last);
+                AudioBoost.last = AudioBoost.clamp(boost);
+                aplicarVolumen();
+                return;
+            }
             finish();
         }
     };
@@ -58,6 +65,7 @@ public class VlcPlayerActivity extends Activity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         stopAction = getPackageName() + ".STOP_VLC";
+        boostAction = getPackageName() + ".AUDIO_BOOST";
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (stopAction.equals(getIntent() != null ? getIntent().getAction() : null)) {
             finish();
@@ -90,7 +98,10 @@ public class VlcPlayerActivity extends Activity {
     private void registrarStop() {
         if (receiverOn) return;
         if (stopAction == null) stopAction = getPackageName() + ".STOP_VLC";
-        IntentFilter filter = new IntentFilter(stopAction);
+        if (boostAction == null) boostAction = getPackageName() + ".AUDIO_BOOST";
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(stopAction);
+        filter.addAction(boostAction);
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -122,6 +133,7 @@ public class VlcPlayerActivity extends Activity {
             }
         }
         if (getIntent() != null) {
+            leerBoost(getIntent());
             playUrl(getIntent().getStringExtra(EXTRA_URL), getIntent().getStringExtra(EXTRA_TITLE));
         }
     }
@@ -135,8 +147,15 @@ public class VlcPlayerActivity extends Activity {
             return;
         }
         if (intent != null) {
+            leerBoost(intent);
             playUrl(intent.getStringExtra(EXTRA_URL), intent.getStringExtra(EXTRA_TITLE));
         }
+    }
+
+    private void leerBoost(Intent intent) {
+        if (intent == null) return;
+        if (!intent.hasExtra("audioBoost")) return;
+        AudioBoost.last = AudioBoost.clamp(intent.getFloatExtra("audioBoost", AudioBoost.last));
     }
 
     private void playUrl(String url, String title) {
@@ -158,6 +177,7 @@ public class VlcPlayerActivity extends Activity {
             media.addOption(":network-caching=2000");
             media.addOption(":live-caching=2000");
             media.addOption(":http-user-agent=" + UA);
+            media.addOption(":gain=" + AudioBoost.clamp(AudioBoost.last));
             mediaPlayer.setMedia(media);
             media.release();
             paused = false;
@@ -166,6 +186,7 @@ public class VlcPlayerActivity extends Activity {
                 mediaPlayer.setAspectRatio(null);
             } catch (Throwable ignored) {}
             mediaPlayer.play();
+            aplicarVolumen();
         } catch (Throwable ignored) {
             return;
         }
@@ -176,6 +197,13 @@ public class VlcPlayerActivity extends Activity {
                 } catch (Exception ignored) {}
             });
         }
+    }
+
+    private void aplicarVolumen() {
+        if (mediaPlayer == null) return;
+        try {
+            mediaPlayer.setVolume(AudioBoost.vlcPercent(AudioBoost.last));
+        } catch (Throwable ignored) {}
     }
 
     private void ocultarBarras() {

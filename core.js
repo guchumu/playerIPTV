@@ -18,6 +18,7 @@ let mpegtsPlayer = null;
 let nativePlaybackActive = false;
 let nativeFullscreen = false;
 const BUFFER_KEY = "streambox_buffer";
+const AUDIO_BOOST_KEY = "streambox_audio_boost";
 const LAST_LIST_KEY = "streambox_last_list";
 const SAVED_LISTS_KEY = "streambox_saved_lists";
 const ACTIVE_LIST_KEY = "streambox_active_list";
@@ -233,6 +234,7 @@ function isTvLayout() {
 function getTvHeaderActions() {
   return [
     document.getElementById("viewModeBtn"),
+    document.getElementById("audioBoostBtn"),
     document.getElementById("refreshBtn"),
     document.getElementById("logoutBtn"),
   ].filter(Boolean);
@@ -394,6 +396,101 @@ function setBufferSeconds(value) {
 // esperar al arrancar; son cosas distintas.
 function getEngineBufferSeconds() {
   return Math.max(getBufferSeconds(), 10);
+}
+
+const AUDIO_BOOST_STEPS = [1, 1.25, 1.5, 2, 3];
+let audioBoostCtx = null;
+let audioBoostGain = null;
+let audioBoostSource = null;
+
+function getAudioBoost() {
+  try {
+    const n = parseFloat(localStorage.getItem(AUDIO_BOOST_KEY));
+    if (!isNaN(n) && n >= 1) return Math.min(3, n);
+  } catch (e) {}
+  return 1;
+}
+
+function audioBoostLabel(boost) {
+  return Math.round((boost || 1) * 100) + "%";
+}
+
+function syncAudioBoostButton() {
+  const btn = document.getElementById("audioBoostBtn");
+  if (!btn) return;
+  const boost = getAudioBoost();
+  btn.textContent = audioBoostLabel(boost);
+  btn.classList.toggle("is-boosted", boost > 1);
+  btn.title =
+    boost > 1
+      ? "Volumen extra " + audioBoostLabel(boost) + " (por encima del máximo del aparato)"
+      : "Volumen extra: pulsa para subir por encima del 100%";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+function ensureAudioBoostGraph() {
+  if (!video || audioBoostSource) return audioBoostGain;
+  if (document.body.classList.contains("is-ios")) return null;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  try {
+    audioBoostCtx = audioBoostCtx || new AC();
+    audioBoostSource = audioBoostCtx.createMediaElementSource(video);
+    audioBoostGain = audioBoostCtx.createGain();
+    const comp = audioBoostCtx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.knee.value = 12;
+    comp.ratio.value = 3;
+    audioBoostSource.connect(audioBoostGain);
+    audioBoostGain.connect(comp);
+    comp.connect(audioBoostCtx.destination);
+  } catch (e) {
+    audioBoostSource = audioBoostSource || true;
+    return null;
+  }
+  return audioBoostGain;
+}
+
+function applyAudioBoost(value, opts) {
+  const boost = Math.min(3, Math.max(1, Number(value) || 1));
+  try {
+    localStorage.setItem(AUDIO_BOOST_KEY, String(boost));
+  } catch (e) {}
+  if (boost > 1) ensureAudioBoostGraph();
+  if (audioBoostGain && audioBoostGain.gain) audioBoostGain.gain.value = boost;
+  if (audioBoostCtx && audioBoostCtx.state === "suspended") {
+    audioBoostCtx.resume().catch(() => {});
+  }
+  const plugin = nativePlayerPlugin();
+  if (plugin && typeof plugin.setVolumeBoost === "function") {
+    plugin.setVolumeBoost({ audioBoost: boost }).catch(() => {});
+  }
+  syncAudioBoostButton();
+  if (!(opts && opts.silent)) {
+    showToast(boost > 1 ? "Volumen " + audioBoostLabel(boost) : "Volumen normal (100%)");
+  }
+  return boost;
+}
+
+function cycleAudioBoost() {
+  const cur = getAudioBoost();
+  let idx = AUDIO_BOOST_STEPS.findIndex((s) => Math.abs(s - cur) < 0.01);
+  if (idx < 0) idx = 0;
+  const next = AUDIO_BOOST_STEPS[(idx + 1) % AUDIO_BOOST_STEPS.length];
+  return applyAudioBoost(next);
+}
+
+function initAudioBoost() {
+  syncAudioBoostButton();
+  const btn = document.getElementById("audioBoostBtn");
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cycleAudioBoost();
+    });
+  }
 }
 
 function stopPlayback(opts) {
@@ -1852,6 +1949,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSplash();
   initChannelTools();
   initChannelView();
+  initAudioBoost();
   initListManager();
   initAdSlot();
   initManualLogin();
@@ -3776,6 +3874,7 @@ async function startNativePlayback(channel, opts) {
           mime: mime,
           fullscreen: fullscreen,
           engine: nativePlayerEngine(),
+          audioBoost: getAudioBoost(),
         },
         nativeEmbedRect()
       )
@@ -3829,7 +3928,12 @@ function startPlayback(channel) {
 
     const playPromise = video.play();
     if (playPromise !== undefined) {
-      playPromise.then(onStarted).catch((err) => {
+      playPromise
+        .then(() => {
+          applyAudioBoost(getAudioBoost(), { silent: true });
+          onStarted();
+        })
+        .catch((err) => {
         showVideoSpinner(false);
         if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
       });
@@ -4932,7 +5036,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830c");
+  url.searchParams.set("v", "20260830d");
   window.location.replace(url.toString());
 }
 

@@ -11,7 +11,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import android.widget.FrameLayout;
+import android.media.audiofx.LoudnessEnhancer;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.media3.common.MediaItem;
@@ -48,6 +48,7 @@ public class NativePlayerPlugin extends Plugin {
     private ExoPlayer exoPlayer;
     private PlayerView exoView;
     private View overlay;
+    private LoudnessEnhancer exoBoost;
     private boolean useVlc;
     private boolean fullscreen = false;
     private int boxX, boxY, boxW, boxH;
@@ -75,6 +76,8 @@ public class NativePlayerPlugin extends Plugin {
         String title = call.getString("title", "");
         String mime = call.getString("mime", "");
         boolean wantFs = Boolean.TRUE.equals(call.getBoolean("fullscreen", false));
+        Double boostRaw = call.getDouble("audioBoost");
+        if (boostRaw != null) AudioBoost.last = AudioBoost.clamp(boostRaw.floatValue());
         Activity act = getActivity();
         if (act == null) {
             call.reject("Sin actividad");
@@ -114,6 +117,31 @@ public class NativePlayerPlugin extends Plugin {
                     call.reject(msg);
                 }
             }
+        });
+    }
+
+    @PluginMethod
+    public void setVolumeBoost(PluginCall call) {
+        Double boostRaw = call.getDouble("audioBoost");
+        float boost = AudioBoost.clamp(boostRaw == null ? AudioBoost.last : boostRaw.floatValue());
+        AudioBoost.last = boost;
+        Activity act = getActivity();
+        android.content.Context ctx = getContext();
+        if (ctx != null) {
+            try {
+                Intent i = new Intent(ctx.getPackageName() + ".AUDIO_BOOST");
+                i.setPackage(ctx.getPackageName());
+                i.putExtra("audioBoost", boost);
+                ctx.sendBroadcast(i);
+            } catch (Throwable ignored) {}
+        }
+        if (act == null) {
+            call.resolve();
+            return;
+        }
+        act.runOnUiThread(() -> {
+            applyExoBoost();
+            call.resolve();
         });
     }
 
@@ -302,6 +330,11 @@ public class NativePlayerPlugin extends Plugin {
             public void onPlayerError(PlaybackException error) {
                 notifyListeners("nativePlayer", errorEvent(error));
             }
+
+            @Override
+            public void onAudioSessionIdChanged(int audioSessionId) {
+                applyExoBoost();
+            }
         });
 
         overlay = exoView;
@@ -400,6 +433,11 @@ public class NativePlayerPlugin extends Plugin {
         exoPlayer.setMediaItem(item);
         exoPlayer.prepare();
         exoPlayer.setPlayWhenReady(true);
+        applyExoBoost();
+    }
+
+    private void applyExoBoost() {
+        exoBoost = AudioBoost.attach(exoPlayer, exoBoost, AudioBoost.last);
     }
 
     private void stopVlcProcess() {
@@ -432,6 +470,7 @@ public class NativePlayerPlugin extends Plugin {
             intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".VlcPlayerActivity");
             intent.putExtra("url", url);
             intent.putExtra("title", title == null ? "" : title);
+            intent.putExtra("audioBoost", AudioBoost.last);
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             if (act != null) act.startActivity(intent);
             else {
@@ -451,6 +490,7 @@ public class NativePlayerPlugin extends Plugin {
         intent.putExtra(PlayerActivity.EXTRA_URL, url);
         intent.putExtra(PlayerActivity.EXTRA_TITLE, title == null ? "" : title);
         intent.putExtra(PlayerActivity.EXTRA_MIME, mime == null ? "" : mime);
+        intent.putExtra("audioBoost", AudioBoost.last);
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         if (act != null) act.startActivity(intent);
         else {
@@ -473,6 +513,12 @@ public class NativePlayerPlugin extends Plugin {
         if (exoPlayer != null) {
             exoPlayer.release();
             exoPlayer = null;
+        }
+        if (exoBoost != null) {
+            try {
+                exoBoost.release();
+            } catch (Throwable ignored) {}
+            exoBoost = null;
         }
         if (backCallback != null) backCallback.setEnabled(false);
     }

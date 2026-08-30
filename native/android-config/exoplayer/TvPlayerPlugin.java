@@ -74,6 +74,8 @@ public class TvPlayerPlugin extends Plugin {
         lastTitle = title == null ? "" : title;
         lastMime = mime == null ? "" : mime;
         lastEngine = normalizarEngine(call.getString("engine", lastEngine));
+        Double boostRaw = call.getDouble("audioBoost");
+        if (boostRaw != null) AudioBoost.last = AudioBoost.clamp(boostRaw.floatValue());
         Activity act = getActivity();
         if (act == null) {
             call.reject("Sin actividad");
@@ -89,6 +91,23 @@ public class TvPlayerPlugin extends Plugin {
                 call.reject(msg);
             }
         });
+    }
+
+    @PluginMethod
+    public void setVolumeBoost(PluginCall call) {
+        Double boostRaw = call.getDouble("audioBoost");
+        float boost = AudioBoost.clamp(boostRaw == null ? AudioBoost.last : boostRaw.floatValue());
+        AudioBoost.last = boost;
+        Context ctx = getContext();
+        if (ctx != null) {
+            try {
+                Intent i = new Intent(ctx.getPackageName() + ".AUDIO_BOOST");
+                i.setPackage(ctx.getPackageName());
+                i.putExtra("audioBoost", boost);
+                ctx.sendBroadcast(i);
+            } catch (Throwable ignored) {}
+        }
+        call.resolve();
     }
 
     @PluginMethod
@@ -172,6 +191,7 @@ public class TvPlayerPlugin extends Plugin {
         intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + cls);
         intent.putExtra("url", url);
         intent.putExtra("title", title == null ? "" : title);
+        intent.putExtra("audioBoost", AudioBoost.last);
         if ("exo".equals(engine)) {
             intent.putExtra("mime", mime == null ? "" : mime);
         }
