@@ -180,15 +180,14 @@ function detectDevice() {
   const landscape = w >= h && w >= 900;
   const heuristicTV =
     flavor !== "mobile" &&
-    (flavor === "tv" ||
-      isFireTV ||
+    (isFireTV ||
       isAndroidTV ||
       markedTv ||
-      (coarse && noHover && wide && h >= 500) ||
-      (landscape && (markedTv || isNativeApp() || /Android/i.test(ua))));
+      (coarse && noHover && wide && h >= 500));
   const isTV =
     flavor === "tv" ||
-    (flavor !== "mobile" && (nativeTv === true || (nativeTv !== false && heuristicTV)));
+    nativeTv === true ||
+    (!isNativeApp() && nativeTv !== false && heuristicTV);
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isMobile = !isTV && window.innerWidth <= 768;
   document.body.classList.toggle("is-tv", isTV);
@@ -3698,8 +3697,14 @@ function playChannel(channel) {
 }
 
 function nativePlayerEngine() {
-  // Sin selector en UI: en TV LibVLC (estable); en móvil/PC nativo ExoPlayer.
-  // Forzar exo en TV rompía la reproducción (v20260824h).
+  // APK móvil: siempre ExoPlayer. LibVLC en el teléfono aborta el proceso.
+  try {
+    const n = window.StreamBoxNative;
+    if (n && (n.flavor === "mobile" || n.engine === "exo" || n.isTv === false)) return "exo";
+  } catch (e) {}
+  try {
+    if (isNativeApp() && !isTvLayout() && nativeTvFlag() !== true) return "exo";
+  } catch (e) {}
   try {
     if (isTvLayout() || nativeTvFlag() === true || document.documentElement.classList.contains("is-native-tv")) {
       return "vlc";
@@ -5036,7 +5041,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830d");
+  url.searchParams.set("v", "20260830e");
   window.location.replace(url.toString());
 }
 

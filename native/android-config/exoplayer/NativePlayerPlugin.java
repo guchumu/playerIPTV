@@ -85,17 +85,17 @@ public class NativePlayerPlugin extends Plugin {
             return;
         }
         boolean tv = StreamBoxPlugin.esTelevisor(act);
-        lastEngine = normalizarEngine(call.getString("engine", lastEngine), tv);
+        lastEngine = tv ? "vlc" : "exo";
         act.runOnUiThread(() -> {
             try {
                 rememberBox(call);
                 lastUrl = url;
                 lastTitle = title == null ? "" : title;
                 lastMime = mime == null ? "" : mime;
-                useVlc = "vlc".equals(lastEngine);
-                if (tv || useVlc) {
+                useVlc = tv;
+                if (tv) {
                     soltar();
-                    lanzarActivity(url, lastTitle, lastMime, lastEngine);
+                    lanzarActivity(url, lastTitle, lastMime, "vlc");
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
@@ -111,7 +111,8 @@ public class NativePlayerPlugin extends Plugin {
                 call.resolve(ok(true, wantFs));
             } catch (Throwable t) {
                 try {
-                    lanzarActivity(url, title, mime, lastEngine);
+                    if (!tv) lanzarActivity(url, title, mime, "exo");
+                    else lanzarActivity(url, title, mime, "vlc");
                     call.resolve(ok(true, wantFs));
                 } catch (Throwable ignored) {
                     String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
@@ -156,11 +157,11 @@ public class NativePlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             rememberBox(call);
-            if (StreamBoxPlugin.esTelevisor(act) || useVlc || "vlc".equals(lastEngine)) {
+            if (StreamBoxPlugin.esTelevisor(act)) {
                 if (wantFs && lastUrl != null && !lastUrl.isEmpty()) {
-                    lastEngine = normalizarEngine(call.getString("engine", lastEngine), true);
-                    useVlc = "vlc".equals(lastEngine);
-                    lanzarActivity(lastUrl, lastTitle, lastMime, lastEngine);
+                    lastEngine = "vlc";
+                    useVlc = true;
+                    lanzarActivity(lastUrl, lastTitle, lastMime, "vlc");
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
@@ -304,6 +305,7 @@ public class NativePlayerPlugin extends Plugin {
     }
 
     private boolean ensureExo(Activity act, ViewGroup parent) {
+        try {
         exoView = (PlayerView) act.getLayoutInflater().inflate(R.layout.overlay_player, parent, false);
         exoView.setBackgroundColor(Color.BLACK);
         exoView.setUseController(false);
@@ -343,6 +345,12 @@ public class NativePlayerPlugin extends Plugin {
         wireOverlayKeys();
         wireBackCallback(act);
         return true;
+        } catch (Throwable t) {
+            try {
+                soltar();
+            } catch (Throwable ignored) {}
+            return false;
+        }
     }
 
     private void wireOverlayKeys() {
@@ -438,7 +446,11 @@ public class NativePlayerPlugin extends Plugin {
     }
 
     private void applyExoBoost() {
-        exoBoost = AudioBoost.attach(exoPlayer, exoBoost, AudioBoost.last);
+        try {
+            exoBoost = AudioBoost.attach(exoPlayer, exoBoost, AudioBoost.last);
+        } catch (Throwable ignored) {
+            exoBoost = null;
+        }
     }
 
     private void stopVlcProcess() {
