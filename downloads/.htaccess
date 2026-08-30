@@ -1,2 +1,0 @@
-AddType application/vnd.android.package-archive .apk
-AddType application/octet-stream .ipa
