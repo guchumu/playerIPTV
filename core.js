@@ -586,44 +586,112 @@ function listCacheKey(user) {
   return "xt:" + (user.server || "") + ":" + (user.username || "");
 }
 
+function withTimeout(promise, ms, fallback) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    Promise.resolve(promise).then(
+      (v) => {
+        clearTimeout(timer);
+        return v;
+      },
+      () => {
+        clearTimeout(timer);
+        return fallback;
+      }
+    ),
+    timeout,
+  ]);
+}
+
 function openListDb() {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) {
       reject(new Error("no"));
       return;
     }
-    const req = indexedDB.open("streambox-lists", 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains("lists")) req.result.createObjectStore("lists");
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("idb-timeout"));
+    }, 1200);
+    try {
+      const req = indexedDB.open("streambox-lists", 1);
+      req.onupgradeneeded = () => {
+        try {
+          if (!req.result.objectStoreNames.contains("lists")) req.result.createObjectStore("lists");
+        } catch (e) {}
+      };
+      req.onsuccess = () => {
+        if (settled) {
+          try {
+            req.result.close();
+          } catch (e) {}
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(req.result);
+      };
+      req.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(req.error || new Error("idb"));
+      };
+      req.onblocked = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error("idb-blocked"));
+      };
+    } catch (e) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    }
   });
 }
 
 async function writeListCache(user, text) {
   try {
     const db = await openListDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction("lists", "readwrite");
-      tx.objectStore("lists").put({ text: text, at: Date.now() }, listCacheKey(user));
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
+    await withTimeout(
+      new Promise((resolve, reject) => {
+        const tx = db.transaction("lists", "readwrite");
+        tx.objectStore("lists").put({ text: text, at: Date.now() }, listCacheKey(user));
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      }),
+      1500,
+      null
+    );
+    try {
+      db.close();
+    } catch (e) {}
   } catch (e) {}
 }
 
 async function readListCache(user) {
   try {
     const db = await openListDb();
-    const row = await new Promise((resolve, reject) => {
-      const tx = db.transaction("lists", "readonly");
-      const req = tx.objectStore("lists").get(listCacheKey(user));
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-    db.close();
+    const row = await withTimeout(
+      new Promise((resolve, reject) => {
+        const tx = db.transaction("lists", "readonly");
+        const req = tx.objectStore("lists").get(listCacheKey(user));
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      }),
+      1200,
+      null
+    );
+    try {
+      db.close();
+    } catch (e) {}
     if (!row || !row.text) return null;
     if (Date.now() - row.at > 7 * 24 * 3600 * 1000) return null;
     return row.text;
@@ -1331,18 +1399,24 @@ function xtreamLoginFailureMessage(response, data, rawText) {
 
 /********** MOTOR CENTRAL DE LOGIN **********/
 async function performLoginAction(serverUrl, username, password, m3uUrl, listName, opts) {
-  // Serializar: auto-login y poll QR no deben pisarse.
   if (remoteLoginBusy) {
+    loginCancelled = true;
+    try {
+      if (loginAbort) loginAbort.abort();
+    } catch (e) {}
     let waited = 0;
-    while (remoteLoginBusy && waited < 45000) {
-      await new Promise((r) => setTimeout(r, 120));
-      waited += 120;
-      if (liveSession && channelsData.length) return true;
-      if (loginCancelled) return false;
+    while (remoteLoginBusy && waited < 2000) {
+      await new Promise((r) => setTimeout(r, 50));
+      waited += 50;
     }
-    if (remoteLoginBusy) return liveSession && channelsData.length > 0;
+    remoteLoginBusy = false;
+    if (liveSession && channelsData.length) {
+      showSpinner(false);
+      return true;
+    }
   }
   remoteLoginBusy = true;
+  loginCancelled = false;
   try {
     const reloadBusy = document.getElementById("forceReloadBtn");
     if (reloadBusy) {
@@ -1353,10 +1427,17 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       } catch (e) {}
     }
   } catch (e) {}
-  loginCancelled = false;
   pendingListName = listName ? String(listName).trim() : null;
   setLoginStatus("Descargando lista... Por favor espera.");
   showSpinner(true, "Conectando...");
+
+  const watchdog = setTimeout(() => {
+    try {
+      if (loginAbort) loginAbort.abort();
+    } catch (e) {}
+    showSpinner(false);
+    setLoginStatus("La carga tardó demasiado. Reintenta o usa Cancelar.");
+  }, 55000);
 
   serverUrl = (serverUrl || "").trim();
   username = (username || "").trim();
@@ -1376,8 +1457,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
-      await saveSession(currentUser);
-      const cachedM3u = await readListCache(currentUser);
+      saveSession(currentUser);
+      const cachedM3u = await withTimeout(readListCache(currentUser), 1500, null);
       if (cachedM3u && !detectProviderListError(cachedM3u)) {
         parseM3U(cachedM3u, currentListMeta(false));
         if (channelsData.length) {
@@ -1386,7 +1467,26 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
         }
       }
 
-      const response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl));
+      const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+      loginAbort = ac;
+      const m3uTimer = ac ? setTimeout(() => ac.abort(), 45000) : null;
+      let response;
+      try {
+        response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), {
+          cache: "no-store",
+          signal: ac ? ac.signal : undefined,
+        });
+      } catch (netErr) {
+        if (channelsData.length) {
+          showSpinner(false);
+          markSessionLive();
+          return true;
+        }
+        throw new Error("No se pudo cargar la URL.");
+      } finally {
+        if (m3uTimer) clearTimeout(m3uTimer);
+        if (loginAbort === ac) loginAbort = null;
+      }
       const m3uContent = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
@@ -1416,8 +1516,6 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
           listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
         );
       }
-      await saveSession(currentUser);
-      await writeListCache(currentUser, m3uContent);
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
       tagChannelsWithList(entry);
       pendingListName = null;
@@ -1432,13 +1530,15 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       renderListSelector();
       checkAccountExpiryFromChannels();
       showSpinner(false);
+      writeListCache(currentUser, m3uContent);
+      saveSession(currentUser);
       return true;
     }
 
     if (hasXtream) {
       currentServer = serverUrl;
       const pendingUser = { username, password, server: serverUrl, isM3U: false };
-      const cachedXt = await readListCache(pendingUser);
+      const cachedXt = await withTimeout(readListCache(pendingUser), 1500, null);
       if (cachedXt && !detectProviderListError(cachedXt)) {
         parseM3U(cachedXt, currentListMeta(false));
         if (channelsData.length) {
@@ -1507,7 +1607,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
 
       currentUser = { username, password, server: serverUrl, info: data.user_info, isM3U: false };
-      await saveSession(currentUser);
+      saveSession(currentUser);
       if (!(liveSession && channelsData.length)) {
         setLoginStatus("Descargando canales...");
         showSpinner(true, "Descargando canales...");
@@ -1566,6 +1666,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     if (!pollingInterval && !liveSession) startRemotePolling();
     return false;
   } finally {
+    clearTimeout(watchdog);
     remoteLoginBusy = false;
     showSpinner(false);
     try {
@@ -1787,22 +1888,21 @@ async function fetchXtream(endpoint, params, serverOverride, opts) {
   const serverPart = targetServer ? "&server=" + encodeURIComponent(targetServer) : "";
   const url =
     "xtream_proxy.php?endpoint=" + encodeURIComponent(endpoint) + serverPart + (queryString ? "&" + queryString : "");
-  const timeoutMs = (opts && opts.timeoutMs) || 25000;
-  if (loginAbort) {
-    try {
-      loginAbort.abort();
-    } catch (e) {}
-  }
-  loginAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = loginAbort ? setTimeout(() => {
-    try {
-      loginAbort.abort();
-    } catch (e) {}
-  }, timeoutMs) : null;
+  const timeoutMs = (opts && opts.timeoutMs) || 45000;
+  const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+  loginAbort = ac;
+  const timer = ac
+    ? setTimeout(() => {
+        try {
+          ac.abort();
+        } catch (e) {}
+      }, timeoutMs)
+    : null;
   try {
-    return await fetch(url, loginAbort ? { signal: loginAbort.signal, cache: "no-store" } : { cache: "no-store" });
+    return await fetch(url, ac ? { signal: ac.signal, cache: "no-store" } : { cache: "no-store" });
   } finally {
     if (timer) clearTimeout(timer);
+    if (loginAbort === ac) loginAbort = null;
   }
 }
 
@@ -2274,7 +2374,7 @@ async function loadM3UFromXtream() {
     const providerError = detectProviderListError(trimmed);
     throw new Error(providerError ? "El proveedor responde: " + providerError : "La lista no contiene canales");
   }
-  await writeListCache(currentUser, m3uContent);
+  writeListCache(currentUser, m3uContent);
 }
 
 function isStreamUrl(line) {
@@ -4759,7 +4859,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830a");
+  url.searchParams.set("v", "20260830b");
   window.location.replace(url.toString());
 }
 
