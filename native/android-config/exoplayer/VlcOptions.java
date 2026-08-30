@@ -19,6 +19,8 @@ public final class VlcOptions {
         opts.add("--file-caching=2000");
         opts.add("--http-reconnect");
         opts.add("--no-stats");
+        opts.add("--no-skip-frames");
+        opts.add("--no-drop-late-frames");
         return opts;
     }
 }

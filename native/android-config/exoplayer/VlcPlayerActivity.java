@@ -161,6 +161,10 @@ public class VlcPlayerActivity extends Activity {
             mediaPlayer.setMedia(media);
             media.release();
             paused = false;
+            try {
+                mediaPlayer.setScale(0);
+                mediaPlayer.setAspectRatio(null);
+            } catch (Throwable ignored) {}
             mediaPlayer.play();
         } catch (Throwable ignored) {
             return;

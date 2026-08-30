@@ -231,7 +231,11 @@ function isTvLayout() {
 }
 
 function getTvHeaderActions() {
-  return [document.getElementById("refreshBtn"), document.getElementById("logoutBtn")].filter(Boolean);
+  return [
+    document.getElementById("viewModeBtn"),
+    document.getElementById("refreshBtn"),
+    document.getElementById("logoutBtn"),
+  ].filter(Boolean);
 }
 
 function isTvChrome() {
@@ -1847,6 +1851,7 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {}
   initSplash();
   initChannelTools();
+  initChannelView();
   initListManager();
   initAdSlot();
   initManualLogin();
@@ -2864,6 +2869,7 @@ function noteDebugZero() {
 const FAV_KEY = "streambox_favorites";
 const HIST_KEY = "streambox_history";
 const SORT_KEY = "streambox_sort";
+const VIEW_KEY = "streambox_channel_view";
 const FAV_NAME = "Favoritos";
 const HIST_NAME = "Recientes";
 const HIST_MAX = 30;
@@ -3042,8 +3048,7 @@ function buildChannelThumb(channel) {
   const fallback = document.createElement("div");
   fallback.className = "channel-logo-fallback";
   fallback.textContent = channelInitials(displayName(channel.name));
-  // En TV no cargar logos remotos: saturan memoria/red y reinician el WebView (vuelve al logo).
-  if (!channel.logo || isTvLayout()) return fallback;
+  if (!channel.logo) return fallback;
 
   const img = document.createElement("img");
   img.className = "channel-logo";
@@ -3107,6 +3112,14 @@ function buildChannelRow(channel) {
   });
   channelDiv.appendChild(favBtn);
 
+  const qHint = extractQualityHint(channel.name);
+  if (qHint) {
+    const qEl = document.createElement("span");
+    qEl.className = "channel-q";
+    qEl.textContent = qHint;
+    channelDiv.appendChild(qEl);
+  }
+
   channelDiv.addEventListener("click", () => {
     if (isTvLayout()) {
       if (currentlyPlayingId === channel.id) enterNativeFullscreen();
@@ -3124,17 +3137,66 @@ function buildChannelRow(channel) {
   return channelDiv;
 }
 
+function isChannelGrid() {
+  return document.body.classList.contains("channels-as-grid");
+}
+
+function preferredChannelView() {
+  try {
+    const saved = localStorage.getItem(VIEW_KEY);
+    if (saved === "grid" || saved === "list") return saved;
+  } catch (e) {}
+  return isTvLayout() ? "grid" : "list";
+}
+
+function applyChannelView(mode, opts) {
+  const grid = mode !== "list";
+  document.body.classList.toggle("channels-as-grid", grid);
+  try {
+    localStorage.setItem(VIEW_KEY, grid ? "grid" : "list");
+  } catch (e) {}
+  const btn = document.getElementById("viewModeBtn");
+  if (btn) {
+    btn.classList.toggle("is-grid", grid);
+    btn.title = grid ? "Ver en lista" : "Ver en cuadrícula";
+    btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-pressed", grid ? "true" : "false");
+  }
+  if (!(opts && opts.skipPaint)) paintVirtualWindow(true);
+}
+
+function initChannelView() {
+  applyChannelView(preferredChannelView(), { skipPaint: true });
+  const btn = document.getElementById("viewModeBtn");
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      applyChannelView(isChannelGrid() ? "list" : "grid");
+    });
+  }
+}
+
 function channelGridCols() {
-  return 1;
+  if (!isChannelGrid()) return 1;
+  const w = window.innerWidth || 1280;
+  if (w < 560) return 2;
+  if (w < 900 && !isTvLayout()) return 3;
+  return 4;
 }
 
 function channelCardHeight() {
+  if (isChannelGrid()) {
+    if (document.body.classList.contains("is-tv")) return 172;
+    if ((window.innerWidth || 0) < 560) return 132;
+    return 156;
+  }
   if (document.body.classList.contains("is-tv")) return 64;
   if (document.body.classList.contains("ui-large")) return 72;
   return 64;
 }
 
 function channelGridGap() {
+  if (isChannelGrid()) return 10;
   return document.body.classList.contains("is-tv") ? 4 : 5;
 }
 
@@ -3703,7 +3765,7 @@ async function startNativePlayback(channel, opts) {
   }
   if (gen !== playGen) return true;
 
-  const fullscreen = !isTvLayout() || !!(opts && opts.fullscreen);
+  const fullscreen = isTvLayout() || !!(opts && opts.fullscreen);
   nativeFullscreen = fullscreen;
   try {
     const ret = await plugin.play(
@@ -3737,9 +3799,10 @@ async function startNativePlayback(channel, opts) {
 
 function startPlayback(channel) {
   if (nativePlayerPlugin()) {
-    startNativePlayback(channel);
+    startNativePlayback(channel, isTvLayout() ? { fullscreen: true } : null);
     return;
   }
+  if (isTvLayout()) enterTheaterMode();
   if (!video) return;
   const gen = ++playGen;
   showVideoSpinner(true);
@@ -3831,6 +3894,11 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        capLevelToPlayerSize: false,
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 8000000,
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.7,
         maxBufferLength: bufferSec + 5,
         maxMaxBufferLength: bufferSec * 2 + 10,
         liveSyncDurationCount: 3,
@@ -3842,7 +3910,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
       enablePrebuffer();
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         refreshTrackSelectors();
-        logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
+        try {
+          if (hls.autoLevelCapping !== undefined) hls.autoLevelCapping = -1;
+          logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
+        } catch (e) {
+          logPlayback("manifiesto", (hls.levels || []).length + " calidades disponibles");
+        }
         tryAutoPlay();
       });
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
@@ -4859,7 +4932,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830b");
+  url.searchParams.set("v", "20260830c");
   window.location.replace(url.toString());
 }
 
@@ -5236,10 +5309,22 @@ document.addEventListener("keydown", (e) => {
         currentFocus.col = 1;
         currentFocus.row = 0;
       }
+    } else if (currentFocus.col === 1) {
+      const cols = channelGridCols();
+      if (cols > 1 && currentFocus.row < virtualList.length - 1 && currentFocus.row % cols < cols - 1) {
+        currentFocus.row++;
+        if (isTvLayout()) ensureTvChannelVisible();
+      }
     }
   } else if (e.key === "ArrowLeft") {
-    if (currentFocus.col === 1 && categories.length > 0) {
-      focusTvCategoryColumn();
+    if (currentFocus.col === 1) {
+      const cols = channelGridCols();
+      if (cols > 1 && currentFocus.row % cols > 0) {
+        currentFocus.row--;
+        if (isTvLayout()) ensureTvChannelVisible();
+      } else if (categories.length > 0) {
+        focusTvCategoryColumn();
+      }
     }
   } else if (e.key === "ArrowDown") {
     if (currentFocus.col === 0 && currentFocus.row < categories.length - 1) {
@@ -5248,11 +5333,12 @@ document.addEventListener("keydown", (e) => {
         selectCategory(categories[currentFocus.row].dataset.category, { keepFocus: true });
       }
     } else if (currentFocus.col === 1) {
+      const cols = channelGridCols();
       if (isTvLayout()) {
-        if (currentFocus.row < virtualList.length - 1) {
-          currentFocus.row++;
-          ensureTvChannelVisible();
-        }
+        const next = currentFocus.row + cols;
+        if (next < virtualList.length) currentFocus.row = next;
+        else if (currentFocus.row < virtualList.length - 1) currentFocus.row = virtualList.length - 1;
+        ensureTvChannelVisible();
       } else if (currentFocus.row < channels.length - 1) currentFocus.row++;
     }
   } else if (e.key === "ArrowUp") {
@@ -5266,8 +5352,9 @@ document.addEventListener("keydown", (e) => {
       updateCursorVisuals();
       return;
     } else if (currentFocus.col === 1 && currentFocus.row > 0) {
+      const cols = channelGridCols();
       if (isTvLayout()) {
-        currentFocus.row--;
+        currentFocus.row = Math.max(0, currentFocus.row - cols);
         ensureTvChannelVisible();
       } else currentFocus.row--;
     } else if (currentFocus.col === 1 && currentFocus.row <= 0 && isTvLayout()) {

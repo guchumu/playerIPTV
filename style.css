@@ -385,24 +385,25 @@ html.is-native-tv .login-manual {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.4rem 0.8rem;
-  padding-top: max(0.4rem, env(safe-area-inset-top));
-  padding-left: max(0.8rem, env(safe-area-inset-left));
-  padding-right: max(0.8rem, env(safe-area-inset-right));
-  background: linear-gradient(90deg, #020617, #111827);
+  padding: 0.45rem 0.9rem;
+  padding-top: max(0.45rem, env(safe-area-inset-top));
+  padding-left: max(0.9rem, env(safe-area-inset-left));
+  padding-right: max(0.9rem, env(safe-area-inset-right));
+  background: linear-gradient(90deg, #020617 0%, #0f172a 55%, #111827 100%);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.18);
   font-size: 0.85rem;
   z-index: 100;
 }
-.header-left h1 { font-size: 1.1rem; }
-.tv-remote-hint {
-  display: none;
-  color: #94a3b8;
-  font-size: 0.72rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.header-left h1 {
+  font-size: 1.12rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  background: linear-gradient(90deg, #e0e7ff, #a5b4fc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
+.tv-remote-hint { display: none !important; }
 .header-right { display: flex; gap: 0.5rem; align-items: center; }
 #accountExpiryLabel { font-size: 0.8rem; margin-right: 10px; font-weight: bold; }
 .action-btn {
@@ -411,15 +412,19 @@ html.is-native-tv .login-manual {
   justify-content: center;
   flex-shrink: 0;
   overflow: visible;
-  background: #4caf50;
+  background: #334155;
   color: white;
   border: none;
   padding: 0.35rem;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 1.1rem;
   line-height: 0;
 }
+.view-mode-btn { background: #4338ca; }
+.view-mode-btn .icon-list { display: none; }
+.view-mode-btn.is-grid .icon-grid { display: none; }
+.view-mode-btn.is-grid .icon-list { display: block; }
 .action-btn svg,
 .action-btn svg path {
   width: 20px;
@@ -429,6 +434,7 @@ html.is-native-tv .login-manual {
   overflow: visible;
 }
 #logoutBtn { background: #ef4444; }
+#refreshBtn { background: #16a34a; }
 #castButton { background: #0ea5e9; }
 #pipBtn, #airplayBtn { background: #334155; }
 .buffer-control {
@@ -473,22 +479,25 @@ html.is-native-tv .login-manual {
 .category-btn {
   width: 100%;
   text-align: left;
-  background: rgba(15, 23, 42, 0.9);
-  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  border-radius: 10px;
   border: 1px solid transparent;
-  padding: 5px 7px;
-  margin-bottom: 3px;
-  font-size: 0.78rem;
+  padding: 7px 10px;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
   line-height: 1.25;
   color: #e5e7eb;
   cursor: pointer;
-  /* Los nombres de categoría suelen ser largos; recortarlos mantiene la
-     columna estrecha en vez de dejar que cada botón crezca a tres líneas. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background 0.15s, border-color 0.15s;
 }
-.category-btn.active { background: linear-gradient(135deg, #4f46e5, #6366f1); }
+.category-btn:hover { border-color: rgba(99, 102, 241, 0.35); }
+.category-btn.active {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.28);
+}
 .category-btn.cursor, .channel-item.cursor { outline: 2px solid #fbbf24; }
 
 .channels-column {
@@ -567,6 +576,10 @@ html.is-native-tv .login-manual {
   gap: 5px;
   width: 100%;
 }
+body.channels-as-grid .channels-grid {
+  grid-template-columns: repeat(var(--channel-cols, 4), minmax(0, 1fr));
+  gap: 10px;
+}
 .channel-item {
   display: flex;
   flex-direction: row;
@@ -578,12 +591,13 @@ html.is-native-tv .login-manual {
   padding: 6px 10px 6px 8px;
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.15);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   user-select: none;
   box-sizing: border-box;
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
   justify-content: flex-start;
   text-align: left;
 }
@@ -691,9 +705,68 @@ html.is-native-tv .login-manual {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
-  line-height: 1.2;
-  max-width: 100%;
+  width: 100%;
+}
+.channel-q { display: none; }
+
+body.channels-as-grid .channel-item {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  height: 156px;
+  min-height: 156px;
+  max-height: 156px;
+  padding: 12px 8px 8px;
+  gap: 6px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+}
+body.channels-as-grid .channel-chno {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: auto;
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+body.channels-as-grid .channel-logo,
+body.channels-as-grid .channel-logo-fallback {
+  width: 72px;
+  height: 72px;
+  margin: 6px auto 0;
+  border-radius: 14px;
+  font-size: 1.05rem;
+}
+body.channels-as-grid .fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin: 0;
+}
+body.channels-as-grid .channel-info {
+  align-items: center;
+  text-align: center;
+}
+body.channels-as-grid .channel-name {
+  font-size: 0.8rem;
+  text-align: center;
+}
+body.channels-as-grid .channel-epg {
+  font-size: 0.64rem;
+  text-align: center;
+}
+body.channels-as-grid .channel-q {
+  display: inline-flex;
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c7d2fe;
+  background: rgba(67, 56, 202, 0.85);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 
 /********** COLUMNA PLAYER **********/
@@ -795,6 +868,8 @@ body.player-theater .compact-header {
   height: 100%;
   object-fit: contain;
   background: #000;
+  image-rendering: auto;
+  transform: translateZ(0);
 }
 .spinner-overlay {
   position: absolute;
@@ -1535,8 +1610,8 @@ body.is-tv .header-left {
   min-width: 0;
 }
 body.is-tv .header-left h1,
-html.is-native-tv .header-left h1 { font-size: 0.95rem; }
-body.is-tv .tv-remote-hint { display: block; }
+html.is-native-tv .header-left h1 { font-size: 1.05rem; }
+body.is-tv .tv-remote-hint { display: none !important; }
 body.is-tv .header-right,
 html.is-native-tv .header-right { gap: 0.35rem; flex-shrink: 0; }
 body.is-tv .header-right span,
@@ -1582,12 +1657,16 @@ html.is-native-tv .header-right button svg path {
   fill: currentColor !important;
   overflow: visible;
 }
+body.is-tv #viewModeBtn:focus,
 body.is-tv #refreshBtn:focus,
 body.is-tv #logoutBtn:focus,
+body.is-tv #viewModeBtn.cursor,
 body.is-tv #refreshBtn.cursor,
 body.is-tv #logoutBtn.cursor,
+html.is-native-tv #viewModeBtn:focus,
 html.is-native-tv #refreshBtn:focus,
 html.is-native-tv #logoutBtn:focus,
+html.is-native-tv #viewModeBtn.cursor,
 html.is-native-tv #refreshBtn.cursor,
 html.is-native-tv #logoutBtn.cursor {
   outline: 3px solid #fbbf24;
@@ -1595,11 +1674,30 @@ html.is-native-tv #logoutBtn.cursor {
   box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.4);
   z-index: 2;
 }
-/* Tres columnas fijas: categorías | lista ancha | preview pequeño. */
+/* Categorías | cuadrícula. El visor pequeño en TV no pinta vídeo (VLC va en otra pantalla). */
 body.is-tv .main-container,
 body.is-tv.tv-channels-open .main-container {
-  grid-template-columns: minmax(150px, 14%) minmax(460px, 1.45fr) minmax(220px, 26%);
+  grid-template-columns: minmax(168px, 16%) 1fr;
   transition: none;
+}
+body.is-tv:not(.player-theater) .player-column {
+  display: none !important;
+}
+body.is-tv.player-theater .player-column {
+  display: flex;
+}
+body.is-tv.player-theater .compact-header {
+  display: none;
+}
+body.is-tv.player-theater .main-container {
+  grid-template-columns: 1fr;
+  height: 100dvh;
+}
+body.is-tv.player-theater .video-wrapper {
+  max-height: 100dvh;
+  height: 100dvh;
+  aspect-ratio: auto;
+  border-radius: 0;
 }
 body.is-tv .categories-column,
 body.is-tv .channels-column,
@@ -1636,6 +1734,21 @@ body.is-tv .channel-item {
   font-size: 0.82rem;
 }
 body.is-tv .channels-grid { gap: 4px; }
+body.is-tv.channels-as-grid .channels-grid { gap: 10px; }
+body.is-tv.channels-as-grid .channel-item {
+  min-height: 172px;
+  height: 172px;
+  max-height: 172px;
+  border-radius: 12px;
+  padding: 12px 8px 8px;
+}
+body.is-tv.channels-as-grid .channel-logo,
+body.is-tv.channels-as-grid .channel-logo-fallback {
+  width: 84px;
+  height: 84px;
+  font-size: 1.2rem;
+}
+body.is-tv.channels-as-grid .channel-name { font-size: 0.88rem; }
 body.is-tv .category-btn {
   min-height: 0;
   height: auto;
@@ -1650,7 +1763,7 @@ body.is-tv .category-btn {
   line-clamp: 2;
   overflow: hidden;
 }
-body.is-tv .channel-item {
+body.is-tv:not(.channels-as-grid) .channel-item {
   min-height: 64px;
   height: 64px;
   max-height: 64px;
@@ -1806,7 +1919,21 @@ body.is-tv .tv-fav-empty {
     -webkit-overflow-scrolling: touch;
   }
   .channels-grid { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  body.channels-as-grid .channels-grid {
+    grid-template-columns: repeat(var(--channel-cols, 2), minmax(0, 1fr));
+    gap: 8px;
+  }
   .channel-item { min-height: 64px; height: 64px; max-height: 64px; }
+  body.channels-as-grid .channel-item {
+    min-height: 132px;
+    height: 132px;
+    max-height: 132px;
+  }
+  body.channels-as-grid .channel-logo,
+  body.channels-as-grid .channel-logo-fallback {
+    width: 56px;
+    height: 56px;
+  }
   .header-right span { display: none; }
 }
 
@@ -1816,12 +1943,12 @@ body.is-tv .tv-fav-empty {
   html.is-native-tv #mainScreen .main-container {
     display: grid !important;
     flex-direction: unset !important;
-    grid-template-columns: minmax(130px, 14%) minmax(300px, 1.45fr) minmax(180px, 26%) !important;
+    grid-template-columns: minmax(150px, 18%) 1fr !important;
   }
-  body.is-tv .player-column,
+  body.is-tv .player-column { display: none !important; }
+  body.is-tv.player-theater .player-column { display: flex !important; }
   body.is-tv .categories-column,
   body.is-tv .channels-column,
-  html.is-native-tv .player-column,
   html.is-native-tv .categories-column,
   html.is-native-tv .channels-column {
     order: unset;
