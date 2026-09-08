@@ -15,20 +15,128 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
+function xtream_resolve_url($url, $base)
+{
+    $url = trim((string) $url);
+    if ($url === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $url)) {
+        return $url;
+    }
+    $bp = parse_url($base);
+    if (!$bp || empty($bp['scheme']) || empty($bp['host'])) {
+        return $url;
+    }
+    $origin = $bp['scheme'] . '://' . $bp['host'] . (isset($bp['port']) ? ':' . $bp['port'] : '');
+    if (isset($url[0]) && $url[0] === '/') {
+        return $origin . $url;
+    }
+    $dir = isset($bp['path']) ? $bp['path'] : '/';
+    $dir = preg_replace('#/[^/]*$#', '/', $dir);
+    if ($dir === '') {
+        $dir = '/';
+    }
+    return $origin . $dir . $url;
+}
+
+function xtream_looks_html($body)
+{
+    $head = strtolower(ltrim(substr((string) $body, 0, 240)));
+    return strpos($head, '<!doctype') === 0
+        || strpos($head, '<html') === 0
+        || strpos($head, '<head') === 0
+        || strpos($head, '<body') === 0;
+}
+
+/**
+ * Fetch URL with manual redirects.
+ * CURLOPT_FOLLOWLOCATION often fails under Plesk open_basedir, which breaks
+ * providers that 301 http→https (playlist portals like powerfhd.me).
+ *
+ * @return array{0:string|false,1:int,2:string,3:string} body, httpCode, err, finalUrl
+ */
 function xtream_fetch($url, $timeout = 120)
 {
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-    curl_setopt($ch, CURLOPT_ENCODING, '');
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
-    curl_close($ch);
-    return array($response, $httpCode, $err);
+    if (!function_exists('curl_init')) {
+        return array(false, 0, 'curl no disponible', $url);
+    }
+    $current = $url;
+    $response = false;
+    $httpCode = 0;
+    $err = '';
+    for ($hop = 0; $hop < 6; $hop++) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $current);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_ENCODING, '');
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'VLC/3.0.16 LibVLC/3.0.16');
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+            'Accept: audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*',
+        ));
+        curl_setopt($ch, CURLOPT_HEADER, true);
+        $raw = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $err = (string) curl_error($ch);
+        curl_close($ch);
+        if ($raw === false) {
+            return array(false, $httpCode, $err !== '' ? $err : 'sin respuesta', $current);
+        }
+        $rawHeaders = substr($raw, 0, max(0, $headerSize));
+        $response = substr($raw, max(0, $headerSize));
+        if ($httpCode >= 300 && $httpCode < 400) {
+            $loc = '';
+            if (preg_match('/^Location:\s*(.+)$/im', $rawHeaders, $lm)) {
+                $loc = trim($lm[1]);
+            }
+            if ($loc === '') {
+                break;
+            }
+            $next = xtream_resolve_url($loc, $current);
+            if (!player_url_ok($next) || $next === $current) {
+                break;
+            }
+            $current = $next;
+            continue;
+        }
+        break;
+    }
+    return array($response, $httpCode, $err, $current);
+}
+
+/**
+ * Playlist fetch: follow redirects and, if started as http://, also try https://.
+ */
+function xtream_fetch_playlist($url, $timeout = 120)
+{
+    $tries = array($url);
+    if (stripos($url, 'http://') === 0) {
+        $tries[] = 'https://' . substr($url, 7);
+    }
+    $last = array(false, 0, '', $url);
+    foreach ($tries as $try) {
+        $res = xtream_fetch($try, $timeout);
+        $body = isset($res[0]) ? $res[0] : false;
+        $code = isset($res[1]) ? (int) $res[1] : 0;
+        $err = isset($res[2]) ? (string) $res[2] : '';
+        $final = isset($res[3]) ? (string) $res[3] : $try;
+        $last = array($body, $code, $err, $final);
+        if (
+            is_string($body)
+            && $body !== ''
+            && !xtream_looks_html($body)
+            && (stripos($body, '#EXTM3U') !== false || stripos($body, '#EXTINF') !== false)
+        ) {
+            return $last;
+        }
+    }
+    return $last;
 }
 
 function xtream_rate_or_fail()
@@ -44,7 +152,7 @@ function xtream_rate_or_fail()
 
 function xtream_m3u_is_cacheable($body)
 {
-    if (!$body || strlen($body) < 48) {
+    if (!$body || strlen($body) < 48 || xtream_looks_html($body)) {
         return false;
     }
     $n = preg_match_all('/#EXTINF:/i', $body);
@@ -62,21 +170,29 @@ if (isset($_GET['direct_url'])) {
         echo 'URL no válida.';
         exit;
     }
-    $cacheName = 'm3u_' . md5($url) . '.txt';
-    $cached = player_cache_get($cacheName, M3U_CACHE_TTL);
-    if ($cached !== null) {
+    $cacheKey = 'm3u_' . md5($url) . '.txt';
+    $cached = player_cache_get($cacheKey, M3U_CACHE_TTL);
+    if ($cached !== null && !xtream_looks_html($cached)) {
         echo $cached;
         exit;
     }
     xtream_rate_or_fail();
-    list($response, $httpCode, $err) = xtream_fetch($url);
+    list($response, $httpCode, $err) = xtream_fetch_playlist($url);
     if ($response && xtream_m3u_is_cacheable($response)) {
-        player_cache_set($cacheName, $response);
+        player_cache_set($cacheKey, $response);
+        if (stripos($url, 'http://') === 0) {
+            player_cache_set('m3u_' . md5('https://' . substr($url, 7)) . '.txt', $response);
+        }
         echo $response;
-    } elseif ($response) {
+    } elseif (
+        $response
+        && !xtream_looks_html($response)
+        && (stripos($response, '#EXTINF') !== false || stripos($response, '#EXTM3U') !== false)
+    ) {
         echo $response;
     } else {
         player_log('m3u directa fallo ' . $httpCode . ' ' . $err);
+        http_response_code(($httpCode >= 400) ? $httpCode : 502);
         echo 'Error al cargar la lista M3U.';
     }
     exit;
@@ -119,10 +235,10 @@ if (!empty($params)) {
 }
 
 $isList = ($endpointBase === 'get.php');
-$cacheName = $isList ? 'm3u_' . md5($url) . '.txt' : '';
+$cacheKey = $isList ? 'm3u_' . md5($url) . '.txt' : '';
 if ($isList) {
-    $cached = player_cache_get($cacheName, M3U_CACHE_TTL);
-    if ($cached !== null) {
+    $cached = player_cache_get($cacheKey, M3U_CACHE_TTL);
+    if ($cached !== null && !xtream_looks_html($cached)) {
         header('Content-Type: text/plain; charset=utf-8');
         echo $cached;
         exit;
@@ -131,8 +247,13 @@ if ($isList) {
 
 xtream_rate_or_fail();
 
-list($response, $httpCode, $err) = xtream_fetch($url);
-if ($response === false || $response === null) {
+if ($isList) {
+    list($response, $httpCode, $err) = xtream_fetch_playlist($url);
+} else {
+    list($response, $httpCode, $err) = xtream_fetch($url);
+}
+
+if ($response === false || $response === null || ($isList && xtream_looks_html($response))) {
     player_log('xtream fallo ' . $endpointBase . ' ' . $httpCode . ' ' . $err);
     http_response_code($httpCode >= 400 ? $httpCode : 502);
     echo json_encode(array('error' => 'No se pudo conectar con el servidor Xtream'));
@@ -146,6 +267,6 @@ if ($endpointBase === 'player_api.php') {
     header('Content-Type: text/plain; charset=utf-8');
 }
 if ($isList && $response && xtream_m3u_is_cacheable($response)) {
-    player_cache_set($cacheName, $response);
+    player_cache_set($cacheKey, $response);
 }
 echo $response;
