@@ -64,6 +64,13 @@ html.splash-done #splashScreen {
   font-size: 1.08rem;
   animation: splash-in 0.9s ease-out 0.7s both;
 }
+.splash-version {
+  margin-top: 0.55rem;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  animation: splash-in 0.9s ease-out 0.95s both;
+}
 .splash-hint {
   margin-top: 2.4rem;
   font-size: 0.8rem;
@@ -77,6 +84,8 @@ body.is-tv .splash-title,
 html.is-native-tv .splash-title { font-size: 2.9rem; }
 body.is-tv .splash-tagline,
 html.is-native-tv .splash-tagline { font-size: 1.35rem; }
+body.is-tv .splash-version,
+html.is-native-tv .splash-version { font-size: 1.05rem; }
 body.is-tv .splash-hint,
 html.is-native-tv .splash-hint { font-size: 1.1rem; }
 body.is-tv .splash-hint-touch,
@@ -393,6 +402,27 @@ html.is-native-tv .login-manual {
   border-bottom: 1px solid rgba(99, 102, 241, 0.18);
   font-size: 0.85rem;
   z-index: 100;
+}
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.header-version {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.build-tag {
+  margin: 0.15rem 0 0.55rem;
+  color: #94a3b8;
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
 }
 .header-left h1 {
   font-size: 1.12rem;
@@ -1625,9 +1655,11 @@ html.is-native-tv .compact-header {
 body.is-tv .header-left {
   display: flex;
   align-items: baseline;
-  gap: 0.85rem;
+  gap: 0.55rem;
   min-width: 0;
 }
+body.is-tv .header-version,
+html.is-native-tv .header-version { font-size: 0.78rem; }
 body.is-tv .header-left h1,
 html.is-native-tv .header-left h1 { font-size: 1.05rem; }
 body.is-tv .tv-remote-hint { display: none !important; }

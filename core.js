@@ -11,6 +11,22 @@ if (!CSS.escape) {
 }
 
 const EPG_URL = "epg_api.php";
+const APP_VERSION = "1.0.17";
+
+function appVersion() {
+  try {
+    const n = window.StreamBoxNative;
+    if (n && n.versionName) return String(n.versionName).replace(/^v/i, "").trim();
+  } catch (e) {}
+  return APP_VERSION;
+}
+
+function applyAppVersion() {
+  const label = "v" + appVersion();
+  document.querySelectorAll("[data-app-version]").forEach((el) => {
+    el.textContent = label;
+  });
+}
 
 let currentServer = "";
 let hls = null;
@@ -201,6 +217,7 @@ function detectDevice() {
   document.documentElement.classList.toggle("login-landscape", landscape);
   if (!isTV) document.body.classList.remove("tv-channels-open");
   applyTvChrome();
+  applyAppVersion();
 }
 
 async function refreshNativeTvFlag() {
@@ -220,6 +237,7 @@ async function refreshNativeTvFlag() {
     });
     detectDevice();
     applyUiMode();
+    applyAppVersion();
     initNativeEnginePicker();
   } catch (e) {}
 }
@@ -2787,6 +2805,7 @@ function getPlaybackStats() {
     lines.push("  url origen: " + maskUrl(channel.url));
     lines.push("  url activa: " + maskUrl(video.getAttribute("data-active-url")));
   }
+  lines.push("  app: v" + appVersion());
   lines.push("  motor: " + (nativePlaybackActive ? (nativePlayerEngine() === "vlc" ? "LibVLC" : "ExoPlayer") : hls ? "hls.js" : mpegtsPlayer ? "mpegts.js" : "nativo"));
   lines.push("  readyState: " + video.readyState + " · networkState: " + video.networkState);
   const mediaError = describeMediaError();
@@ -5038,7 +5057,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830f");
+  url.searchParams.set("v", "20260830g");
   window.location.replace(url.toString());
 }
 

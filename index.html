@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260830f" />
+      <link rel="stylesheet" href="style.css?v=20260830g" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -41,6 +41,7 @@
             <img src="logo.svg" alt="" class="splash-logo" />
             <h1 class="splash-title">StreamBox IPTV</h1>
             <p class="splash-tagline">Tu televisión, en cualquier pantalla</p>
+            <p class="splash-version" data-app-version>v1.0.17</p>
             <p class="splash-hint">
                 <span class="splash-hint-touch">Pulsa para continuar</span>
                 <span class="splash-hint-tv">Pulsa OK para continuar</span>
@@ -53,7 +54,7 @@
             <div class="login-head">
                 <img src="logo.png" alt="" class="login-logo" />
                 <h1>StreamBox IPTV</h1>
-                <p class="build-tag">v20260830f</p>
+                <p class="build-tag" data-app-version>v1.0.17</p>
                 <p class="login-tv-hint">En la tele: el código QR queda a la derecha. Con el móvil, ábrelo y carga la lista.</p>
             </div>
 
@@ -112,6 +113,7 @@
         <header class="compact-header">
             <div class="header-left">
                 <h1>StreamBox IPTV</h1>
+                <span class="header-version" data-app-version>v1.0.17</span>
             </div>
             <div class="header-right">
                 <span id="accountExpiryLabel"></span>
@@ -278,6 +280,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260830f"></script>
+    <script src="core.js?v=20260830g"></script>
 </body>
 </html>
