@@ -519,7 +519,7 @@ html.is-native-tv .login-manual {
 .dns-login-chip {
   margin: 0.2rem auto 0.55rem;
   min-height: 32px;
-  min-width: 52px;
+  min-width: 72px;
 }
 .dns-btn.is-ok {
   background: #15803d;
@@ -527,8 +527,8 @@ html.is-native-tv .login-manual {
   color: #fff;
 }
 .dns-btn.is-blocked {
-  background: #b45309;
-  border-color: #f59e0b;
+  background: #b91c1c;
+  border-color: #ef4444;
   color: #fff;
 }
 .dns-lead,
@@ -1862,7 +1862,7 @@ html.is-native-tv #audioBoostBtn,
 body.is-tv #dnsBtn,
 html.is-native-tv #dnsBtn {
   width: auto;
-  min-width: 56px;
+  min-width: 78px;
   padding: 0 10px;
   font-size: 0.78rem;
   font-weight: 800;
@@ -2060,10 +2060,10 @@ body.is-tv .tv-fav-empty {
   body:not(.is-tv) .dns-btn,
   body:not(.is-tv) #dnsBtn {
     display: inline-flex;
-    padding: 0.2rem 0.45rem;
+    padding: 0.2rem 0.5rem;
     font-size: 0.7rem;
     min-height: 28px;
-    min-width: 42px;
+    min-width: 64px;
   }
   .header-right { min-width: 0; gap: 0.3rem; }
 

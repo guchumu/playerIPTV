@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260830i" />
+      <link rel="stylesheet" href="style.css?v=20260830j" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -55,7 +55,7 @@
                 <img src="logo.png" alt="" class="login-logo" />
                 <h1>StreamBox IPTV</h1>
                 <p class="build-tag" data-app-version>v1.0.17</p>
-                <button type="button" id="dnsLoginBtn" class="dns-btn dns-login-chip" title="DNS xdp.es y comprobación de bloqueos" aria-label="DNS y bloqueo del operador">DNS</button>
+                <button type="button" id="dnsLoginBtn" class="dns-btn dns-login-chip" title="Comprobar si llegan los dominios" aria-label="Comprobar DNS">DNS</button>
                 <p class="login-tv-hint">En la tele: el código QR queda a la derecha. Con el móvil, ábrelo y carga la lista.</p>
             </div>
 
@@ -115,7 +115,7 @@
             <div class="header-left">
                 <h1>StreamBox IPTV</h1>
                 <span class="header-version" data-app-version>v1.0.17</span>
-                <button type="button" id="dnsBtn" class="dns-btn" title="DNS xdp.es y comprobación de bloqueos" aria-label="DNS y bloqueo del operador">DNS</button>
+                <button type="button" id="dnsBtn" class="dns-btn" title="Comprobar si llegan los dominios" aria-label="Comprobar DNS">DNS</button>
             </div>
             <div class="header-right">
                 <span id="accountExpiryLabel"></span>
@@ -263,13 +263,14 @@
         </div>
     </div>
 
+    <!-- Guía DNS oculta en producción. Visible con ?dnsguide=1 o el botón «Guía DNS» del modo debug (5 toques en el título). -->
     <div id="dnsOverlay" class="lists-overlay dns-overlay" hidden aria-hidden="true">
         <div class="lists-panel dns-panel">
             <div class="lists-header">
                 <strong>DNS / bloqueo del operador</strong>
                 <button type="button" id="dnsCloseBtn">Cerrar</button>
             </div>
-            <p id="dnsStatusLead" class="dns-lead">Si el botón DNS está verde, este aparato llega a los dominios de prueba. Si está naranja, el operador puede estar cortando: cambia el DNS a xdp.es.</p>
+            <p id="dnsStatusLead" class="dns-lead">Si el botón DNS está verde, este aparato llega a los dominios de la lista. Si está rojo, alguno no resuelve: pon DNS privado dns.xdp.es.</p>
             <p id="dnsFutbolBadge" class="dns-badge">Comprobando…</p>
             <p class="dns-honest">Esta aplicación no puede cambiar el DNS del aparato (ni en Android TV ni en el móvil). Hay que ponerlo a mano como DNS privado.</p>
             <div class="dns-box">
@@ -286,8 +287,8 @@
                     <li>Escribe <strong>dns.xdp.es</strong> y vuelve aquí</li>
                 </ol>
                 <p><strong>Cómo saber si funciona</strong></p>
-                <p>Pulsa «Comprobar ahora». Si los dominios cargan y no están bloqueados, el botón DNS se pone <strong>verde</strong>. Si no resuelven o hay bloqueo, se pone <strong>naranja</strong> para que entres aquí y cambies el DNS.</p>
-                <p class="dns-how-links">Guía: <a href="https://xdp.es/" target="_blank" rel="noopener">xdp.es</a> · IPs bloqueadas: <a href="https://hayahora.futbol/" target="_blank" rel="noopener">hayahora.futbol</a></p>
+                <p>Pulsa «Comprobar ahora». Si los dominios llegan, el botón DNS se pone <strong>verde</strong> (<code>DNS 4/4</code>). Si alguno no resuelve, se pone <strong>rojo</strong>.</p>
+                <p class="dns-how-links">Guía: <a href="https://xdp.es/" target="_blank" rel="noopener">xdp.es</a></p>
             </div>
             <div class="dns-actions">
                 <button type="button" id="dnsCopyBtn">Copiar dns.xdp.es</button>
@@ -304,6 +305,7 @@
             <div class="debug-header" id="debugHeader">
                 <strong>Modo debug</strong>
                 <div>
+                    <button type="button" id="debugDnsGuideBtn" title="Abrir la guía de DNS privado">Guía DNS</button>
                     <button type="button" id="debugProbeBtn" title="Preguntar al servidor por qué falla el canal">Diagnosticar</button>
                     <button type="button" id="debugCopyBtn">Copiar</button>
                     <button type="button" id="debugCloseBtn">Cerrar</button>
@@ -318,6 +320,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260830i"></script>
+    <script src="core.js?v=20260830j"></script>
 </body>
 </html>

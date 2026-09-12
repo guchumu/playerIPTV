@@ -536,33 +536,34 @@ function syncDnsPrefButtons() {
   }
 }
 
-function dnsLooksHttpsCanary(domain) {
-  const d = String(domain || "");
-  return d === "deinser.com" || d === "dle.rae.es" || /\.(es|com|net|org)$/i.test(d);
+function dnsGuideRequested() {
+  try {
+    const v = String(new URLSearchParams(window.location.search || "").get("dnsguide") || "").toLowerCase();
+    return v === "1" || v === "true" || v === "yes";
+  } catch (e) {
+    return false;
+  }
 }
 
-function dnsIsUnhealthy(rows) {
-  if (!rows || !rows.length) return false;
-  return rows.some((r) => {
-    if (r.blocked) return true;
-    if (r.resolved === false) return true;
-    if (r.reachable === false && (r.reachable_https || dnsLooksHttpsCanary(r.domain))) return true;
-    return false;
-  });
+function dnsReachStats(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const total = list.length;
+  const ok = list.filter((r) => r.reachable === true).length;
+  return { ok, total, bad: total > 0 && ok < total, good: total > 0 && ok === total };
 }
 
 function applyDnsButtonState(rows) {
   const btns = document.querySelectorAll(".dns-btn");
   if (!btns.length) return;
-  const has = !!(rows && rows.length);
-  const bad = has && dnsIsUnhealthy(rows);
-  const good = has && !bad;
-  let title = "DNS xdp.es y comprobación de bloqueos";
-  if (bad) title = "Hay bloqueo o no llegan los dominios. Pulsa para poner DNS dns.xdp.es";
-  else if (good) title = "DNS en buen estado. Pulsa para ver el detalle";
+  const stats = dnsReachStats(rows);
+  const label = stats.total ? "DNS " + stats.ok + "/" + stats.total : "DNS";
+  let title = "Comprobar si llegan los dominios";
+  if (stats.bad) title = "No llegan todos (" + stats.ok + " de " + stats.total + "). Pulsa para volver a comprobar";
+  else if (stats.good) title = "Llegan " + stats.ok + " de " + stats.total + ". Pulsa para volver a comprobar";
   btns.forEach((btn) => {
-    btn.classList.toggle("is-ok", good);
-    btn.classList.toggle("is-blocked", bad);
+    btn.classList.toggle("is-ok", stats.good);
+    btn.classList.toggle("is-blocked", stats.bad);
+    btn.textContent = label;
     btn.title = title;
     btn.setAttribute("aria-label", title);
   });
@@ -685,64 +686,88 @@ async function probeDnsUrl(url) {
 }
 
 async function probeDnsDomain(domain) {
-  if (await probeDnsUrl("https://" + domain + "/")) return true;
-  return probeDnsUrl("http://" + domain + "/");
+  const host = String(domain || "").trim();
+  if (!host) return false;
+  const hits = await Promise.all([
+    probeDnsUrl("http://" + host + ":80/"),
+    probeDnsUrl("http://" + host + "/"),
+    probeDnsUrl("https://" + host + "/"),
+  ]);
+  return hits.some(Boolean);
 }
 
 let dnsCheckBusy = false;
+let lastDnsRows = [];
 
-async function runDnsCheck(opts) {
-  const quiet = !!(opts && opts.quiet);
-  const force = !(opts && opts.force === false);
+function fillDnsGuidePanel(rows, err) {
+  if (!isDnsOverlayOpen()) return;
   const badge = document.getElementById("dnsFutbolBadge");
   const lead = document.getElementById("dnsStatusLead");
-  const checkBtn = document.getElementById("dnsCheckBtn");
-  if (dnsCheckBusy) return;
-  dnsCheckBusy = true;
-  if (!quiet && badge) {
-    badge.className = "dns-badge";
-    badge.textContent = "Comprobando listas y este aparato…";
+  if (err) {
+    if (badge) {
+      badge.className = "dns-badge is-block";
+      badge.textContent = "No se pudo comprobar: " + (err.message || "error");
+    }
+    return;
   }
+  const stats = dnsReachStats(rows);
+  if (badge) {
+    badge.className = "dns-badge " + (stats.bad ? "is-block" : "is-ok");
+    badge.textContent = stats.total
+      ? stats.ok + " de " + stats.total + " llegan desde este aparato"
+      : "No hay dominios en la lista";
+  }
+  if (lead) {
+    lead.textContent = stats.bad
+      ? "Si no llegan, pon DNS privado dns.xdp.es y vuelve a comprobar."
+      : "Los dominios de la lista llegan desde este aparato.";
+  }
+  renderDnsDomains(rows);
+}
+
+async function runDnsCheck(opts) {
+  const force = !(opts && opts.force === false);
+  const toast = !!(opts && opts.toast);
+  const checkBtn = document.getElementById("dnsCheckBtn");
+  if (dnsCheckBusy) return lastDnsRows;
+  dnsCheckBusy = true;
   if (checkBtn) checkBtn.disabled = true;
+  const prev = dnsReachStats(lastDnsRows);
   try {
     const res = await fetch(force ? "bloqueo_api.php?force=1" : "bloqueo_api.php", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     if (!data || !data.ok) throw new Error((data && data.error) || "respuesta no válida");
     const rows = Array.isArray(data.domains) ? data.domains.slice() : [];
-    for (let i = 0; i < rows.length; i++) {
-      rows[i].reachable = await probeDnsDomain(rows[i].domain);
-    }
-    const futbol = !!data.futbol_blocking_active;
-    const blockedN = rows.filter((r) => r.blocked).length;
-    const failN = rows.filter((r) => r.reachable === false).length;
-    const unhealthy = dnsIsUnhealthy(rows);
+    await Promise.all(
+      rows.map(async (row) => {
+        row.reachable = await probeDnsDomain(row.domain);
+      })
+    );
+    lastDnsRows = rows;
     applyDnsButtonState(rows);
-    if (badge) {
-      badge.className = "dns-badge " + (futbol || unhealthy ? "is-block" : "is-ok");
-      if (futbol) badge.textContent = "Hay bloqueo de fútbol ahora (hayahora / deinser).";
-      else if (unhealthy) badge.textContent = "Algún dominio no resuelve o no llega desde este aparato.";
-      else badge.textContent = "No hay bloqueo de fútbol activo en las listas.";
+    fillDnsGuidePanel(rows);
+    if (toast) {
+      const stats = dnsReachStats(rows);
+      if (!stats.total) showToast("No hay dominios que comprobar");
+      else if (stats.bad && prev.bad) showToast("Sigue sin resolver. Pon DNS privado dns.xdp.es");
+      else showToast("Comprobado: " + stats.ok + " de " + stats.total + " llegan");
     }
-    if (lead) {
-      const ipN = data.hayahora && data.hayahora.blocked_ip_count != null ? data.hayahora.blocked_ip_count : 0;
-      lead.textContent =
-        blockedN +
-        " dominio(s) bloqueados · " +
-        failN +
-        " no llegan desde este aparato · " +
-        ipN +
-        " IPs en hayahora. Tras poner dns.xdp.es, si un dominio pasa a «llega», las DNS funcionan.";
-    }
-    renderDnsDomains(rows);
   } catch (e) {
-    if (!quiet && badge) {
-      badge.className = "dns-badge is-block";
-      badge.textContent = "No se pudo comprobar: " + (e && e.message ? e.message : "error");
-    }
+    if (toast) showToast("No se pudo comprobar el DNS");
+    fillDnsGuidePanel(lastDnsRows, e);
   } finally {
     dnsCheckBusy = false;
     if (checkBtn) checkBtn.disabled = false;
+  }
+  return lastDnsRows;
+}
+
+async function onDnsButtonPress() {
+  const wasBad = dnsReachStats(lastDnsRows).bad;
+  await runDnsCheck({ force: true, toast: true });
+  if (wasBad || dnsReachStats(lastDnsRows).bad) {
+    await openDeviceNetworkSettings();
   }
 }
 
@@ -750,14 +775,13 @@ function initDnsPanel() {
   syncDnsPrefButtons();
   const settingsBtn = document.getElementById("dnsSettingsBtn");
   if (settingsBtn) settingsBtn.hidden = !canOpenAndroidSettings();
-  document.querySelectorAll(".dns-btn").forEach((openBtn) => {
-    if (!openBtn || openBtn.dataset.bound) return;
-    openBtn.dataset.bound = "1";
-    openBtn.addEventListener("click", (ev) => {
+  document.querySelectorAll(".dns-btn").forEach((btn) => {
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      showDnsOverlay(true);
-      if (!dnsCheckBusy) runDnsCheck({ force: false });
+      onDnsButtonPress();
     });
   });
   const closeBtn = document.getElementById("dnsCloseBtn");
@@ -782,21 +806,34 @@ function initDnsPanel() {
   if (settingsBtn) {
     settingsBtn.addEventListener("click", async () => {
       setDnsXdpEnabled(true);
-      const opened = await openDeviceNetworkSettings();
-      showToast(opened ? "Abre DNS privado y pon dns.xdp.es" : "Pon DNS privado: dns.xdp.es");
+      await openDeviceNetworkSettings();
+      showToast("Pon DNS privado: dns.xdp.es");
     });
   }
   const xdpBtn = document.getElementById("dnsXdpBtn");
   if (xdpBtn) {
     xdpBtn.addEventListener("click", async () => {
       setDnsXdpEnabled(true);
-      const opened = await openDeviceNetworkSettings();
-      showToast(opened ? "Abre DNS privado y pon dns.xdp.es" : "Pon DNS privado: dns.xdp.es");
+      await openDeviceNetworkSettings();
+      showToast("Pon DNS privado: dns.xdp.es");
     });
   }
   const checkBtn = document.getElementById("dnsCheckBtn");
-  if (checkBtn) checkBtn.addEventListener("click", () => runDnsCheck({ force: true }));
-  runDnsCheck({ quiet: true, force: false });
+  if (checkBtn) checkBtn.addEventListener("click", () => runDnsCheck({ force: true, toast: true }));
+  const debugGuideBtn = document.getElementById("debugDnsGuideBtn");
+  if (debugGuideBtn) {
+    debugGuideBtn.addEventListener("click", () => {
+      showDnsOverlay(true);
+      fillDnsGuidePanel(lastDnsRows);
+      if (!dnsCheckBusy) runDnsCheck({ force: false });
+    });
+  }
+  runDnsCheck({ quiet: true, force: false }).then(() => {
+    if (dnsGuideRequested()) {
+      showDnsOverlay(true);
+      fillDnsGuidePanel(lastDnsRows);
+    }
+  });
 }
 
 function stopPlayback(opts) {
@@ -5347,7 +5384,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830i");
+  url.searchParams.set("v", "20260830j");
   window.location.replace(url.toString());
 }
 

