@@ -251,9 +251,9 @@ function isTvLayout() {
 
 function getTvHeaderActions() {
   return [
-    document.getElementById("viewModeBtn"),
-    document.getElementById("audioBoostBtn"),
     document.getElementById("dnsBtn"),
+    document.getElementById("audioBoostBtn"),
+    document.getElementById("viewModeBtn"),
     document.getElementById("refreshBtn"),
     document.getElementById("logoutBtn"),
   ].filter(Boolean);
@@ -552,21 +552,20 @@ function dnsIsUnhealthy(rows) {
 }
 
 function applyDnsButtonState(rows) {
-  const btn = document.getElementById("dnsBtn");
-  if (!btn) return;
+  const btns = document.querySelectorAll(".dns-btn");
+  if (!btns.length) return;
   const has = !!(rows && rows.length);
   const bad = has && dnsIsUnhealthy(rows);
   const good = has && !bad;
-  btn.classList.toggle("is-ok", good);
-  btn.classList.toggle("is-blocked", bad);
-  if (bad) {
-    btn.title = "Hay bloqueo o no llegan los dominios. Pulsa para poner DNS dns.xdp.es";
-  } else if (good) {
-    btn.title = "DNS en buen estado. Pulsa para ver el detalle";
-  } else {
-    btn.title = "DNS xdp.es y comprobación de bloqueos";
-  }
-  btn.setAttribute("aria-label", btn.title);
+  let title = "DNS xdp.es y comprobación de bloqueos";
+  if (bad) title = "Hay bloqueo o no llegan los dominios. Pulsa para poner DNS dns.xdp.es";
+  else if (good) title = "DNS en buen estado. Pulsa para ver el detalle";
+  btns.forEach((btn) => {
+    btn.classList.toggle("is-ok", good);
+    btn.classList.toggle("is-blocked", bad);
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+  });
 }
 
 function isDnsOverlayOpen() {
@@ -751,8 +750,8 @@ function initDnsPanel() {
   syncDnsPrefButtons();
   const settingsBtn = document.getElementById("dnsSettingsBtn");
   if (settingsBtn) settingsBtn.hidden = !canOpenAndroidSettings();
-  const openBtn = document.getElementById("dnsBtn");
-  if (openBtn && !openBtn.dataset.bound) {
+  document.querySelectorAll(".dns-btn").forEach((openBtn) => {
+    if (!openBtn || openBtn.dataset.bound) return;
     openBtn.dataset.bound = "1";
     openBtn.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -760,7 +759,7 @@ function initDnsPanel() {
       showDnsOverlay(true);
       if (!dnsCheckBusy) runDnsCheck({ force: false });
     });
-  }
+  });
   const closeBtn = document.getElementById("dnsCloseBtn");
   if (closeBtn) closeBtn.addEventListener("click", () => showDnsOverlay(false));
   const overlay = document.getElementById("dnsOverlay");
@@ -5348,7 +5347,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830h");
+  url.searchParams.set("v", "20260830i");
   window.location.replace(url.toString());
 }
 

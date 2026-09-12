@@ -405,7 +405,7 @@ html.is-native-tv .login-manual {
 }
 .header-left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.55rem;
   min-width: 0;
 }
@@ -428,6 +428,10 @@ html.is-native-tv .login-manual {
   font-size: 1.12rem;
   font-weight: 750;
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: linear-gradient(90deg, #e0e7ff, #a5b4fc);
   -webkit-background-clip: text;
   background-clip: text;
@@ -497,6 +501,10 @@ html.is-native-tv .login-manual {
   cursor: pointer;
 }
 .dns-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   background: #334155;
   color: #e2e8f0;
   border: 1px solid #475569;
@@ -506,6 +514,12 @@ html.is-native-tv .login-manual {
   font-size: 0.78rem;
   font-weight: 800;
   cursor: pointer;
+  line-height: 1;
+}
+.dns-login-chip {
+  margin: 0.2rem auto 0.55rem;
+  min-height: 32px;
+  min-width: 52px;
 }
 .dns-btn.is-ok {
   background: #15803d;
@@ -1670,6 +1684,11 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   margin-bottom: 0.35rem;
   font-size: 0.7rem;
 }
+:is(body.is-tv, html.is-native-tv, html.login-landscape) .dns-login-chip {
+  margin: 0.15rem 0 0.4rem;
+  min-height: 40px;
+  min-width: 56px;
+}
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-tv-hint,
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .qr-hint,
 :is(body.is-tv, html.is-native-tv, html.login-landscape) .upload-url,
@@ -1793,7 +1812,7 @@ html.is-native-tv .compact-header {
 }
 body.is-tv .header-left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.55rem;
   min-width: 0;
 }
@@ -2030,10 +2049,23 @@ body.is-tv .tv-fav-empty {
   }
   .compact-header {
     flex-shrink: 0;
+    gap: 0.4rem;
     padding-top: max(0.4rem, env(safe-area-inset-top));
     padding-left: max(0.8rem, env(safe-area-inset-left));
     padding-right: max(0.8rem, env(safe-area-inset-right));
   }
+  body:not(.is-tv) .header-left h1 { font-size: 0.95rem; }
+  body:not(.is-tv) .header-version { display: none; }
+  body:not(.is-tv) .buffer-control { display: none !important; }
+  body:not(.is-tv) .dns-btn,
+  body:not(.is-tv) #dnsBtn {
+    display: inline-flex;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.7rem;
+    min-height: 28px;
+    min-width: 42px;
+  }
+  .header-right { min-width: 0; gap: 0.3rem; }
 
   /* flex:1 + min-height:0, no calc(100dvh - 40px): el header con notch
      mide más de 40px y ese cálculo estiraba el contenedor por encima
