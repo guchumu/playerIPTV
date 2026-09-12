@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260830g" />
+      <link rel="stylesheet" href="style.css?v=20260830h" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -130,6 +130,7 @@
                     </select>
                 </label>
                 <button type="button" id="audioBoostBtn" class="audio-boost-btn" title="Volumen extra: pulsa para subir por encima del 100%">100%</button>
+                <button type="button" id="dnsBtn" class="dns-btn" title="DNS xdp.es y comprobación de bloqueos">DNS</button>
                 <label class="track-control" id="audioTrackWrap" hidden>
                     Audio
                     <select id="audioTrackSelect"></select>
@@ -261,6 +262,30 @@
         </div>
     </div>
 
+    <div id="dnsOverlay" class="lists-overlay dns-overlay" hidden aria-hidden="true">
+        <div class="lists-panel dns-panel">
+            <div class="lists-header">
+                <strong>Red y bloqueos</strong>
+                <button type="button" id="dnsCloseBtn">Cerrar</button>
+            </div>
+            <p id="dnsStatusLead" class="dns-lead">Mira si hay corte de fútbol y si tus dominios responden desde este aparato.</p>
+            <p id="dnsFutbolBadge" class="dns-badge">Pulsa Comprobar para ver el estado.</p>
+            <button type="button" id="dnsXdpBtn" class="dns-xdp-btn">Usar DNS xdp.es</button>
+            <div id="dnsHow" class="dns-how" hidden>
+                <p>La app no puede cambiar las DNS de la tele sola. En el aparato:</p>
+                <ol>
+                    <li>Ajustes → Red → DNS privado (o DNS de la Wi‑Fi)</li>
+                    <li>Pon <strong>dns.xdp.es</strong></li>
+                    <li>Si pide IP: <strong>85.208.114.51</strong></li>
+                </ol>
+                <p>Luego pulsa Comprobar. Si un dominio no llegaba y ahora sí, esas DNS están actuando. Si el operador corta la IP, el DNS no basta.</p>
+                <p class="dns-how-links">Guía: <a href="https://xdp.es/" target="_blank" rel="noopener">xdp.es</a> · IPs: <a href="https://hayahora.futbol/" target="_blank" rel="noopener">hayahora.futbol</a></p>
+            </div>
+            <ul id="dnsDomainList" class="dns-domain-list"></ul>
+            <button type="button" id="dnsCheckBtn" class="lists-add-btn">Comprobar ahora</button>
+        </div>
+    </div>
+
     <div id="debugOverlay" class="debug-overlay" hidden>
         <div class="debug-panel">
             <div class="debug-header" id="debugHeader">
@@ -280,6 +305,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260830g"></script>
+    <script src="core.js?v=20260830h"></script>
 </body>
 </html>

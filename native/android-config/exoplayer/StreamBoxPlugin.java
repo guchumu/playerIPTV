@@ -1,7 +1,9 @@
 package PACKAGE_NAME;
 
+import android.app.Activity;
 import android.app.UiModeManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
@@ -210,5 +212,27 @@ public class StreamBoxPlugin extends Plugin {
         ret.put("engine", streamer ? "vlc" : "exo");
         ret.put("versionName", versionName(getContext()));
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openNetworkSettings(PluginCall call) {
+        Activity act = getActivity();
+        if (act == null) {
+            call.reject("Sin actividad");
+            return;
+        }
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS);
+            act.startActivity(i);
+            call.resolve();
+        } catch (Throwable ignored) {
+            try {
+                Intent i = new Intent(android.provider.Settings.ACTION_SETTINGS);
+                act.startActivity(i);
+                call.resolve();
+            } catch (Throwable t) {
+                call.reject("No se pudieron abrir los ajustes");
+            }
+        }
     }
 }

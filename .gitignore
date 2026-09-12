@@ -20,6 +20,7 @@ native/ios/
 xcuserdata/
 .idea/
 local.properties
+data/bloqueo_cache.json
 # Banners subidos por el admin: no versionar anuncios de clientes.
 ads/*
 !ads/.htaccess

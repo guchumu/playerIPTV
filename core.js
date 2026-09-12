@@ -12,6 +12,7 @@ if (!CSS.escape) {
 
 const EPG_URL = "epg_api.php";
 const APP_VERSION = "1.0.17";
+const DNS_XDP_KEY = "streambox_dns_xdp";
 
 function appVersion() {
   try {
@@ -252,6 +253,7 @@ function getTvHeaderActions() {
   return [
     document.getElementById("viewModeBtn"),
     document.getElementById("audioBoostBtn"),
+    document.getElementById("dnsBtn"),
     document.getElementById("refreshBtn"),
     document.getElementById("logoutBtn"),
   ].filter(Boolean);
@@ -508,6 +510,196 @@ function initAudioBoost() {
       cycleAudioBoost();
     });
   }
+}
+
+function dnsXdpEnabled() {
+  try {
+    return localStorage.getItem(DNS_XDP_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function setDnsXdpEnabled(on) {
+  try {
+    localStorage.setItem(DNS_XDP_KEY, on ? "1" : "0");
+  } catch (e) {}
+  syncDnsButton();
+}
+
+function syncDnsButton() {
+  const btn = document.getElementById("dnsBtn");
+  if (!btn) return;
+  const on = dnsXdpEnabled();
+  btn.classList.toggle("is-on", on);
+  btn.title = on ? "DNS xdp.es marcado. Abre para comprobar bloqueos." : "DNS xdp.es y comprobación de bloqueos";
+  const xdpBtn = document.getElementById("dnsXdpBtn");
+  if (xdpBtn) {
+    xdpBtn.classList.toggle("is-on", on);
+    xdpBtn.textContent = on ? "DNS xdp.es activado" : "Usar DNS xdp.es";
+  }
+  const how = document.getElementById("dnsHow");
+  if (how) how.hidden = !on;
+}
+
+function isDnsOverlayOpen() {
+  const overlay = document.getElementById("dnsOverlay");
+  return !!(overlay && !overlay.hidden && overlay.classList.contains("is-open"));
+}
+
+function showDnsOverlay(show) {
+  const overlay = document.getElementById("dnsOverlay");
+  if (!overlay) return;
+  if (show) {
+    overlay.hidden = false;
+    overlay.classList.add("is-open");
+    overlay.setAttribute("aria-hidden", "false");
+    syncDnsButton();
+    const checkBtn = document.getElementById("dnsCheckBtn");
+    if (checkBtn) checkBtn.focus();
+  } else {
+    overlay.classList.remove("is-open");
+    overlay.hidden = true;
+    overlay.setAttribute("aria-hidden", "true");
+  }
+}
+
+async function openDeviceNetworkSettings() {
+  try {
+    const cap = window.Capacitor;
+    const plugin = cap && cap.Plugins && cap.Plugins.StreamBox;
+    if (plugin && typeof plugin.openNetworkSettings === "function") {
+      await plugin.openNetworkSettings();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+function renderDnsDomains(rows) {
+  const ul = document.getElementById("dnsDomainList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  (rows || []).forEach((row) => {
+    const li = document.createElement("li");
+    const blocked = !!row.blocked;
+    const reach = row.reachable;
+    li.className = "dns-domain-item" + (blocked ? " is-block" : reach === true ? " is-ok" : "");
+    const name = document.createElement("strong");
+    name.textContent = row.domain || "";
+    const meta = document.createElement("span");
+    const bits = [];
+    if (blocked) bits.push("en lista de bloqueo");
+    else bits.push("no listado");
+    if (reach === true) bits.push("llega desde aquí");
+    else if (reach === false) bits.push("no llega desde aquí");
+    if (row.xdp_ips && row.xdp_ips.length) bits.push("xdp " + row.xdp_ips[0]);
+    meta.textContent = bits.join(" · ");
+    li.appendChild(name);
+    li.appendChild(meta);
+    ul.appendChild(li);
+  });
+}
+
+async function probeDnsDomain(domain) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 7000);
+  try {
+    await fetch("https://" + domain + "/", {
+      mode: "no-cors",
+      cache: "no-store",
+      credentials: "omit",
+      signal: ctrl.signal,
+    });
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runDnsCheck() {
+  const badge = document.getElementById("dnsFutbolBadge");
+  const lead = document.getElementById("dnsStatusLead");
+  const checkBtn = document.getElementById("dnsCheckBtn");
+  if (badge) {
+    badge.className = "dns-badge";
+    badge.textContent = "Comprobando listas y este aparato…";
+  }
+  if (checkBtn) checkBtn.disabled = true;
+  try {
+    const res = await fetch("bloqueo_api.php?force=1", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (!data || !data.ok) throw new Error("respuesta no válida");
+    const rows = Array.isArray(data.domains) ? data.domains.slice() : [];
+    for (let i = 0; i < rows.length; i++) {
+      rows[i].reachable = await probeDnsDomain(rows[i].domain);
+    }
+    const futbol = !!data.futbol_blocking_active;
+    const blockedN = rows.filter((r) => r.blocked).length;
+    const failN = rows.filter((r) => r.reachable === false).length;
+    if (badge) {
+      badge.className = "dns-badge " + (futbol || blockedN || failN ? "is-block" : "is-ok");
+      if (futbol) badge.textContent = "Hay bloqueo de fútbol ahora (hayahora / deinser).";
+      else badge.textContent = "No hay bloqueo de fútbol activo en las listas.";
+    }
+    if (lead) {
+      const ipN = data.hayahora && data.hayahora.blocked_ip_count != null ? data.hayahora.blocked_ip_count : 0;
+      lead.textContent =
+        blockedN +
+        " dominio(s) en IPs bloqueadas · " +
+        failN +
+        " no llegan desde este aparato · " +
+        ipN +
+        " IPs en hayahora. Si activaste dns.xdp.es y un dominio pasa a «llega», las DNS funcionan.";
+    }
+    renderDnsDomains(rows);
+  } catch (e) {
+    if (badge) {
+      badge.className = "dns-badge is-block";
+      badge.textContent = "No se pudo comprobar: " + (e && e.message ? e.message : "error");
+    }
+  } finally {
+    if (checkBtn) checkBtn.disabled = false;
+  }
+}
+
+function initDnsPanel() {
+  syncDnsButton();
+  const openBtn = document.getElementById("dnsBtn");
+  if (openBtn && !openBtn.dataset.bound) {
+    openBtn.dataset.bound = "1";
+    openBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showDnsOverlay(true);
+    });
+  }
+  const closeBtn = document.getElementById("dnsCloseBtn");
+  if (closeBtn) closeBtn.addEventListener("click", () => showDnsOverlay(false));
+  const overlay = document.getElementById("dnsOverlay");
+  if (overlay) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) showDnsOverlay(false);
+    });
+  }
+  const xdpBtn = document.getElementById("dnsXdpBtn");
+  if (xdpBtn) {
+    xdpBtn.addEventListener("click", async () => {
+      const next = !dnsXdpEnabled();
+      setDnsXdpEnabled(next);
+      if (next) {
+        const opened = await openDeviceNetworkSettings();
+        showToast(opened ? "Abre DNS privado y pon dns.xdp.es" : "Pon DNS privado: dns.xdp.es");
+      } else {
+        showToast("DNS xdp.es desmarcado");
+      }
+    });
+  }
+  const checkBtn = document.getElementById("dnsCheckBtn");
+  if (checkBtn) checkBtn.addEventListener("click", () => runDnsCheck());
 }
 
 function stopPlayback(opts) {
@@ -1967,6 +2159,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initChannelTools();
   initChannelView();
   initAudioBoost();
+  initDnsPanel();
   initListManager();
   initAdSlot();
   initManualLogin();
@@ -5057,7 +5250,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830g");
+  url.searchParams.set("v", "20260830h");
   window.location.replace(url.toString());
 }
 
@@ -5260,7 +5453,7 @@ document.addEventListener("keydown", (e) => {
 
   const digit = e.key >= "0" && e.key <= "9" ? e.key : "";
   const onPlayer = document.getElementById("mainScreen") && document.getElementById("mainScreen").classList.contains("active");
-  if (digit && onPlayer && !isTypingTarget(e.target) && !isSplashActive()) {
+  if (digit && onPlayer && !isTypingTarget(e.target) && !isSplashActive() && !isDnsOverlayOpen()) {
     e.preventDefault();
     if (digit === "0") noteDebugZero();
     noteZapDigit(digit);
@@ -5271,6 +5464,10 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Backspace" && isTypingTarget(e.target)) return;
     if (isLoginScreenActive()) return;
     e.preventDefault();
+    if (isDnsOverlayOpen()) {
+      showDnsOverlay(false);
+      return;
+    }
     if (exitNativeFullscreen()) {
       focusChannelList();
       return;
@@ -5348,6 +5545,7 @@ document.addEventListener("keydown", (e) => {
 
   const validKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "OK", "Select"];
   if (!validKeys.includes(e.key) && !isConfirmKey(e)) return;
+  if (isDnsOverlayOpen()) return;
 
   if (isConfirmKey(e) && isTvLayout() && currentFocus.col === 1) {
     if (e.repeat) {

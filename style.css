@@ -496,6 +496,98 @@ html.is-native-tv .login-manual {
   font-family: inherit;
   cursor: pointer;
 }
+.dns-btn {
+  background: #334155;
+  color: #e2e8f0;
+  border: none;
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.dns-btn.is-on {
+  background: #1d4ed8;
+  color: #fff;
+}
+.dns-lead,
+.dns-how,
+.dns-how-links {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0 0 0.7rem;
+}
+.dns-how ol {
+  margin: 0.4rem 0 0.6rem 1.1rem;
+  padding: 0;
+}
+.dns-how a { color: #93c5fd; }
+.dns-badge {
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.dns-badge.is-block {
+  background: rgba(220, 38, 38, 0.2);
+  color: #fecaca;
+}
+.dns-badge.is-ok {
+  background: rgba(22, 163, 74, 0.2);
+  color: #bbf7d0;
+}
+.dns-xdp-btn {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+.dns-xdp-btn.is-on { background: #15803d; }
+.dns-domain-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 36vh;
+  overflow: auto;
+}
+.dns-domain-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+}
+.dns-domain-item strong { color: #f8fafc; }
+.dns-domain-item span { color: #94a3b8; text-align: right; }
+.dns-domain-item.is-block { border-color: rgba(248, 113, 113, 0.45); }
+.dns-domain-item.is-ok { border-color: rgba(74, 222, 128, 0.35); }
+.dns-panel { width: min(520px, 100%); }
+body.is-tv .dns-panel,
+html.is-native-tv .dns-panel { width: min(640px, calc(100vw - 48px)); }
+body.is-tv .dns-lead,
+body.is-tv .dns-how,
+html.is-native-tv .dns-lead,
+html.is-native-tv .dns-how { font-size: 0.95rem; }
+body.is-tv .dns-badge,
+html.is-native-tv .dns-badge { font-size: 1rem; }
 .audio-boost-btn.is-boosted {
   background: #b45309;
   border-color: #f59e0b;
@@ -1700,7 +1792,9 @@ html.is-native-tv .header-right button {
   overflow: visible;
 }
 body.is-tv #audioBoostBtn,
-html.is-native-tv #audioBoostBtn {
+html.is-native-tv #audioBoostBtn,
+body.is-tv #dnsBtn,
+html.is-native-tv #dnsBtn {
   width: auto;
   min-width: 56px;
   padding: 0 10px;
