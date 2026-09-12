@@ -499,7 +499,7 @@ html.is-native-tv .login-manual {
 .dns-btn {
   background: #334155;
   color: #e2e8f0;
-  border: none;
+  border: 1px solid #475569;
   border-radius: 8px;
   padding: 0.35rem 0.65rem;
   font: inherit;
@@ -507,17 +507,46 @@ html.is-native-tv .login-manual {
   font-weight: 800;
   cursor: pointer;
 }
-.dns-btn.is-on {
-  background: #1d4ed8;
+.dns-btn.is-ok {
+  background: #15803d;
+  border-color: #22c55e;
+  color: #fff;
+}
+.dns-btn.is-blocked {
+  background: #b45309;
+  border-color: #f59e0b;
   color: #fff;
 }
 .dns-lead,
 .dns-how,
-.dns-how-links {
+.dns-how-links,
+.dns-honest {
   color: #94a3b8;
   font-size: 0.82rem;
   line-height: 1.45;
   margin: 0 0 0.7rem;
+}
+.dns-honest { color: #cbd5e1; }
+.dns-box {
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.75);
+  border: 1px solid #334155;
+}
+.dns-label { margin: 0 0 0.25rem; color: #94a3b8; font-size: 0.75rem; }
+.dns-host {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.dns-ips, .dns-doh {
+  margin: 0.25rem 0 0;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  word-break: break-all;
 }
 .dns-how ol {
   margin: 0.4rem 0 0.6rem 1.1rem;
@@ -541,27 +570,39 @@ html.is-native-tv .login-manual {
   background: rgba(22, 163, 74, 0.2);
   color: #bbf7d0;
 }
-.dns-xdp-btn {
-  width: 100%;
+.dns-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 0.75rem;
-  background: #1d4ed8;
-  color: #fff;
-  border: none;
+}
+.dns-actions button {
+  width: 100%;
+  min-height: 44px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
   border-radius: 8px;
-  padding: 0.7rem 0.9rem;
+  padding: 0.65rem 0.9rem;
   font: inherit;
   font-weight: 750;
   cursor: pointer;
 }
-.dns-xdp-btn.is-on { background: #15803d; }
+.dns-xdp-btn {
+  background: #1d4ed8 !important;
+  border-color: #2563eb !important;
+  color: #fff !important;
+}
+.dns-xdp-btn.is-on { background: #15803d !important; border-color: #22c55e !important; }
+#dnsCheckBtn { background: #4f46e5; color: #fff; border: none; }
 .dns-domain-list {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 36vh;
+  max-height: 28vh;
   overflow: auto;
 }
 .dns-domain-item {
@@ -579,15 +620,21 @@ html.is-native-tv .login-manual {
 .dns-domain-item span { color: #94a3b8; text-align: right; }
 .dns-domain-item.is-block { border-color: rgba(248, 113, 113, 0.45); }
 .dns-domain-item.is-ok { border-color: rgba(74, 222, 128, 0.35); }
-.dns-panel { width: min(520px, 100%); }
+.dns-panel { width: min(560px, 100%); max-height: min(88vh, 820px); overflow: auto; }
 body.is-tv .dns-panel,
-html.is-native-tv .dns-panel { width: min(640px, calc(100vw - 48px)); }
+html.is-native-tv .dns-panel { width: min(680px, calc(100vw - 48px)); }
 body.is-tv .dns-lead,
 body.is-tv .dns-how,
+body.is-tv .dns-honest,
 html.is-native-tv .dns-lead,
-html.is-native-tv .dns-how { font-size: 0.95rem; }
+html.is-native-tv .dns-how,
+html.is-native-tv .dns-honest { font-size: 0.95rem; }
+body.is-tv .dns-host,
+html.is-native-tv .dns-host { font-size: 1.7rem; }
 body.is-tv .dns-badge,
 html.is-native-tv .dns-badge { font-size: 1rem; }
+body.is-tv .dns-actions button,
+html.is-native-tv .dns-actions button { min-height: 52px; font-size: 1.05rem; }
 .audio-boost-btn.is-boosted {
   background: #b45309;
   border-color: #f59e0b;
@@ -1812,18 +1859,22 @@ html.is-native-tv .header-right button svg path {
 }
 body.is-tv #viewModeBtn:focus,
 body.is-tv #audioBoostBtn:focus,
+body.is-tv #dnsBtn:focus,
 body.is-tv #refreshBtn:focus,
 body.is-tv #logoutBtn:focus,
 body.is-tv #viewModeBtn.cursor,
 body.is-tv #audioBoostBtn.cursor,
+body.is-tv #dnsBtn.cursor,
 body.is-tv #refreshBtn.cursor,
 body.is-tv #logoutBtn.cursor,
 html.is-native-tv #viewModeBtn:focus,
 html.is-native-tv #audioBoostBtn:focus,
+html.is-native-tv #dnsBtn:focus,
 html.is-native-tv #refreshBtn:focus,
 html.is-native-tv #logoutBtn:focus,
 html.is-native-tv #viewModeBtn.cursor,
 html.is-native-tv #audioBoostBtn.cursor,
+html.is-native-tv #dnsBtn.cursor,
 html.is-native-tv #refreshBtn.cursor,
 html.is-native-tv #logoutBtn.cursor {
   outline: 3px solid #fbbf24;

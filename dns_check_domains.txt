@@ -1,0 +1,11 @@
+# Dominios canario para ver si el operador (ISP) está bloqueando.
+# Edita este fichero en el servidor (Plesk → Administrador de archivos).
+# Un dominio por línea. Las líneas que empiezan por # son comentarios.
+# No pongas http:// ni rutas: solo el host (ejemplo: deinser.com).
+# La app los comprueba con deinser.com, hayahora.futbol y DNS de xdp.es.
+
+deinser.com
+dle.rae.es
+nctdqkaw.k21fmcom.xyz
+hmdasdxu.k21fmcom.xyz
+gex68cd9.k21te.xyz

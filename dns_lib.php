@@ -1,32 +1,41 @@
 <?php
 /**
- * Lista de dominios (admin) + sondas de bloqueo (deinser / hayahora) + DoH xdp.es.
+ * Sondas de bloqueo DNS/ISP: lista TXT en el servidor, deinser, hayahora y DoH xdp.es.
+ * Editar dominios: dns_check_domains.txt (un host por línea).
  */
+require_once __DIR__ . '/player_lib.php';
 
 define('DNS_XDP_IPV4', '85.208.114.51');
 define('DNS_XDP_IPV6', '2a0e:97c0:c40::51');
 define('DNS_XDP_DOT', 'dns.xdp.es');
 define('DNS_XDP_DOH', 'https://dns.xdp.es/dns-query');
-define('DNS_DOMAINS_MAX', 20);
-define('DNS_CACHE_TTL', 90);
-
-function dns_data_dir()
-{
-    $dir = __DIR__ . '/data';
-    if (!is_dir($dir)) {
-        @mkdir($dir, 0775, true);
-    }
-    return $dir;
-}
+define('DNS_DOMAINS_MAX', 30);
+define('DNS_CACHE_TTL', 60);
+define('DNS_BROWSER_UA', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36');
 
 function dns_domains_file()
 {
-    return dns_data_dir() . '/dns_check_domains.json';
+    $root = __DIR__ . '/dns_check_domains.txt';
+    if (is_file($root)) {
+        return $root;
+    }
+    return __DIR__ . '/data/dns_check_domains.txt';
 }
 
 function dns_cache_file()
 {
-    return dns_data_dir() . '/bloqueo_cache.json';
+    return player_cache_dir() . '/bloqueo_cache.json';
+}
+
+function dns_default_domains()
+{
+    return array(
+        'deinser.com',
+        'dle.rae.es',
+        'nctdqkaw.k21fmcom.xyz',
+        'hmdasdxu.k21fmcom.xyz',
+        'gex68cd9.k21te.xyz',
+    );
 }
 
 function dns_normalize_domain($raw)
@@ -35,10 +44,16 @@ function dns_normalize_domain($raw)
     if ($s === '') {
         return '';
     }
+    if (strpos($s, '#') !== false) {
+        $s = trim(strtok($s, '#'));
+    }
     $s = preg_replace('#^https?://#', '', $s);
     $s = preg_replace('#/.*$#', '', $s);
-    $s = preg_replace('/:\d+$/', '', $s);
-    if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/', $s)) {
+    $s = preg_replace('/:\\d+$/', '', $s);
+    if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}$/', $s)) {
+        return '';
+    }
+    if (strlen($s) > 253) {
         return '';
     }
     return $s;
@@ -46,11 +61,11 @@ function dns_normalize_domain($raw)
 
 function dns_load_domains()
 {
-    $data = json_decode((string) @file_get_contents(dns_domains_file()), true);
     $out = array();
-    if (is_array($data) && isset($data['domains']) && is_array($data['domains'])) {
-        foreach ($data['domains'] as $item) {
-            $d = dns_normalize_domain($item);
+    $file = dns_domains_file();
+    if (is_file($file)) {
+        foreach (preg_split('/\\R/', (string) @file_get_contents($file)) as $line) {
+            $d = dns_normalize_domain($line);
             if ($d !== '') {
                 $out[] = $d;
             }
@@ -58,55 +73,104 @@ function dns_load_domains()
     }
     $out = array_values(array_unique($out));
     if (!$out) {
-        $out = array('deinser.com', 'dle.rae.es', 'www.rae.es');
+        $out = dns_default_domains();
     }
     return array_slice($out, 0, DNS_DOMAINS_MAX);
 }
 
-function dns_save_domains($domains)
+function dns_curl_handle($url, $opts)
 {
-    $clean = array();
-    foreach ((array) $domains as $item) {
-        $d = dns_normalize_domain($item);
-        if ($d !== '') {
-            $clean[] = $d;
-        }
+    $ch = curl_init();
+    $headers = array('Accept-Language: es-ES,es;q=0.9,en;q=0.8');
+    if (!empty($opts['accept'])) {
+        $headers[] = 'Accept: ' . $opts['accept'];
     }
-    $clean = array_slice(array_values(array_unique($clean)), 0, DNS_DOMAINS_MAX);
-    $json = json_encode(array('domains' => $clean), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    $ok = @file_put_contents(dns_domains_file(), $json . "\n") !== false;
-    @unlink(dns_cache_file());
-    return $ok;
+    $timeout = isset($opts['timeout']) ? (int) $opts['timeout'] : 8;
+    curl_setopt_array($ch, array(
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_CONNECTTIMEOUT => 4,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_ENCODING => '',
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_USERAGENT => DNS_BROWSER_UA,
+        CURLOPT_HTTPHEADER => $headers,
+    ));
+    return $ch;
 }
 
-function dns_http_get($url, $accept, $timeout)
+function dns_http_one($url, $opts)
 {
+    $empty = array('ok' => false, 'code' => 0, 'error' => 'sin curl', 'body' => '');
     if (!function_exists('curl_init')) {
-        return '';
+        return $empty;
     }
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
-    curl_setopt($ch, CURLOPT_ENCODING, '');
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Accept: ' . $accept));
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 StreamBox/1.0');
+    $ch = dns_curl_handle($url, $opts);
     $body = curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = (string) curl_error($ch);
     curl_close($ch);
-    if ($body === false || $code >= 400) {
-        return '';
+    return array(
+        'ok' => $body !== false && $code >= 200 && $code < 400,
+        'code' => $code,
+        'error' => $err,
+        'body' => $body === false ? '' : (string) $body,
+    );
+}
+
+function dns_http_multi($jobs)
+{
+    $out = array();
+    foreach ($jobs as $key => $job) {
+        $out[$key] = array('ok' => false, 'code' => 0, 'error' => 'sin respuesta', 'body' => '');
     }
-    return (string) $body;
+    if (!$jobs) {
+        return $out;
+    }
+    if (!function_exists('curl_multi_init')) {
+        foreach ($jobs as $key => $job) {
+            $out[$key] = dns_http_one($job['url'], $job);
+        }
+        return $out;
+    }
+    $mh = curl_multi_init();
+    $handles = array();
+    foreach ($jobs as $key => $job) {
+        $ch = dns_curl_handle($job['url'], $job);
+        $handles[$key] = $ch;
+        curl_multi_add_handle($mh, $ch);
+    }
+    $running = null;
+    do {
+        $status = curl_multi_exec($mh, $running);
+        if ($running) {
+            curl_multi_select($mh, 1.0);
+        }
+    } while ($running && $status === CURLM_OK);
+    foreach ($handles as $key => $ch) {
+        $body = curl_multi_getcontent($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = (string) curl_error($ch);
+        $out[$key] = array(
+            'ok' => $body !== false && $body !== null && $code >= 200 && $code < 400,
+            'code' => $code,
+            'error' => $err,
+            'body' => ($body === false || $body === null) ? '' : (string) $body,
+        );
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+    }
+    curl_multi_close($mh);
+    return $out;
 }
 
 function dns_skip_name($raw, $offset)
 {
     $len = strlen($raw);
-    while ($offset < $len) {
+    $guard = 0;
+    while ($offset < $len && $guard++ < 64) {
         $label = ord($raw[$offset]);
         if ($label === 0) {
             return $offset + 1;
@@ -159,38 +223,42 @@ function dns_parse_a_records($raw)
     return array_values(array_unique($ips));
 }
 
-function dns_xdp_resolve($domain)
+function dns_build_query($domain)
 {
     $id = random_int(0, 65535);
     $header = pack('nnnnnn', $id, 0x0100, 1, 0, 0, 0);
     $qname = '';
     foreach (explode('.', $domain) as $label) {
-        $qname .= chr(strlen($label)) . $label;
+        $len = strlen($label);
+        if ($len < 1 || $len > 63) {
+            return '';
+        }
+        $qname .= chr($len) . $label;
     }
     $qname .= "\0";
-    $msg = $header . $qname . pack('nn', 1, 1);
-    $b64 = rtrim(strtr(base64_encode($msg), '+/', '-_'), '=');
-    $raw = dns_http_get(DNS_XDP_DOH . '?dns=' . $b64, 'application/dns-message', 8);
-    return dns_parse_a_records($raw);
+    return $header . $qname . pack('nn', 1, 1);
 }
 
-function dns_deinser_check($domain)
+function dns_doh_url($domain)
 {
-    $url = 'https://deinser.com/cloudflare/laliga/?domain=' . rawurlencode($domain) . '&json=1';
-    $raw = dns_http_get($url, 'application/json', 10);
-    $data = json_decode($raw, true);
-    if (!is_array($data) || !isset($data['domain'])) {
-        return null;
+    $msg = dns_build_query($domain);
+    if ($msg === '') {
+        return '';
     }
-    return $data;
+    $b64 = rtrim(strtr(base64_encode($msg), '+/', '-_'), '=');
+    return DNS_XDP_DOH . '?dns=' . $b64;
 }
 
-function dns_hayahora_blocked_ips()
+function dns_parse_ip_list($text)
 {
-    $raw = dns_http_get('https://hayahora.futbol/estado/blocked-any.txt', 'text/plain', 8);
     $ips = array();
-    foreach (preg_split('/\R/', (string) $raw) as $line) {
-        $ip = trim($line);
+    foreach (preg_split('/\\R/', (string) $text) as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#') {
+            continue;
+        }
+        $parts = preg_split('/\\s+/', $line);
+        $ip = $parts[0];
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             $ips[] = $ip;
         }
@@ -223,16 +291,58 @@ function dns_build_report($force)
     }
 
     $domains = dns_load_domains();
-    $blockedIps = dns_hayahora_blocked_ips();
+    $jobs = array(
+        'hayahora' => array(
+            'url' => 'https://hayahora.futbol/estado/blocked-any.txt',
+            'accept' => 'text/plain',
+            'timeout' => 8,
+        ),
+    );
+    foreach ($domains as $i => $domain) {
+        $jobs['deinser_' . $i] = array(
+            'url' => 'https://deinser.com/cloudflare/laliga/?domain=' . rawurlencode($domain) . '&json=1',
+            'accept' => 'application/json,text/html;q=0.8',
+            'timeout' => 8,
+        );
+        $doh = dns_doh_url($domain);
+        if ($doh !== '') {
+            $jobs['doh_' . $i] = array(
+                'url' => $doh,
+                'accept' => 'application/dns-message',
+                'timeout' => 8,
+            );
+        }
+        $jobs['https_' . $i] = array(
+            'url' => 'https://' . $domain . '/',
+            'accept' => '*/*',
+            'timeout' => 5,
+        );
+        $jobs['http_' . $i] = array(
+            'url' => 'http://' . $domain . '/',
+            'accept' => '*/*',
+            'timeout' => 5,
+        );
+    }
+
+    $fetched = dns_http_multi($jobs);
+    $blockedIps = dns_parse_ip_list(isset($fetched['hayahora']['body']) ? $fetched['hayahora']['body'] : '');
     $blockedSet = array_fill_keys($blockedIps, true);
     $futbol = count($blockedIps) > 0;
     $rows = array();
 
-    foreach ($domains as $domain) {
-        $deinser = dns_deinser_check($domain);
-        $xdpIps = dns_xdp_resolve($domain);
+    foreach ($domains as $i => $domain) {
+        $deinserRaw = isset($fetched['deinser_' . $i]['body']) ? $fetched['deinser_' . $i]['body'] : '';
+        $deinser = json_decode($deinserRaw, true);
+        if (!is_array($deinser) || !isset($deinser['domain'])) {
+            $deinser = null;
+        }
+        $xdpIps = array();
+        if (!empty($fetched['doh_' . $i]['ok'])) {
+            $xdpIps = dns_parse_a_records($fetched['doh_' . $i]['body']);
+        }
         $listed = array();
         $sourceIps = array();
+        $domainBlocked = false;
         if (is_array($deinser)) {
             if (!empty($deinser['futbol_blocking_active'])) {
                 $futbol = true;
@@ -240,9 +350,6 @@ function dns_build_report($force)
             $sourceIps = isset($deinser['domain_ips']) && is_array($deinser['domain_ips']) ? $deinser['domain_ips'] : array();
             $listed = isset($deinser['blocked_ips']) && is_array($deinser['blocked_ips']) ? $deinser['blocked_ips'] : array();
             $domainBlocked = !empty($deinser['domain_blocked']);
-        } else {
-            $sourceIps = $xdpIps;
-            $domainBlocked = false;
         }
         foreach (array_merge($sourceIps, $xdpIps) as $ip) {
             if (isset($blockedSet[$ip])) {
@@ -251,6 +358,8 @@ function dns_build_report($force)
             }
         }
         $listed = array_values(array_unique($listed));
+        $httpsHint = !empty($fetched['https_' . $i]['ok']);
+        $httpHint = !empty($fetched['http_' . $i]['ok']);
         $rows[] = array(
             'domain' => $domain,
             'blocked' => $domainBlocked,
@@ -258,7 +367,11 @@ function dns_build_report($force)
             'ips' => array_values(array_unique($sourceIps)),
             'blocked_ips' => $listed,
             'xdp_ips' => $xdpIps,
+            'xdp_ip_blocked' => count(array_intersect($xdpIps, $listed)) > 0,
             'deinser_ok' => is_array($deinser),
+            'resolved' => count($sourceIps) > 0 || count($xdpIps) > 0,
+            'reachable_https' => $httpsHint,
+            'reachable_http' => $httpHint,
         );
     }
 
@@ -277,10 +390,12 @@ function dns_build_report($force)
         'how_to' => array(
             'private_dns' => DNS_XDP_DOT,
             'ipv4' => DNS_XDP_IPV4,
-            'hint' => 'En Android: Ajustes → Red → DNS privado → dns.xdp.es. Luego pulsa Comprobar: si un dominio no llegaba y ahora sí, las DNS nuevas están actuando. Si el operador corta la IP (no solo el DNS), hará falta otra red o una VPN.',
+            'ipv6' => DNS_XDP_IPV6,
+            'doh' => DNS_XDP_DOH,
+            'hint' => 'Esta app no puede cambiar el DNS del aparato. En Android: Ajustes → Red e Internet → DNS privado → dns.xdp.es. Luego pulsa Comprobar.',
         ),
     );
 
-    @file_put_contents($cacheFile, json_encode($report));
+    @file_put_contents($cacheFile, json_encode($report), LOCK_EX);
     return $report;
 }
