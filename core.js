@@ -251,7 +251,6 @@ function isTvLayout() {
 
 function getTvHeaderActions() {
   return [
-    document.getElementById("dnsBtn"),
     document.getElementById("audioBoostBtn"),
     document.getElementById("viewModeBtn"),
     document.getElementById("refreshBtn"),
@@ -552,23 +551,6 @@ function dnsReachStats(rows) {
   return { ok, total, bad: total > 0 && ok < total, good: total > 0 && ok === total };
 }
 
-function applyDnsButtonState(rows) {
-  const btns = document.querySelectorAll(".dns-btn");
-  if (!btns.length) return;
-  const stats = dnsReachStats(rows);
-  const label = stats.total ? "DNS " + stats.ok + "/" + stats.total : "DNS";
-  let title = "Comprobar si llegan los dominios";
-  if (stats.bad) title = "No llegan todos (" + stats.ok + " de " + stats.total + "). Pulsa para volver a comprobar";
-  else if (stats.good) title = "Llegan " + stats.ok + " de " + stats.total + ". Pulsa para volver a comprobar";
-  btns.forEach((btn) => {
-    btn.classList.toggle("is-ok", stats.good);
-    btn.classList.toggle("is-blocked", stats.bad);
-    btn.textContent = label;
-    btn.title = title;
-    btn.setAttribute("aria-label", title);
-  });
-}
-
 function isDnsOverlayOpen() {
   const overlay = document.getElementById("dnsOverlay");
   return !!(overlay && !overlay.hidden && overlay.classList.contains("is-open"));
@@ -745,7 +727,6 @@ async function runDnsCheck(opts) {
       })
     );
     lastDnsRows = rows;
-    applyDnsButtonState(rows);
     fillDnsGuidePanel(rows);
     if (toast) {
       const stats = dnsReachStats(rows);
@@ -763,27 +744,10 @@ async function runDnsCheck(opts) {
   return lastDnsRows;
 }
 
-async function onDnsButtonPress() {
-  const wasBad = dnsReachStats(lastDnsRows).bad;
-  await runDnsCheck({ force: true, toast: true });
-  if (wasBad || dnsReachStats(lastDnsRows).bad) {
-    await openDeviceNetworkSettings();
-  }
-}
-
 function initDnsPanel() {
   syncDnsPrefButtons();
   const settingsBtn = document.getElementById("dnsSettingsBtn");
   if (settingsBtn) settingsBtn.hidden = !canOpenAndroidSettings();
-  document.querySelectorAll(".dns-btn").forEach((btn) => {
-    if (!btn || btn.dataset.bound) return;
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      onDnsButtonPress();
-    });
-  });
   const closeBtn = document.getElementById("dnsCloseBtn");
   if (closeBtn) closeBtn.addEventListener("click", () => showDnsOverlay(false));
   const overlay = document.getElementById("dnsOverlay");
@@ -828,12 +792,11 @@ function initDnsPanel() {
       if (!dnsCheckBusy) runDnsCheck({ force: false });
     });
   }
-  runDnsCheck({ quiet: true, force: false }).then(() => {
-    if (dnsGuideRequested()) {
-      showDnsOverlay(true);
-      fillDnsGuidePanel(lastDnsRows);
-    }
-  });
+  if (dnsGuideRequested()) {
+    showDnsOverlay(true);
+    fillDnsGuidePanel(lastDnsRows);
+    runDnsCheck({ force: false });
+  }
 }
 
 function stopPlayback(opts) {
@@ -5384,7 +5347,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830j");
+  url.searchParams.set("v", "20260830k");
   window.location.replace(url.toString());
 }
 
