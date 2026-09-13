@@ -3059,6 +3059,25 @@ function getBufferAhead() {
   }
 }
 
+// Segundos descargados en total (del más antiguo al más nuevo). Eso es el
+// retraso respecto al vivo si arrancamos al principio del tramo.
+function getBufferedSpan() {
+  if (!video || !video.buffered || !video.buffered.length) return 0;
+  try {
+    return Math.max(0, video.buffered.end(video.buffered.length - 1) - video.buffered.start(0));
+  } catch (e) {
+    return 0;
+  }
+}
+
+function parkAtBufferStart() {
+  if (!video || !video.buffered || !video.buffered.length) return;
+  try {
+    const first = video.buffered.start(0);
+    if (Math.abs(video.currentTime - first) > 0.4) video.currentTime = first + 0.05;
+  } catch (e) {}
+}
+
 let lastDroppedFrames = 0;
 
 // Perder fotogramas en bloque no genera ningún evento del navegador, pero se
@@ -3799,9 +3818,9 @@ function prebufferEnough(ahead, target) {
 }
 
 function prebufferStallMs(ahead, target) {
-  if (ahead >= target * 0.7) return 1500;
-  if (ahead >= 3) return 3000;
-  return 10000;
+  if (ahead >= target * 0.7) return 2000;
+  if (ahead >= 3) return 4000;
+  return 12000;
 }
 
 function setPrebufferCover(on) {
@@ -3878,9 +3897,9 @@ function cancelPrebuffer(reason) {
 }
 
 /**
- * El sonido sigue (el motor está en play). La imagen se tapa hasta tener el
- * colchón pedido. En un directo a tiempo real el colchón a veces no crece
- * porque se consume al oír; entonces se muestra al dejar de acumular.
+ * Para tener N segundos de colchón hay que ir N segundos por detrás del vivo.
+ * Si se reproduce (aunque solo sea el audio) el cursor corre con el directo y
+ * el colchón no crece. Se pausa, se acumula y se arranca al inicio del tramo.
  */
 function beginPrebufferFill(channel) {
   clearPrebuffer();
@@ -3891,8 +3910,9 @@ function beginPrebufferFill(channel) {
     return;
   }
 
-  const heredado = getBufferAhead();
+  const heredado = Math.max(getBufferedSpan(), getBufferAhead());
   if (prebufferEnough(heredado, target)) {
+    parkAtBufferStart();
     prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno)";
     logPlayback("prebuffer", prebufferResult);
     setPrebufferCover(false);
@@ -3904,9 +3924,9 @@ function beginPrebufferFill(channel) {
   prebufferResult = "llenando...";
   setPrebufferCover(true);
   try {
-    const p = video.play();
-    if (p) p.catch(() => {});
+    video.pause();
   } catch (e) {}
+  parkAtBufferStart();
 
   let lastGrowthAt = Date.now();
   let best = heredado;
@@ -3915,8 +3935,9 @@ function beginPrebufferFill(channel) {
   const finish = (reason) => {
     prebufferActive = false;
     clearPrebuffer();
+    parkAtBufferStart();
     setPrebufferCover(false);
-    prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
+    prebufferResult = getBufferedSpan().toFixed(1) + "s de " + target + "s (" + reason + ")";
     logPlayback("prebuffer", prebufferResult);
     jumpOverBufferGap();
     showVideoSpinner(false);
@@ -3932,7 +3953,14 @@ function beginPrebufferFill(channel) {
       return;
     }
 
-    const ahead = getBufferAhead();
+    if (!video.paused) {
+      try {
+        video.pause();
+      } catch (e) {}
+    }
+    parkAtBufferStart();
+
+    const ahead = Math.max(getBufferedSpan(), getBufferAhead());
     if (ahead > best + 0.05) {
       best = ahead;
       lastGrowthAt = Date.now();
@@ -3942,10 +3970,6 @@ function beginPrebufferFill(channel) {
       return finish(ahead < 0.3 ? "sin datos" : "estabilizado en " + ahead.toFixed(1) + "s");
     }
 
-    if (video.paused) {
-      const p = video.play();
-      if (p) p.catch(() => {});
-    }
     showVideoSpinner(true, "Esperando buffer… " + ahead.toFixed(0) + "s de " + target + "s", true);
     prebufferTimer = setTimeout(tick, 250);
   };
@@ -4279,7 +4303,7 @@ function startPlayback(channel) {
         {
           enableWorker: true,
           enableStashBuffer: true,
-          stashInitialSize: 384 * 1024,
+          stashInitialSize: Math.max(384 * 1024, bufferSec * 80 * 1024),
           liveBufferLatencyChasing: false,
         }
       );
@@ -4327,10 +4351,11 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         abrEwmaDefaultEstimate: 8000000,
         abrBandWidthFactor: 0.95,
         abrBandWidthUpFactor: 0.7,
-        maxBufferLength: bufferSec + 5,
-        maxMaxBufferLength: bufferSec * 2 + 10,
-        liveSyncDurationCount: 3,
-        backBufferLength: 0,
+        maxBufferLength: bufferSec + 8,
+        maxMaxBufferLength: bufferSec * 2 + 15,
+        liveSyncDuration: bufferSec,
+        liveMaxLatencyDuration: bufferSec + 12,
+        backBufferLength: 30,
       });
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
@@ -5360,7 +5385,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830n");
+  url.searchParams.set("v", "20260830o");
   window.location.replace(url.toString());
 }
 
