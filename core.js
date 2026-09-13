@@ -45,8 +45,8 @@ const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
 const BUFFER_PRESETS = [6, 10, 15];
 const BUFFER_PRESET_LABEL = { 6: "Bajo", 10: "Medio", 15: "Alto" };
-// Si el directo no crece nada, no colgar la espera para siempre.
-const PREBUFFER_STALL_MS = 15000;
+// Casi ningún directo llega al segundo exacto (se queda en 12–14 de 15).
+const PREBUFFER_CLOSE_SECONDS = 2;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -3792,6 +3792,18 @@ function getPrebufferTarget() {
   return getBufferSeconds();
 }
 
+function prebufferEnough(ahead, target) {
+  if (ahead >= target) return true;
+  if (ahead + PREBUFFER_CLOSE_SECONDS >= target) return true;
+  return target > 0 && ahead / target >= 0.85;
+}
+
+function prebufferStallMs(ahead, target) {
+  if (ahead >= target * 0.7) return 1500;
+  if (ahead >= 3) return 3000;
+  return 10000;
+}
+
 function setPrebufferCover(on) {
   const wrap = video && video.closest(".video-wrapper");
   if (wrap) wrap.classList.toggle("is-prebuffering", !!on);
@@ -3880,7 +3892,7 @@ function beginPrebufferFill(channel) {
   }
 
   const heredado = getBufferAhead();
-  if (heredado >= target) {
+  if (prebufferEnough(heredado, target)) {
     prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno)";
     logPlayback("prebuffer", prebufferResult);
     setPrebufferCover(false);
@@ -3925,9 +3937,9 @@ function beginPrebufferFill(channel) {
       best = ahead;
       lastGrowthAt = Date.now();
     }
-    if (ahead >= target) return finish("completo");
-    if (Date.now() - lastGrowthAt >= PREBUFFER_STALL_MS) {
-      return finish(ahead < 0.3 ? "sin datos" : "la fuente no acumula más");
+    if (prebufferEnough(ahead, target)) return finish("completo");
+    if (Date.now() - lastGrowthAt >= prebufferStallMs(ahead, target)) {
+      return finish(ahead < 0.3 ? "sin datos" : "estabilizado en " + ahead.toFixed(1) + "s");
     }
 
     if (video.paused) {
@@ -5348,7 +5360,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830m");
+  url.searchParams.set("v", "20260830n");
   window.location.replace(url.toString());
 }
 
