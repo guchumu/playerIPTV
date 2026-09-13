@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260830p" />
+      <link rel="stylesheet" href="style.css?v=20260830q" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -116,9 +116,9 @@
                 <span class="header-version" data-app-version>v1.0.17</span>
             </div>
             <div class="header-right">
-                <span id="accountExpiryLabel"></span>
-                <span id="headerUser"></span>
-                <label class="buffer-control" title="Segundos que se acumulan antes de mostrar imagen. Más colchón = menos cortes, pero más espera al cambiar de canal y más retraso respecto al directo. «Rápido» muestra imagen en cuanto llega.">
+                <span id="accountExpiryLabel" class="header-settings-hide"></span>
+                <span id="headerUser" class="header-settings-hide"></span>
+                <label class="buffer-control header-settings-hide" title="Segundos que se acumulan antes de mostrar imagen. Más colchón = menos cortes, pero más espera al cambiar de canal y más retraso respecto al directo. «Rápido» muestra imagen en cuanto llega.">
                     Buffer
                     <select id="bufferSelect">
                         <option value="0">Rápido</option>
@@ -129,19 +129,19 @@
                         <option value="20">20s</option>
                     </select>
                 </label>
-                <button type="button" id="audioBoostBtn" class="audio-boost-btn" title="Volumen extra: pulsa para subir por encima del 100%">100%</button>
-                <label class="track-control" id="audioTrackWrap" hidden>
+                <button type="button" id="audioBoostBtn" class="audio-boost-btn header-settings-hide" title="Volumen extra: pulsa para subir por encima del 100%">100%</button>
+                <label class="track-control header-settings-hide" id="audioTrackWrap" hidden>
                     Audio
                     <select id="audioTrackSelect"></select>
                 </label>
-                <label class="track-control" id="subtitleTrackWrap" hidden>
+                <label class="track-control header-settings-hide" id="subtitleTrackWrap" hidden>
                     Subs
                     <select id="subtitleTrackSelect"></select>
                 </label>
                 <button id="fullscreenBtn" class="action-btn pc-only-btn" type="button" title="Visor al 100% de ancho" aria-label="Visor al 100% de ancho">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 7H5c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm0 8H5V9h14v6z"/></svg>
                 </button>
-                <button id="displayBtn" class="action-btn" type="button" title="Tamaño y contraste" aria-label="Tamaño y contraste">
+                <button id="displayBtn" class="action-btn header-settings-hide" type="button" title="Tamaño y contraste" aria-label="Tamaño y contraste">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.93 13.5h4.14L12 7.98 9.93 13.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.07 14.5-.9-2.5H8.17l.9 2.5H6.5L9.4 7h1.2l2.9 9.5h-2.57zm7.57 0h-1.75L14.5 7h1.76l2.24 9.5z"/></svg>
                 </button>
                 <button id="pipBtn" class="action-btn" type="button" title="Picture-in-Picture" aria-label="Picture-in-Picture" hidden>
@@ -157,10 +157,13 @@
                     <svg class="icon-grid" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>
                     <svg class="icon-list" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/></svg>
                 </button>
-                <button id="refreshBtn" class="action-btn" type="button" tabindex="0" title="Actualizar lista" aria-label="Actualizar lista">
+                <button id="settingsBtn" class="action-btn" type="button" title="Ajustes" aria-label="Ajustes" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64L4.86 10.7c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+                </button>
+                <button id="refreshBtn" class="action-btn header-settings-hide" type="button" tabindex="0" title="Actualizar lista" aria-label="Actualizar lista">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-8 8s3.57 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
                 </button>
-                <button id="logoutBtn" class="action-btn" type="button" tabindex="0" title="Cerrar sesión" aria-label="Cerrar sesión">
+                <button id="logoutBtn" class="action-btn header-settings-hide" type="button" tabindex="0" title="Cerrar sesión" aria-label="Cerrar sesión">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
                 </button>
             </div>
@@ -245,6 +248,42 @@
 
     <div id="appToast" hidden></div>
 
+    <div id="settingsOverlay" class="lists-overlay" hidden aria-hidden="true">
+        <div class="lists-panel settings-panel">
+            <div class="lists-header">
+                <strong>Ajustes</strong>
+                <button type="button" id="settingsCloseBtn">Cerrar</button>
+            </div>
+            <p id="settingsExpiry" class="settings-expiry"></p>
+            <label class="settings-row">
+                Apariencia
+                <select id="settingsUiSelect">
+                    <option value="normal">Normal</option>
+                    <option value="large">Texto grande</option>
+                    <option value="contrast">Alto contraste</option>
+                </select>
+            </label>
+            <label class="settings-row">
+                Buffer
+                <select id="settingsBufferSelect">
+                    <option value="0">Rápido</option>
+                    <option value="3">3s</option>
+                    <option value="5">5s</option>
+                    <option value="10" selected>10s</option>
+                    <option value="15">15s</option>
+                    <option value="20">20s</option>
+                </select>
+            </label>
+            <div class="settings-row">
+                <span>Potenciador de audio</span>
+                <button type="button" id="settingsBoostBtn" class="audio-boost-btn">100%</button>
+            </div>
+            <p class="settings-hint" id="settingsBoostHint">El volumen extra actúa sobre el reproductor. En iPhone Safari el sistema no deja subir más que los botones del aparato.</p>
+            <button type="button" id="settingsRefreshBtn" class="lists-add-btn">Recargar lista</button>
+            <button type="button" id="settingsLogoutBtn" class="settings-logout">Cerrar sesión</button>
+        </div>
+    </div>
+
     <div id="listsOverlay" class="lists-overlay" hidden aria-hidden="true">
         <div class="lists-panel">
             <div class="lists-header">
@@ -318,6 +357,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260830p"></script>
+    <script src="core.js?v=20260830q"></script>
 </body>
 </html>

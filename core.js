@@ -196,6 +196,7 @@ function detectDevice() {
   document.body.classList.toggle("is-tv", isTV);
   document.body.classList.toggle("is-mobile", isMobile);
   document.body.classList.toggle("is-ios", isIOS);
+  document.body.classList.toggle("use-settings-menu", isMobile && !isTV);
   document.body.classList.toggle("is-touch", coarse || "ontouchstart" in window);
   document.documentElement.classList.toggle(
     "is-native-tv",
@@ -205,6 +206,7 @@ function detectDevice() {
   if (!isTV) document.body.classList.remove("tv-channels-open");
   applyTvChrome();
   applyAppVersion();
+  applySettingsButton();
 }
 
 async function refreshNativeTvFlag() {
@@ -276,6 +278,96 @@ function applyTvChrome() {
     else video.setAttribute("controls", "");
   }
   if (tv) document.body.classList.add("tv-channels-open");
+}
+
+function applySettingsButton() {
+  const btn = document.getElementById("settingsBtn");
+  if (!btn) return;
+  const mobile = document.body.classList.contains("use-settings-menu");
+  btn.hidden = !mobile;
+}
+
+function showSettingsOverlay(show) {
+  const overlay = document.getElementById("settingsOverlay");
+  if (!overlay) return;
+  overlay.hidden = !show;
+  overlay.classList.toggle("is-open", !!show);
+  overlay.setAttribute("aria-hidden", show ? "false" : "true");
+  if (show) {
+    const ui = document.getElementById("settingsUiSelect");
+    if (ui) ui.value = localStorage.getItem(UI_KEY) || "normal";
+    const buf = document.getElementById("settingsBufferSelect");
+    const mainBuf = document.getElementById("bufferSelect");
+    if (buf) buf.value = String(getBufferSeconds());
+    if (mainBuf) mainBuf.value = String(getBufferSeconds());
+    syncAudioBoostButton();
+    const exp = document.getElementById("accountExpiryLabel");
+    const dest = document.getElementById("settingsExpiry");
+    if (dest) dest.textContent = (exp && exp.textContent) || "";
+    if (dest && exp) dest.style.color = exp.style.color || "";
+  }
+}
+
+function initSettingsPanel() {
+  applySettingsButton();
+  const openBtn = document.getElementById("settingsBtn");
+  const closeBtn = document.getElementById("settingsCloseBtn");
+  const overlay = document.getElementById("settingsOverlay");
+  if (openBtn && !openBtn.dataset.bound) {
+    openBtn.dataset.bound = "1";
+    openBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      showSettingsOverlay(true);
+    });
+  }
+  if (closeBtn) closeBtn.addEventListener("click", () => showSettingsOverlay(false));
+  if (overlay) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) showSettingsOverlay(false);
+    });
+  }
+  const ui = document.getElementById("settingsUiSelect");
+  if (ui && !ui.dataset.bound) {
+    ui.dataset.bound = "1";
+    ui.addEventListener("change", () => {
+      localStorage.setItem(UI_KEY, ui.value);
+      applyUiMode();
+      paintVirtualWindow(true);
+    });
+  }
+  const buf = document.getElementById("settingsBufferSelect");
+  if (buf && !buf.dataset.bound) {
+    buf.dataset.bound = "1";
+    buf.addEventListener("change", () => {
+      const n = setBufferSeconds(buf.value);
+      const mainBuf = document.getElementById("bufferSelect");
+      if (mainBuf) mainBuf.value = String(n);
+      showToast(n > 0 ? "Colchón de " + n + "s" : "Arranque rápido");
+    });
+  }
+  const boost = document.getElementById("settingsBoostBtn");
+  if (boost && !boost.dataset.bound) {
+    boost.dataset.bound = "1";
+    boost.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      cycleAudioBoost();
+    });
+  }
+  const refresh = document.getElementById("settingsRefreshBtn");
+  if (refresh) {
+    refresh.addEventListener("click", () => {
+      showSettingsOverlay(false);
+      const btn = document.getElementById("refreshBtn");
+      if (btn) btn.click();
+    });
+  }
+  const logout = document.getElementById("settingsLogoutBtn");
+  if (logout) {
+    logout.addEventListener("click", () => {
+      showSettingsOverlay(false);
+      doLogout();
+    });
+  }
 }
 
 function rememberLastList(payload) {
@@ -403,6 +495,8 @@ const AUDIO_BOOST_STEPS = [1, 1.25, 1.5, 2, 3];
 let audioBoostCtx = null;
 let audioBoostGain = null;
 let audioBoostSource = null;
+let audioBoostFailed = false;
+let softVolume = 1;
 
 function getAudioBoost() {
   try {
@@ -417,23 +511,48 @@ function audioBoostLabel(boost) {
 }
 
 function syncAudioBoostButton() {
-  const btn = document.getElementById("audioBoostBtn");
-  if (!btn) return;
   const boost = getAudioBoost();
-  btn.textContent = audioBoostLabel(boost);
-  btn.classList.toggle("is-boosted", boost > 1);
-  btn.title =
+  const label = audioBoostLabel(boost);
+  const title =
     boost > 1
-      ? "Volumen extra " + audioBoostLabel(boost) + " (por encima del máximo del aparato)"
+      ? "Volumen extra " + label + " (por encima del máximo del aparato)"
       : "Volumen extra: pulsa para subir por encima del 100%";
-  btn.setAttribute("aria-label", btn.title);
+  ["audioBoostBtn", "settingsBoostBtn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.textContent = label;
+    btn.classList.toggle("is-boosted", boost > 1);
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+  });
+}
+
+function applySoftVolume(value) {
+  softVolume = Math.min(1, Math.max(0, Number(value) || 0));
+  if (video) {
+    try {
+      video.volume = softVolume;
+      video.muted = softVolume <= 0.001;
+    } catch (e) {}
+  }
+  if (audioBoostGain && audioBoostGain.gain) {
+    audioBoostGain.gain.value = Math.max(0.001, softVolume) * getAudioBoost();
+  }
+  const plugin = nativePlayerPlugin();
+  if (plugin && typeof plugin.setVolume === "function") {
+    plugin.setVolume({ volume: softVolume }).catch(() => {});
+  }
+  return softVolume;
 }
 
 function ensureAudioBoostGraph() {
-  if (!video || audioBoostSource) return audioBoostGain;
-  if (document.body.classList.contains("is-ios")) return null;
+  if (audioBoostGain) return audioBoostGain;
+  if (audioBoostFailed || !video) return null;
   const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return null;
+  if (!AC) {
+    audioBoostFailed = true;
+    return null;
+  }
   try {
     audioBoostCtx = audioBoostCtx || new AC();
     audioBoostSource = audioBoostCtx.createMediaElementSource(video);
@@ -445,8 +564,10 @@ function ensureAudioBoostGraph() {
     audioBoostSource.connect(audioBoostGain);
     audioBoostGain.connect(comp);
     comp.connect(audioBoostCtx.destination);
+    audioBoostGain.gain.value = Math.max(0.001, softVolume) * getAudioBoost();
   } catch (e) {
-    audioBoostSource = audioBoostSource || true;
+    audioBoostFailed = true;
+    audioBoostGain = null;
     return null;
   }
   return audioBoostGain;
@@ -457,18 +578,23 @@ function applyAudioBoost(value, opts) {
   try {
     localStorage.setItem(AUDIO_BOOST_KEY, String(boost));
   } catch (e) {}
-  if (boost > 1) ensureAudioBoostGraph();
-  if (audioBoostGain && audioBoostGain.gain) audioBoostGain.gain.value = boost;
+  const graph = boost > 1 || nativePlayerPlugin() ? ensureAudioBoostGraph() : audioBoostGain;
+  if (graph && graph.gain) graph.gain.value = Math.max(0.001, softVolume) * boost;
   if (audioBoostCtx && audioBoostCtx.state === "suspended") {
     audioBoostCtx.resume().catch(() => {});
   }
+  applySoftVolume(softVolume);
   const plugin = nativePlayerPlugin();
   if (plugin && typeof plugin.setVolumeBoost === "function") {
     plugin.setVolumeBoost({ audioBoost: boost }).catch(() => {});
   }
   syncAudioBoostButton();
   if (!(opts && opts.silent)) {
-    showToast(boost > 1 ? "Volumen " + audioBoostLabel(boost) : "Volumen normal (100%)");
+    if (boost > 1 && !graph && !plugin && document.body.classList.contains("is-ios")) {
+      showToast("En iPhone usa los botones de volumen del aparato");
+    } else {
+      showToast(boost > 1 ? "Volumen " + audioBoostLabel(boost) : "Volumen normal (100%)");
+    }
   }
   return boost;
 }
@@ -2239,6 +2365,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initChannelTools();
   initChannelView();
   initAudioBoost();
+  initSettingsPanel();
   initDnsPanel();
   initListManager();
   initAdSlot();
@@ -2375,6 +2502,11 @@ function showAccountExpiry(info) {
   if (pcExpiryEl) {
     pcExpiryEl.textContent = expiryText;
     pcExpiryEl.style.color = color;
+  }
+  const settingsExpiry = document.getElementById("settingsExpiry");
+  if (settingsExpiry) {
+    settingsExpiry.textContent = expiryText || "";
+    settingsExpiry.style.color = color || "";
   }
 }
 
@@ -3576,7 +3708,7 @@ function channelGridCols() {
 function channelCardHeight() {
   if (isChannelGrid()) {
     if (document.body.classList.contains("is-tv")) return 172;
-    if ((window.innerWidth || 0) < 560) return 132;
+    if ((window.innerWidth || 0) < 560) return 158;
     return 156;
   }
   if (document.body.classList.contains("is-tv")) return 64;
@@ -4910,7 +5042,7 @@ const castButton = document.getElementById("castButton");
 let castReady = false;
 
 function setupCast() {
-  if (isTvChrome()) {
+  if (isTvChrome() || document.body.classList.contains("is-ios")) {
     if (castButton) castButton.hidden = true;
     return false;
   }
@@ -4930,7 +5062,7 @@ function setupCast() {
 }
 
 if (castButton && document.body.classList.contains("is-ios")) {
-  castButton.hidden = false;
+  castButton.hidden = true;
 }
 
 window.__onGCastApiAvailable = function (isAvailable) {
@@ -5163,7 +5295,7 @@ function initPlayerGestures() {
         height: rect.height,
         side: touch.clientX - rect.left < rect.width / 2 ? "brightness" : "volume",
         startBrightness: getBrightness(),
-        startVolume: video.volume,
+        startVolume: softVolume,
         active: false,
       };
     },
@@ -5196,23 +5328,22 @@ function initPlayerGestures() {
       }
 
       const target = Math.min(1, Math.max(0, gesture.startVolume + ratio));
-      try {
-        video.volume = target;
-        if (target > 0) video.muted = false;
-      } catch (err) {}
+      applySoftVolume(target);
+      ensureAudioBoostGraph();
+      if (audioBoostCtx && audioBoostCtx.state === "suspended") audioBoostCtx.resume().catch(() => {});
 
-      // iOS no permite cambiar el volumen por código: se avisa en vez de mentir
-      // con un indicador que no corresponde a nada.
-      if (Math.abs(video.volume - target) > 0.05) {
+      const applied = video ? video.volume : softVolume;
+      const native = !!(nativePlayerPlugin() && typeof nativePlayerPlugin().setVolume === "function");
+      if (!native && !audioBoostGain && Math.abs(applied - target) > 0.05) {
         if (!volumeLockWarned) {
           volumeLockWarned = true;
-          showToast("En iPhone y iPad el volumen se cambia con los botones del dispositivo");
+          showToast("En iPhone el volumen se cambia con los botones del aparato");
         }
         hideGestureHint(0);
         return;
       }
 
-      showGestureHint(video.volume === 0 ? "🔇" : "🔊", video.volume);
+      showGestureHint(softVolume <= 0.001 ? "🔇" : "🔊", softVolume);
     },
     { passive: false }
   );
@@ -5320,7 +5451,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830p");
+  url.searchParams.set("v", "20260830q");
   window.location.replace(url.toString());
 }
 

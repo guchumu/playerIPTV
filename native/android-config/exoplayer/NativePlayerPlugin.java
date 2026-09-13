@@ -58,6 +58,7 @@ public class NativePlayerPlugin extends Plugin {
     private String lastTitle = "";
     private String lastMime = "";
     private String lastEngine = "exo";
+    private float lastVolume = 1f;
 
     private static String normalizarEngine(String raw, boolean tvDefaultVlc) {
         if (raw == null || raw.trim().isEmpty()) return tvDefaultVlc ? "vlc" : "exo";
@@ -144,6 +145,25 @@ public class NativePlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             applyExoBoost();
+            applyExoVolume();
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void setVolume(PluginCall call) {
+        Double raw = call.getDouble("volume");
+        float v = raw == null ? lastVolume : raw.floatValue();
+        if (v < 0f) v = 0f;
+        if (v > 1f) v = 1f;
+        lastVolume = v;
+        Activity act = getActivity();
+        if (act == null) {
+            call.resolve();
+            return;
+        }
+        act.runOnUiThread(() -> {
+            applyExoVolume();
             call.resolve();
         });
     }
@@ -444,7 +464,14 @@ public class NativePlayerPlugin extends Plugin {
         exoPlayer.setMediaItem(item);
         exoPlayer.prepare();
         exoPlayer.setPlayWhenReady(true);
+        applyExoVolume();
         applyExoBoost();
+    }
+
+    private void applyExoVolume() {
+        try {
+            if (exoPlayer != null) exoPlayer.setVolume(lastVolume);
+        } catch (Throwable ignored) {}
     }
 
     private void applyExoBoost() {

@@ -902,11 +902,17 @@ body.channels-as-grid .channel-chno {
 }
 body.channels-as-grid .channel-logo,
 body.channels-as-grid .channel-logo-fallback {
+  display: flex;
+  flex-shrink: 0;
   width: 72px;
   height: 72px;
   margin: 6px auto 0;
   border-radius: 14px;
   font-size: 1.05rem;
+}
+body.channels-as-grid .channel-logo {
+  display: block;
+  object-fit: contain;
 }
 body.channels-as-grid .fav-btn {
   position: absolute;
@@ -1400,6 +1406,52 @@ body.is-tv .ad-slot img { max-height: 108px; }
 }
 .lists-overlay.is-open { display: flex; }
 .lists-overlay[hidden] { display: none; }
+.settings-panel { width: min(420px, 100%); }
+.settings-expiry {
+  margin: 0 0 12px;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: #e2e8f0;
+  font-size: 0.92rem;
+}
+.settings-row select,
+.settings-row .audio-boost-btn {
+  min-height: 40px;
+  min-width: 120px;
+}
+.settings-row select {
+  background: #020617;
+  color: #f9fafb;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+}
+.settings-hint {
+  margin: 0 0 14px;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.settings-logout {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 44px;
+  background: rgba(220, 38, 38, 0.18);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
 .lists-panel {
   width: min(420px, 100%);
   background: #0f172a;
@@ -2015,6 +2067,8 @@ body.is-tv .tv-fav-empty {
   body:not(.is-tv) .header-left h1 { font-size: 0.95rem; }
   body:not(.is-tv) .header-version { display: none; }
   body:not(.is-tv) .buffer-control { display: none !important; }
+  body.use-settings-menu .header-settings-hide { display: none !important; }
+  body.use-settings-menu #settingsBtn { display: inline-flex; }
   .header-right { min-width: 0; gap: 0.3rem; }
 
   /* flex:1 + min-height:0, no calc(100dvh - 40px): el header con notch
@@ -2071,7 +2125,7 @@ body.is-tv .tv-fav-empty {
     overflow: hidden;
   }
   .video-wrapper { border-radius: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; box-shadow: none; margin: 0; }
-  .epg-timeline-box { margin: 0 10px 8px; flex-shrink: 0; max-height: 96px; }
+  body:not(.is-tv) .epg-timeline-box { display: none !important; }
   .epg-slot { min-width: 72px; max-width: 160px; font-size: 0.7rem; padding: 4px 6px; }
   .epg-slot.is-now,
   .epg-slot.is-open { min-width: 120px; max-width: 240px; padding: 8px 10px; }
@@ -2114,15 +2168,18 @@ body.is-tv .tv-fav-empty {
     gap: 8px;
   }
   .channel-item { min-height: 64px; height: 64px; max-height: 64px; }
-  body.channels-as-grid .channel-item {
-    min-height: 132px;
-    height: 132px;
-    max-height: 132px;
+  body.channels-as-grid .channel-item,
+  body.ui-large.channels-as-grid .channel-item {
+    min-height: 158px;
+    height: 158px;
+    max-height: 158px;
   }
   body.channels-as-grid .channel-logo,
-  body.channels-as-grid .channel-logo-fallback {
-    width: 56px;
-    height: 56px;
+  body.channels-as-grid .channel-logo-fallback,
+  body.ui-large.channels-as-grid .channel-logo,
+  body.ui-large.channels-as-grid .channel-logo-fallback {
+    width: 72px;
+    height: 72px;
   }
   .header-right span { display: none; }
 }
@@ -2166,7 +2223,7 @@ body.is-tv .tv-fav-empty {
     height: auto;
     aspect-ratio: 16 / 9;
   }
-  body:not(.is-tv) .epg-timeline-box { max-height: 72px; }
+  body:not(.is-tv) .epg-timeline-box { display: none !important; }
   body:not(.is-tv) .compact-header {
     padding-left: max(0.8rem, env(safe-area-inset-left));
     padding-right: max(0.8rem, env(safe-area-inset-right));
@@ -2186,6 +2243,11 @@ body.is-ios #videoPlayer { object-fit: contain; }
 body.ui-large { font-size: 18px; }
 body.ui-large .category-btn,
 body.ui-large .channel-item { font-size: 1.05rem; height: 72px; min-height: 72px; max-height: 72px; }
+body.ui-large.channels-as-grid .channel-item {
+  height: 168px;
+  min-height: 168px;
+  max-height: 168px;
+}
 body.ui-large .channel-name { font-size: 0.98rem; text-align: left; }
 body.ui-large .channel-logo,
 body.ui-large .channel-logo-fallback { width: 44px; height: 44px; }
