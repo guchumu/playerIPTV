@@ -255,6 +255,15 @@ function isTvChrome() {
   return isTvLayout() || document.documentElement.classList.contains("is-native-tv");
 }
 
+// iPhone/iPad (Safari y Chrome/CriOS: ambos son WebKit). mpegts.js@latest y
+// hls.js@latest declaran MSE/ManagedMediaSource a partir de iOS 17.1, pero el
+// MPEG-TS remuxado no arranca en el iPhone y Chrome encima expone MediaSource
+// clásico, que mpegts prefiere y que en iOS no funciona. El camino estable es
+// HLS nativo del <video>, con las URLs Xtream .ts pasadas a .m3u8.
+function prefersNativeHls() {
+  return document.body.classList.contains("is-ios");
+}
+
 function applyTvChrome() {
   const tv = isTvChrome();
   const hideIds = ["displayBtn", "pipBtn", "airplayBtn", "castButton", "bufferSelect", "channelSearch", "sortBtn", "stopBtn", "goLiveBtn"];
@@ -548,6 +557,10 @@ function applySoftVolume(value) {
 function ensureAudioBoostGraph() {
   if (audioBoostGain) return audioBoostGain;
   if (audioBoostFailed || !video) return null;
+  if (prefersNativeHls() && !nativePlayerPlugin()) {
+    audioBoostFailed = true;
+    return null;
+  }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) {
     audioBoostFailed = true;
@@ -4360,7 +4373,8 @@ function startPlayback(channel) {
 
   const begin = async () => {
     if (gen !== playGen) return;
-    const mseSupported = window.mpegts && mpegts.getFeatureList().mseLivePlayback;
+    const mseSupported =
+      !prefersNativeHls() && window.mpegts && mpegts.getFeatureList().mseLivePlayback;
 
     if (isTs && mseSupported) {
       const proxiedTsUrl = currentDomain + (await signedStreamHref(originalUrl));
@@ -4410,7 +4424,7 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
   }
   if (isM3u8) {
     video.setAttribute("data-active-url", originalUrl);
-    if (window.Hls && Hls.isSupported()) {
+    if (!prefersNativeHls() && window.Hls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -4467,7 +4481,10 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
     } else {
       video.src = originalUrl;
       tryAutoPlay();
-      logPlayback("motor", "nativo (hls.js no soportado) · " + maskUrl(originalUrl));
+      logPlayback(
+        "motor",
+        (prefersNativeHls() ? "nativo (HLS iOS) · " : "nativo (hls.js no soportado) · ") + maskUrl(originalUrl)
+      );
     }
     return;
   }
@@ -5451,7 +5468,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830q");
+  url.searchParams.set("v", "20260913a");
   window.location.replace(url.toString());
 }
 
