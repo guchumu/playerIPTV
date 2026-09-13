@@ -46,19 +46,8 @@ const DEFAULT_BUFFER_SECONDS = 10;
 // Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
 // que un ajuste alto sigue valiendo como techo pero no como espera.
 const PREBUFFER_MAX_SECONDS = 20;
-/**
- * Tope real de espera al cambiar de canal.
- *
- * Un colchón de N segundos solo se construye dejando que pasen N segundos: si
- * el origen emite a tiempo real, lo acumulado crece a la misma velocidad que
- * el reloj. Por eso pedir 10s de colchón costaba 10s de pantalla en negro.
- *
- * Ya no hace falta pagarlo: la reproducción arranca en el punto más antiguo de
- * lo descargado, así que la ráfaga inicial que manda el proveedor ya se hereda
- * como colchón sin esperar nada. Esta espera solo remata lo que falte, y con
- * un tope corto para que zapear sea llevadero.
- */
-const PREBUFFER_MAX_WAIT_MS = 4000;
+// Si el directo no crece nada, no colgar la espera para siempre.
+const PREBUFFER_STALL_MS = 15000;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -3864,12 +3853,9 @@ function cancelPrebuffer(reason) {
 }
 
 /**
- * Arranca, pausa enseguida y deja que se acumule. Mientras el vídeo está
- * parado el directo sigue avanzando y lo descargado se apila por delante: ese
- * hueco es exactamente el colchón que después absorbe los cortes.
- *
- * Se hace pausando en vez de retrasando el play() porque los motores solo
- * llenan de verdad una vez la reproducción ha arrancado.
+ * Pausa en cuanto el motor arranca y no suelta imagen hasta tener el colchón
+ * pedido (8s, 15s…). Mientras está parado el directo se sigue descargando y
+ * eso es el margen que evita cortes al ver.
  */
 function beginPrebufferFill(channel) {
   clearPrebuffer();
@@ -3879,12 +3865,9 @@ function beginPrebufferFill(channel) {
     return;
   }
 
-  // Arrancar en el punto más antiguo de lo descargado suele dejar ya bastante
-  // colchón heredado de la ráfaga inicial del proveedor. Cuando ocurre, pausar
-  // para nada solo provocaría un tirón al reanudar.
   const heredado = getBufferAhead();
   if (heredado >= target) {
-    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno, sin esperar)";
+    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno)";
     logPlayback("prebuffer", prebufferResult);
     showVideoSpinner(false);
     return;
@@ -3896,11 +3879,9 @@ function beginPrebufferFill(channel) {
     video.pause();
   } catch (e) {}
 
-  const startedAt = Date.now();
-  const initial = heredado;
-  let best = initial;
-  const deadline = startedAt + Math.min(target * 1000, PREBUFFER_MAX_WAIT_MS);
-  const growthCheck = startedAt + 1500;
+  let lastGrowthAt = Date.now();
+  let best = heredado;
+  showVideoSpinner(true, "Esperando buffer… " + heredado.toFixed(0) + "s de " + target + "s", true);
 
   const finish = (reason) => {
     prebufferActive = false;
@@ -3921,20 +3902,22 @@ function beginPrebufferFill(channel) {
     }
 
     const ahead = getBufferAhead();
-    if (ahead > best) best = ahead;
+    if (ahead > best + 0.05) {
+      best = ahead;
+      lastGrowthAt = Date.now();
+    }
     if (ahead >= target) return finish("completo");
-    // Hay fuentes que emiten en tiempo estricto y no dejan acumular nada.
-    // Detectarlo pronto evita esperar para nada.
-    if (Date.now() > growthCheck && best - initial < 0.5) return finish("la fuente no acumula, se sigue sin esperar");
-    if (Date.now() > deadline) return finish("tope de espera, se sigue con lo acumulado");
+    // Solo abortar si el stream no crece nada: si no, esperar al objetivo.
+    if (Date.now() - lastGrowthAt >= PREBUFFER_STALL_MS) {
+      return finish(ahead < 0.3 ? "sin datos" : "la fuente no acumula más");
+    }
 
     if (!video.paused) {
       try {
         video.pause();
       } catch (e) {}
     }
-    const restante = Math.max(0, deadline - Date.now()) / 1000;
-    showVideoSpinner(true, "Colchón " + ahead.toFixed(1) + "s de " + target + "s · " + restante.toFixed(0) + "s", true);
+    showVideoSpinner(true, "Esperando buffer… " + ahead.toFixed(0) + "s de " + target + "s", true);
     prebufferTimer = setTimeout(tick, 250);
   };
 
@@ -4215,7 +4198,8 @@ function startPlayback(channel) {
   if (isTvLayout()) enterTheaterMode();
   if (!video) return;
   const gen = ++playGen;
-  showVideoSpinner(true);
+  const waitTarget = getPrebufferTarget();
+  showVideoSpinner(true, waitTarget > 0 ? "Esperando buffer… 0s de " + waitTarget + "s" : "Cargando…");
   stopPlayback();
   updateActivity(channel);
   resetTrackSelectors();
@@ -5347,7 +5331,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830k");
+  url.searchParams.set("v", "20260830l");
   window.location.replace(url.toString());
 }
 
@@ -5407,7 +5391,7 @@ if (bufferSelect) {
   if (!bufferSelect.value) bufferSelect.value = String(setBufferSeconds(DEFAULT_BUFFER_SECONDS));
   bufferSelect.addEventListener("change", () => {
     const n = setBufferSeconds(bufferSelect.value);
-    showToast(n > 0 ? "Colchón de " + n + "s antes de ver imagen" : "Arranque rápido, sin esperar colchón");
+    showToast(n > 0 ? "Espera " + n + "s de buffer antes de ver imagen" : "Arranque rápido, sin esperar buffer");
   });
 }
 
