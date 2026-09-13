@@ -43,10 +43,8 @@ const ALL_LISTS_ID = "__all__";
 const LOGOUT_AT_KEY = "streambox_logout_at";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
-const BUFFER_PRESETS = [6, 10, 15];
-const BUFFER_PRESET_LABEL = { 6: "Bajo", 10: "Medio", 15: "Alto" };
-// Casi ningún directo llega al segundo exacto (se queda en 12–14 de 15).
-const PREBUFFER_CLOSE_SECONDS = 2;
+const PREBUFFER_MAX_SECONDS = 20;
+const PREBUFFER_MAX_WAIT_MS = 4000;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -384,31 +382,21 @@ function extractQualityHint(name) {
   return "";
 }
 
-function normalizeBufferSeconds(value) {
-  const n = parseInt(value, 10);
-  if (BUFFER_PRESETS.indexOf(n) >= 0) return n;
-  if (isNaN(n) || n <= 7) return 6;
-  if (n <= 12) return 10;
-  return 15;
-}
-
-function bufferPresetLabel(seconds) {
-  return BUFFER_PRESET_LABEL[seconds] || "Medio";
-}
-
 function getBufferSeconds() {
   const raw = localStorage.getItem(BUFFER_KEY);
-  return normalizeBufferSeconds(raw == null ? DEFAULT_BUFFER_SECONDS : raw);
+  const n = parseInt(raw == null ? String(DEFAULT_BUFFER_SECONDS) : raw, 10);
+  if (isNaN(n) || n < 0) return DEFAULT_BUFFER_SECONDS;
+  return Math.min(90, n);
 }
 
 function setBufferSeconds(value) {
-  const n = normalizeBufferSeconds(value);
+  const n = Math.min(90, Math.max(0, parseInt(value, 10) || 0));
   localStorage.setItem(BUFFER_KEY, String(n));
   return n;
 }
 
 function getEngineBufferSeconds() {
-  return getBufferSeconds();
+  return Math.max(getBufferSeconds(), 10);
 }
 
 const AUDIO_BOOST_STEPS = [1, 1.25, 1.5, 2, 3];
@@ -800,7 +788,6 @@ function stopPlayback(opts) {
   teardownInProgress = true;
   prebufferActive = false;
   clearPrebuffer();
-  setPrebufferCover(false);
   clearTimeout(teardownTimer);
   teardownTimer = setTimeout(() => {
     teardownInProgress = false;
@@ -3059,25 +3046,6 @@ function getBufferAhead() {
   }
 }
 
-// Segundos descargados en total (del más antiguo al más nuevo). Eso es el
-// retraso respecto al vivo si arrancamos al principio del tramo.
-function getBufferedSpan() {
-  if (!video || !video.buffered || !video.buffered.length) return 0;
-  try {
-    return Math.max(0, video.buffered.end(video.buffered.length - 1) - video.buffered.start(0));
-  } catch (e) {
-    return 0;
-  }
-}
-
-function parkAtBufferStart() {
-  if (!video || !video.buffered || !video.buffered.length) return;
-  try {
-    const first = video.buffered.start(0);
-    if (Math.abs(video.currentTime - first) > 0.4) video.currentTime = first + 0.05;
-  } catch (e) {}
-}
-
 let lastDroppedFrames = 0;
 
 // Perder fotogramas en bloque no genera ningún evento del navegador, pero se
@@ -3808,24 +3776,7 @@ let prebufferResult = "";
 let positionLogged = false;
 
 function getPrebufferTarget() {
-  return getBufferSeconds();
-}
-
-function prebufferEnough(ahead, target) {
-  if (ahead >= target) return true;
-  if (ahead + PREBUFFER_CLOSE_SECONDS >= target) return true;
-  return target > 0 && ahead / target >= 0.85;
-}
-
-function prebufferStallMs(ahead, target) {
-  if (ahead >= target * 0.7) return 2000;
-  if (ahead >= 3) return 4000;
-  return 12000;
-}
-
-function setPrebufferCover(on) {
-  const wrap = video && video.closest(".video-wrapper");
-  if (wrap) wrap.classList.toggle("is-prebuffering", !!on);
+  return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
 }
 
 /**
@@ -3891,53 +3842,45 @@ function cancelPrebuffer(reason) {
   if (!prebufferActive) return;
   prebufferActive = false;
   clearPrebuffer();
-  setPrebufferCover(false);
   showVideoSpinner(false);
   if (reason) logPlayback("prebuffer", reason);
 }
 
 /**
- * Para tener N segundos de colchón hay que ir N segundos por detrás del vivo.
- * Si se reproduce (aunque solo sea el audio) el cursor corre con el directo y
- * el colchón no crece. Se pausa, se acumula y se arranca al inicio del tramo.
+ * Arranca, pausa un momento y sigue. Tope corto: no se espera a llenar 10–15s.
  */
 function beginPrebufferFill(channel) {
   clearPrebuffer();
   const target = getPrebufferTarget();
   if (!video || target <= 0) {
-    setPrebufferCover(false);
     showVideoSpinner(false);
     return;
   }
 
-  const heredado = Math.max(getBufferedSpan(), getBufferAhead());
-  if (prebufferEnough(heredado, target)) {
-    parkAtBufferStart();
-    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno)";
+  const heredado = getBufferAhead();
+  if (heredado >= target) {
+    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno, sin esperar)";
     logPlayback("prebuffer", prebufferResult);
-    setPrebufferCover(false);
     showVideoSpinner(false);
     return;
   }
 
   prebufferActive = true;
   prebufferResult = "llenando...";
-  setPrebufferCover(true);
   try {
     video.pause();
   } catch (e) {}
-  parkAtBufferStart();
 
-  let lastGrowthAt = Date.now();
-  let best = heredado;
-  showVideoSpinner(true, "Esperando buffer… " + heredado.toFixed(0) + "s de " + target + "s", true);
+  const startedAt = Date.now();
+  const initial = heredado;
+  let best = initial;
+  const deadline = startedAt + Math.min(target * 1000, PREBUFFER_MAX_WAIT_MS);
+  const growthCheck = startedAt + 1500;
 
   const finish = (reason) => {
     prebufferActive = false;
     clearPrebuffer();
-    parkAtBufferStart();
-    setPrebufferCover(false);
-    prebufferResult = getBufferedSpan().toFixed(1) + "s de " + target + "s (" + reason + ")";
+    prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
     logPlayback("prebuffer", prebufferResult);
     jumpOverBufferGap();
     showVideoSpinner(false);
@@ -3949,28 +3892,22 @@ function beginPrebufferFill(channel) {
     if (!prebufferActive) return;
     if (!currentChannelRef || currentChannelRef.id !== channel.id) {
       prebufferActive = false;
-      setPrebufferCover(false);
       return;
     }
+
+    const ahead = getBufferAhead();
+    if (ahead > best) best = ahead;
+    if (ahead >= target) return finish("completo");
+    if (Date.now() > growthCheck && best - initial < 0.5) return finish("la fuente no acumula, se sigue sin esperar");
+    if (Date.now() > deadline) return finish("tope de espera, se sigue con lo acumulado");
 
     if (!video.paused) {
       try {
         video.pause();
       } catch (e) {}
     }
-    parkAtBufferStart();
-
-    const ahead = Math.max(getBufferedSpan(), getBufferAhead());
-    if (ahead > best + 0.05) {
-      best = ahead;
-      lastGrowthAt = Date.now();
-    }
-    if (prebufferEnough(ahead, target)) return finish("completo");
-    if (Date.now() - lastGrowthAt >= prebufferStallMs(ahead, target)) {
-      return finish(ahead < 0.3 ? "sin datos" : "estabilizado en " + ahead.toFixed(1) + "s");
-    }
-
-    showVideoSpinner(true, "Esperando buffer… " + ahead.toFixed(0) + "s de " + target + "s", true);
+    const restante = Math.max(0, deadline - Date.now()) / 1000;
+    showVideoSpinner(true, "Colchón " + ahead.toFixed(1) + "s de " + target + "s · " + restante.toFixed(0) + "s", true);
     prebufferTimer = setTimeout(tick, 250);
   };
 
@@ -4251,8 +4188,7 @@ function startPlayback(channel) {
   if (isTvLayout()) enterTheaterMode();
   if (!video) return;
   const gen = ++playGen;
-  const waitTarget = getPrebufferTarget();
-  showVideoSpinner(true, waitTarget > 0 ? "Esperando buffer… 0s de " + waitTarget + "s" : "Cargando…");
+  showVideoSpinner(true);
   stopPlayback();
   updateActivity(channel);
   resetTrackSelectors();
@@ -4303,7 +4239,7 @@ function startPlayback(channel) {
         {
           enableWorker: true,
           enableStashBuffer: true,
-          stashInitialSize: Math.max(384 * 1024, bufferSec * 80 * 1024),
+          stashInitialSize: 384 * 1024,
           liveBufferLatencyChasing: false,
         }
       );
@@ -4351,11 +4287,10 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         abrEwmaDefaultEstimate: 8000000,
         abrBandWidthFactor: 0.95,
         abrBandWidthUpFactor: 0.7,
-        maxBufferLength: bufferSec + 8,
-        maxMaxBufferLength: bufferSec * 2 + 15,
-        liveSyncDuration: bufferSec,
-        liveMaxLatencyDuration: bufferSec + 12,
-        backBufferLength: 30,
+        maxBufferLength: bufferSec + 5,
+        maxMaxBufferLength: bufferSec * 2 + 10,
+        liveSyncDurationCount: 3,
+        backBufferLength: 0,
       });
       hls.loadSource(originalUrl);
       hls.attachMedia(video);
@@ -5385,7 +5320,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830o");
+  url.searchParams.set("v", "20260830p");
   window.location.replace(url.toString());
 }
 
@@ -5440,11 +5375,11 @@ if (spinnerSkip) {
 
 const bufferSelect = document.getElementById("bufferSelect");
 if (bufferSelect) {
-  bufferSelect.value = String(setBufferSeconds(getBufferSeconds()));
+  bufferSelect.value = String(getBufferSeconds());
   if (!bufferSelect.value) bufferSelect.value = String(setBufferSeconds(DEFAULT_BUFFER_SECONDS));
   bufferSelect.addEventListener("change", () => {
     const n = setBufferSeconds(bufferSelect.value);
-    showToast("Buffer " + bufferPresetLabel(n).toLowerCase() + " (" + n + "s)");
+    showToast(n > 0 ? "Colchón de " + n + "s antes de ver imagen" : "Arranque rápido, sin esperar colchón");
   });
 }
 
