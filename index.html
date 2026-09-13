@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260830l" />
+      <link rel="stylesheet" href="style.css?v=20260830m" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -118,16 +118,12 @@
             <div class="header-right">
                 <span id="accountExpiryLabel"></span>
                 <span id="headerUser"></span>
-                <label class="buffer-control" title="No se muestra imagen hasta acumular estos segundos. Más colchón = menos cortes y más espera al cambiar de canal.">
+                <label class="buffer-control" title="No se muestra imagen hasta acumular el colchón. El sonido sí puede empezar antes. Bajo 6s, medio 10s, alto 15s.">
                     Buffer
                     <select id="bufferSelect">
-                        <option value="0">Rápido</option>
-                        <option value="3">3s</option>
-                        <option value="5">5s</option>
-                        <option value="8">8s</option>
-                        <option value="10" selected>10s</option>
-                        <option value="15">15s</option>
-                        <option value="20">20s</option>
+                        <option value="6">Bajo</option>
+                        <option value="10" selected>Medio</option>
+                        <option value="15">Alto</option>
                     </select>
                 </label>
                 <button type="button" id="audioBoostBtn" class="audio-boost-btn" title="Volumen extra: pulsa para subir por encima del 100%">100%</button>
@@ -319,6 +315,6 @@
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260830l"></script>
+    <script src="core.js?v=20260830m"></script>
 </body>
 </html>

@@ -43,9 +43,8 @@ const ALL_LISTS_ID = "__all__";
 const LOGOUT_AT_KEY = "streambox_logout_at";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
-// Esperar más de esto antes de ver imagen se hace insoportable al zapear, así
-// que un ajuste alto sigue valiendo como techo pero no como espera.
-const PREBUFFER_MAX_SECONDS = 20;
+const BUFFER_PRESETS = [6, 10, 15];
+const BUFFER_PRESET_LABEL = { 6: "Bajo", 10: "Medio", 15: "Alto" };
 // Si el directo no crece nada, no colgar la espera para siempre.
 const PREBUFFER_STALL_MS = 15000;
 let currentUser = null;
@@ -385,24 +384,31 @@ function extractQualityHint(name) {
   return "";
 }
 
+function normalizeBufferSeconds(value) {
+  const n = parseInt(value, 10);
+  if (BUFFER_PRESETS.indexOf(n) >= 0) return n;
+  if (isNaN(n) || n <= 7) return 6;
+  if (n <= 12) return 10;
+  return 15;
+}
+
+function bufferPresetLabel(seconds) {
+  return BUFFER_PRESET_LABEL[seconds] || "Medio";
+}
+
 function getBufferSeconds() {
   const raw = localStorage.getItem(BUFFER_KEY);
-  const n = parseInt(raw == null ? String(DEFAULT_BUFFER_SECONDS) : raw, 10);
-  // El 0 es válido: significa arrancar sin esperar a acumular nada.
-  if (isNaN(n) || n < 0) return DEFAULT_BUFFER_SECONDS;
-  return Math.min(90, n);
+  return normalizeBufferSeconds(raw == null ? DEFAULT_BUFFER_SECONDS : raw);
 }
 
 function setBufferSeconds(value) {
-  const n = Math.min(90, Math.max(0, parseInt(value, 10) || 0));
+  const n = normalizeBufferSeconds(value);
   localStorage.setItem(BUFFER_KEY, String(n));
   return n;
 }
 
-// Los motores necesitan un techo de buffer razonable aunque no se quiera
-// esperar al arrancar; son cosas distintas.
 function getEngineBufferSeconds() {
-  return Math.max(getBufferSeconds(), 10);
+  return getBufferSeconds();
 }
 
 const AUDIO_BOOST_STEPS = [1, 1.25, 1.5, 2, 3];
@@ -794,6 +800,7 @@ function stopPlayback(opts) {
   teardownInProgress = true;
   prebufferActive = false;
   clearPrebuffer();
+  setPrebufferCover(false);
   clearTimeout(teardownTimer);
   teardownTimer = setTimeout(() => {
     teardownInProgress = false;
@@ -3782,7 +3789,12 @@ let prebufferResult = "";
 let positionLogged = false;
 
 function getPrebufferTarget() {
-  return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
+  return getBufferSeconds();
+}
+
+function setPrebufferCover(on) {
+  const wrap = video && video.closest(".video-wrapper");
+  if (wrap) wrap.classList.toggle("is-prebuffering", !!on);
 }
 
 /**
@@ -3848,19 +3860,21 @@ function cancelPrebuffer(reason) {
   if (!prebufferActive) return;
   prebufferActive = false;
   clearPrebuffer();
+  setPrebufferCover(false);
   showVideoSpinner(false);
   if (reason) logPlayback("prebuffer", reason);
 }
 
 /**
- * Pausa en cuanto el motor arranca y no suelta imagen hasta tener el colchón
- * pedido (8s, 15s…). Mientras está parado el directo se sigue descargando y
- * eso es el margen que evita cortes al ver.
+ * El sonido sigue (el motor está en play). La imagen se tapa hasta tener el
+ * colchón pedido. En un directo a tiempo real el colchón a veces no crece
+ * porque se consume al oír; entonces se muestra al dejar de acumular.
  */
 function beginPrebufferFill(channel) {
   clearPrebuffer();
   const target = getPrebufferTarget();
   if (!video || target <= 0) {
+    setPrebufferCover(false);
     showVideoSpinner(false);
     return;
   }
@@ -3869,14 +3883,17 @@ function beginPrebufferFill(channel) {
   if (heredado >= target) {
     prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno)";
     logPlayback("prebuffer", prebufferResult);
+    setPrebufferCover(false);
     showVideoSpinner(false);
     return;
   }
 
   prebufferActive = true;
   prebufferResult = "llenando...";
+  setPrebufferCover(true);
   try {
-    video.pause();
+    const p = video.play();
+    if (p) p.catch(() => {});
   } catch (e) {}
 
   let lastGrowthAt = Date.now();
@@ -3886,6 +3903,7 @@ function beginPrebufferFill(channel) {
   const finish = (reason) => {
     prebufferActive = false;
     clearPrebuffer();
+    setPrebufferCover(false);
     prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
     logPlayback("prebuffer", prebufferResult);
     jumpOverBufferGap();
@@ -3898,6 +3916,7 @@ function beginPrebufferFill(channel) {
     if (!prebufferActive) return;
     if (!currentChannelRef || currentChannelRef.id !== channel.id) {
       prebufferActive = false;
+      setPrebufferCover(false);
       return;
     }
 
@@ -3907,15 +3926,13 @@ function beginPrebufferFill(channel) {
       lastGrowthAt = Date.now();
     }
     if (ahead >= target) return finish("completo");
-    // Solo abortar si el stream no crece nada: si no, esperar al objetivo.
     if (Date.now() - lastGrowthAt >= PREBUFFER_STALL_MS) {
       return finish(ahead < 0.3 ? "sin datos" : "la fuente no acumula más");
     }
 
-    if (!video.paused) {
-      try {
-        video.pause();
-      } catch (e) {}
+    if (video.paused) {
+      const p = video.play();
+      if (p) p.catch(() => {});
     }
     showVideoSpinner(true, "Esperando buffer… " + ahead.toFixed(0) + "s de " + target + "s", true);
     prebufferTimer = setTimeout(tick, 250);
@@ -5331,7 +5348,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260830l");
+  url.searchParams.set("v", "20260830m");
   window.location.replace(url.toString());
 }
 
@@ -5386,12 +5403,11 @@ if (spinnerSkip) {
 
 const bufferSelect = document.getElementById("bufferSelect");
 if (bufferSelect) {
-  bufferSelect.value = String(getBufferSeconds());
-  // Un valor guardado de una versión anterior puede no estar en la lista.
+  bufferSelect.value = String(setBufferSeconds(getBufferSeconds()));
   if (!bufferSelect.value) bufferSelect.value = String(setBufferSeconds(DEFAULT_BUFFER_SECONDS));
   bufferSelect.addEventListener("change", () => {
     const n = setBufferSeconds(bufferSelect.value);
-    showToast(n > 0 ? "Espera " + n + "s de buffer antes de ver imagen" : "Arranque rápido, sin esperar buffer");
+    showToast("Buffer " + bufferPresetLabel(n).toLowerCase() + " (" + n + "s)");
   });
 }
 

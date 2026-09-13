@@ -1042,6 +1042,9 @@ body.player-theater .compact-header {
   image-rendering: auto;
   transform: translateZ(0);
 }
+.video-wrapper.is-prebuffering video {
+  opacity: 0;
+}
 .spinner-overlay {
   position: absolute;
   inset: 0;
