@@ -1,12 +1,10 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
-import android.app.PictureInPictureParams;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
-import android.util.Rational;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,12 +31,12 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Reproductor nativo.
+ * Reproductor nativo en el teléfono.
  *
- * En el teléfono: ExoPlayer encima del WebView.
- * En TV: nunca se monta LibVLC sobre el WebView. Eso abortaba el proceso al
- * mover el mando (misma GPU que el WebView). El canal abre VlcPlayerActivity
- * en el proceso :vlc; si VLC peta, el menú sigue vivo.
+ * Nunca monta ExoPlayer sobre el WebView: Media3 y el WebView comparten GPU,
+ * y un MPEG-TS de IPTV aborta el proceso entero (la app “se cierra”).
+ * El canal abre PlayerActivity en el proceso :exo; si el descodificador peta,
+ * el menú sigue vivo. En TV el plugin es TvPlayerPlugin.
  */
 @UnstableApi
 @CapacitorPlugin(name = "NativePlayer")
@@ -59,6 +57,33 @@ public class NativePlayerPlugin extends Plugin {
     private String lastMime = "";
     private String lastEngine = "exo";
     private float lastVolume = 1f;
+    private boolean receiverOn;
+
+    private final android.content.BroadcastReceiver finishedReceiver =
+        new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context context, Intent intent) {
+                emit(true, false);
+            }
+        };
+
+    @Override
+    public void load() {
+        if (receiverOn) return;
+        android.content.Context ctx = getContext();
+        if (ctx == null) return;
+        try {
+            android.content.IntentFilter filter = new android.content.IntentFilter();
+            filter.addAction(ctx.getPackageName() + ".EXO_FINISHED");
+            filter.addAction(ctx.getPackageName() + ".VLC_FINISHED");
+            if (Build.VERSION.SDK_INT >= 33) {
+                ctx.registerReceiver(finishedReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                ctx.registerReceiver(finishedReceiver, filter);
+            }
+            receiverOn = true;
+        } catch (Throwable ignored) {}
+    }
 
     private static String normalizarEngine(String raw, boolean tvDefaultVlc) {
         if (raw == null || raw.trim().isEmpty()) return tvDefaultVlc ? "vlc" : "exo";
@@ -77,7 +102,6 @@ public class NativePlayerPlugin extends Plugin {
         }
         String title = call.getString("title", "");
         String mime = call.getString("mime", "");
-        boolean wantFs = Boolean.TRUE.equals(call.getBoolean("fullscreen", false));
         Double boostRaw = call.getDouble("audioBoost");
         if (boostRaw != null) AudioBoost.last = AudioBoost.clamp(boostRaw.floatValue());
         Activity act = getActivity();
@@ -95,31 +119,17 @@ public class NativePlayerPlugin extends Plugin {
                 lastTitle = title == null ? "" : title;
                 lastMime = mime == null ? "" : mime;
                 useVlc = "vlc".equals(motor);
+                soltar();
                 if (tv) {
-                    soltar();
-                    lanzarActivity(url, lastTitle, lastMime, motor);
-                    emit(false, true);
-                    call.resolve(ok(true, true));
-                    return;
+                    lanzarActivity(url, lastTitle, lastMime, motor, false);
+                } else {
+                    lanzarActivity(url, lastTitle, lastMime, "exo", false);
                 }
-                if (!ensureOverlay()) {
-                    lanzarActivity(url, lastTitle, lastMime, "exo");
-                    call.resolve(ok(true, wantFs));
-                    return;
-                }
-                playExo(url, mime);
-                applyLayout(wantFs);
-                emit(false, wantFs);
-                call.resolve(ok(true, wantFs));
+                emit(false, true);
+                call.resolve(ok(true, true));
             } catch (Throwable t) {
-                try {
-                    if (!tv) lanzarActivity(url, title, mime, "exo");
-                    else lanzarActivity(url, title, mime, motor);
-                    call.resolve(ok(true, wantFs));
-                } catch (Throwable ignored) {
-                    String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
-                    call.reject(msg);
-                }
+                String msg = t.getMessage() != null ? t.getMessage() : "No se pudo abrir el reproductor";
+                call.reject(msg);
             }
         });
     }
@@ -183,7 +193,7 @@ public class NativePlayerPlugin extends Plugin {
                     String motor = StreamBoxPlugin.motorReproductor(act);
                     lastEngine = motor;
                     useVlc = "vlc".equals(motor);
-                    lanzarActivity(lastUrl, lastTitle, lastMime, motor);
+                    lanzarActivity(lastUrl, lastTitle, lastMime, motor, false);
                     emit(false, true);
                     call.resolve(ok(true, true));
                     return;
@@ -233,12 +243,12 @@ public class NativePlayerPlugin extends Plugin {
         }
         act.runOnUiThread(() -> {
             try {
-                applyLayout(true);
-                PictureInPictureParams.Builder b = new PictureInPictureParams.Builder()
-                    .setAspectRatio(new Rational(16, 9));
-                boolean ok = act.enterPictureInPictureMode(b.build());
-                if (ok) call.resolve(ok(true, true));
-                else call.reject("El sistema rechazó PiP");
+                if (lastUrl == null || lastUrl.isEmpty()) {
+                    call.reject("Nada en reproducción");
+                    return;
+                }
+                lanzarActivity(lastUrl, lastTitle, lastMime, "exo", true);
+                call.resolve(ok(true, true));
             } catch (Throwable t) {
                 call.reject(t.getMessage() != null ? t.getMessage() : "PiP no disponible");
             }
@@ -502,7 +512,7 @@ public class NativePlayerPlugin extends Plugin {
         } catch (Throwable ignored) {}
     }
 
-    private void lanzarActivity(String url, String title, String mime, String engine) {
+    private void lanzarActivity(String url, String title, String mime, String engine, boolean pip) {
         Activity act = getActivity();
         android.content.Context ctx = getContext();
         if (ctx == null) return;
@@ -521,18 +531,13 @@ public class NativePlayerPlugin extends Plugin {
             }
             return;
         }
-        // Exo en proceso aparte en TV; en móvil se puede reutilizar la Activity viva.
-        boolean tv = StreamBoxPlugin.esTelevisor(ctx);
-        if (!tv && PlayerActivity.isRunning()) {
-            PlayerActivity.playNow(url, title, mime);
-            return;
-        }
         Intent intent = new Intent();
         intent.setClassName(ctx.getPackageName(), ctx.getPackageName() + ".PlayerActivity");
         intent.putExtra(PlayerActivity.EXTRA_URL, url);
         intent.putExtra(PlayerActivity.EXTRA_TITLE, title == null ? "" : title);
         intent.putExtra(PlayerActivity.EXTRA_MIME, mime == null ? "" : mime);
         intent.putExtra("audioBoost", AudioBoost.last);
+        intent.putExtra(PlayerActivity.EXTRA_PIP, pip);
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         if (act != null) act.startActivity(intent);
         else {

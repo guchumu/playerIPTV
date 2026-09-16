@@ -15,7 +15,8 @@ Además se inyecta el reproductor nativo. En Google TV Streamer (MediaTek)
 ExoPlayer congela el vídeo y el audio sigue; por eso en leanback se usa
 LibVLC, pero nunca encima del WebView (eso abortaba el proceso al mover el
 mando). En TV el canal abre VlcPlayerActivity en el proceso :vlc. En el
-teléfono sigue ExoPlayer encima del WebView.
+teléfono el canal abre PlayerActivity en el proceso :exo (nunca ExoPlayer
+encima del WebView: eso abortaba la app al reproducir).
 
 El WebView de Android TV usa un User-Agent de Chrome de móvil, sin "TV".
 StreamBoxPlugin detecta leanback / UI_MODE_TYPE_TELEVISION e inyecta
@@ -171,11 +172,18 @@ def parchear_manifest(ruta, flavor):
             cambios.append(f"application {clave}")
 
     # 4. Activities de ExoPlayer y LibVLC en procesos aparte.
-    # Así un aborto nativo no mata el menú del WebView en TV.
-    asegurar_actividad(app, "PlayerActivity", cambios, {
+    # Así un aborto nativo no mata el menú del WebView.
+    player_attrs = {
         f"{A}process": ":exo",
         f"{A}excludeFromRecents": "true",
-    })
+    }
+    if not es_tv:
+        player_attrs[f"{A}supportsPictureInPicture"] = "true"
+        player_attrs[f"{A}configChanges"] = (
+            "keyboard|keyboardHidden|orientation|screenSize|"
+            "smallestScreenSize|screenLayout|uiMode"
+        )
+    asegurar_actividad(app, "PlayerActivity", cambios, player_attrs)
     asegurar_actividad(app, "VlcPlayerActivity", cambios, {
         f"{A}process": ":vlc",
         f"{A}excludeFromRecents": "true",
@@ -427,7 +435,7 @@ def main():
     if not manifest.exists():
         raise SystemExit(f"error: no existe {manifest}\nejecuta antes: npx cap add android")
 
-    print("parcheando flavor=" + flavor + " (" + ("LibVLC proceso :vlc" if flavor == "tv" else "ExoPlayer overlay + PiP") + ")")
+    print("parcheando flavor=" + flavor + " (" + ("LibVLC proceso :vlc" if flavor == "tv" else "ExoPlayer Activity :exo + PiP") + ")")
     for r in copiar_recursos(base):
         print(f"  recurso: {r}")
     for r in copiar_exoplayer(base, flavor):

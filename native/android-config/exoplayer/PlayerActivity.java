@@ -1,6 +1,7 @@
 package PACKAGE_NAME;
 
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -8,6 +9,7 @@ import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Rational;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -41,6 +43,7 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_MIME = "mime";
     public static final String EXTRA_BOOST = "audioBoost";
+    public static final String EXTRA_PIP = "pip";
 
     private static final String UA = "VLC/3.0.16 LibVLC/3.0.16";
 
@@ -130,9 +133,6 @@ public class PlayerActivity extends Activity {
                 if (titleView == null) return;
                 titleView.setVisibility(View.VISIBLE);
                 titleView.setText("No se pudo reproducir el canal");
-                titleView.postDelayed(() -> {
-                    if (!isFinishing()) finish();
-                }, 2800);
             }
 
             @Override
@@ -196,6 +196,28 @@ public class PlayerActivity extends Activity {
         player.prepare();
         player.setPlayWhenReady(true);
         aplicarBoost();
+        if (getIntent() != null && getIntent().getBooleanExtra(EXTRA_PIP, false)) {
+            getIntent().removeExtra(EXTRA_PIP);
+            if (playerView != null) playerView.post(this::entrarPip);
+        }
+    }
+
+    private void entrarPip() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        if (isInPictureInPictureMode()) return;
+        if (player == null) return;
+        try {
+            PictureInPictureParams params = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(16, 9))
+                .build();
+            enterPictureInPictureMode(params);
+        } catch (Throwable ignored) {}
+    }
+
+    @Override
+    public void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (player != null && player.isPlaying()) entrarPip();
     }
 
     private void leerBoost(Intent intent) {
@@ -255,7 +277,8 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (player != null) player.setPlayWhenReady(false);
+        boolean pip = Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode();
+        if (!pip && player != null) player.setPlayWhenReady(false);
         super.onStop();
     }
 

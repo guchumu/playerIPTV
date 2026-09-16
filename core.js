@@ -4282,18 +4282,26 @@ async function startNativePlayback(channel, opts) {
 
   const originalUrl = channel.url;
   const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
+  const isTs = /\.ts(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".ts");
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
 
+  // ExoPlayer aguanta peor un MPEG-TS crudo (vía stream.php) que HLS.
+  // En Xtream .ts y .m3u8 son el mismo canal; HLS evita el aborto nativo.
   let playUrl = originalUrl;
   let mime = "application/x-mpegURL";
-  if (!isM3u8) {
+  if (isM3u8) {
+    playUrl = originalUrl;
+    mime = "application/x-mpegURL";
+  } else if (isTs) {
+    playUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
+    mime = "application/x-mpegURL";
+  } else {
     playUrl = currentDomain + (await signedStreamHref(originalUrl));
     mime = "video/mp2t";
   }
   if (gen !== playGen) return true;
 
-  const fullscreen = isTvLayout() || !!(opts && opts.fullscreen);
-  nativeFullscreen = fullscreen;
+  nativeFullscreen = true;
   try {
     const ret = await plugin.play(
       Object.assign(
@@ -4301,7 +4309,7 @@ async function startNativePlayback(channel, opts) {
           url: playUrl,
           title: displayName(channel.name),
           mime: mime,
-          fullscreen: fullscreen,
+          fullscreen: true,
           engine: nativePlayerEngine(),
           audioBoost: getAudioBoost(),
         },
@@ -4313,7 +4321,7 @@ async function startNativePlayback(channel, opts) {
     showVideoSpinner(false);
     const engine = (ret && ret.engine) || nativePlayerEngine();
     const label = engine === "vlc" ? "LibVLC" : "ExoPlayer";
-    logPlayback("motor", label + " · " + (fullscreen ? "pantalla completa" : "ventana") + " · " + maskUrl(playUrl));
+    logPlayback("motor", label + " · pantalla completa · " + maskUrl(playUrl));
     requestAnimationFrame(() => layoutNativePlayer());
   } catch (e) {
     nativePlaybackActive = false;
@@ -5468,7 +5476,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260913a");
+  url.searchParams.set("v", "20260916a");
   window.location.replace(url.toString());
 }
 
