@@ -4269,6 +4269,21 @@ function exitNativeFullscreen() {
   return false;
 }
 
+function urlLooksLikeHls(url) {
+  const u = String(url || "");
+  if (!u) return false;
+  if (/\.m3u8(\?|$)/i.test(u) || u.toLowerCase().includes(".m3u8")) return true;
+  // Restream sirve HLS en play.php; los segmentos van con &ts=seg_N.ts.
+  if (/\/play\.php(?:\?|$)/i.test(u) && !/[?&]ts=/i.test(u)) return true;
+  return false;
+}
+
+function urlLooksLikeTs(url) {
+  const u = String(url || "");
+  if (urlLooksLikeHls(u)) return false;
+  return /\.ts(\?|$)/i.test(u) || u.toLowerCase().includes(".ts");
+}
+
 async function startNativePlayback(channel, opts) {
   const plugin = nativePlayerPlugin();
   if (!plugin) return false;
@@ -4281,8 +4296,8 @@ async function startNativePlayback(channel, opts) {
   hlsRecoveries = 0;
 
   const originalUrl = channel.url;
-  const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
-  const isTs = /\.ts(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".ts");
+  const isM3u8 = urlLooksLikeHls(originalUrl);
+  const isTs = urlLooksLikeTs(originalUrl);
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
 
   // ExoPlayer aguanta peor un MPEG-TS crudo (vía stream.php) que HLS.
@@ -4349,8 +4364,8 @@ function startPlayback(channel) {
 
   const currentDomain = window.location.origin + window.location.pathname.replace("index.html", "");
   const originalUrl = channel.url;
-  const isTs = /\.ts(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".ts");
-  const isM3u8 = /\.m3u8(\?|$)/i.test(originalUrl) || originalUrl.toLowerCase().includes(".m3u8");
+  const isTs = urlLooksLikeTs(originalUrl);
+  const isM3u8 = urlLooksLikeHls(originalUrl);
   const bufferSec = getEngineBufferSeconds();
 
   let prebufferEnabled = false;
@@ -5124,7 +5139,7 @@ function castCurrentChannel() {
       const session = context.getCurrentSession();
       if (!session) throw new Error("sin sesión");
 
-      const isHls = url.indexOf(".m3u8") !== -1;
+      const isHls = urlLooksLikeHls(url);
       const mediaInfo = new chrome.cast.media.MediaInfo(url, isHls ? "application/x-mpegURL" : "video/mp2t");
       mediaInfo.streamType = chrome.cast.media.StreamType.LIVE;
       const channel = currentlyPlayingId ? channelById.get(currentlyPlayingId) : null;
