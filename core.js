@@ -41,6 +41,7 @@ const SAVED_LISTS_KEY = "streambox_saved_lists";
 const ACTIVE_LIST_KEY = "streambox_active_list";
 const ALL_LISTS_ID = "__all__";
 const LOGOUT_AT_KEY = "streambox_logout_at";
+const IGNORE_ASSIGN_KEY = "streambox_ignore_assign";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
 const PREBUFFER_MAX_SECONDS = 20;
@@ -69,6 +70,9 @@ let remotePollGen = 0;
 const EPG_RETRY_DELAYS = [8000, 20000, 45000, 90000, 180000, 300000];
 let channelById = new Map();
 let pollingInterval = null;
+let remotePollDelayTimer = null;
+let lastIgnoreLogFp = "";
+let clearListsInProgress = false;
 let sessionToken = null;
 let activityInterval = null;
 let heartbeatInterval = null;
@@ -454,6 +458,79 @@ function assignmentIsStale(data) {
   // Sin ts (ficheros antiguos) no bloqueamos: si no, la TV ve la lista y nunca entra.
   if (!ts) return false;
   return ts <= logoutAt;
+}
+
+function assignmentFingerprint(data) {
+  if (!data) return "";
+  const m3u = String(data.m3uUrl || "").trim();
+  if (m3u) return "m3u:" + m3u;
+  return (
+    "xt:" +
+    String(data.serverUrl || data.server || "").trim() +
+    "|" +
+    String(data.username || "").trim()
+  );
+}
+
+function rememberIgnoredAssignment(data) {
+  if (!data) return;
+  const rec = {
+    fp: assignmentFingerprint(data),
+    ts: data.ts != null ? Number(data.ts) : Date.now(),
+    at: Date.now(),
+  };
+  if (!rec.fp || rec.fp === "m3u:" || rec.fp === "xt:|") return;
+  try {
+    sessionStorage.setItem(IGNORE_ASSIGN_KEY, JSON.stringify(rec));
+  } catch (e) {}
+}
+
+function hintFromCurrentList() {
+  const last = peekLastList();
+  const u = currentUser || last || {};
+  return {
+    m3uUrl: u.m3uUrl || "",
+    serverUrl: u.server || u.serverUrl || "",
+    username: u.username && u.username !== "Invitado M3U" ? u.username : "",
+    ts: Date.now(),
+  };
+}
+
+function assignmentShouldIgnore(data) {
+  if (assignmentIsStale(data)) return true;
+  try {
+    const rec = JSON.parse(sessionStorage.getItem(IGNORE_ASSIGN_KEY) || "null");
+    if (!rec || !rec.fp) return false;
+    const fp = assignmentFingerprint(data);
+    if (!fp || fp !== rec.fp) return false;
+    const ts = data && data.ts != null ? Number(data.ts) : 0;
+    if (ts && rec.ts && ts > rec.ts) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function wipeRemoteAssignment() {
+  const deviceId = typeof getDeviceId === "function" ? getDeviceId() : "";
+  if (!deviceId) return false;
+  const url = "api_dispositivos.php?id=" + encodeURIComponent(deviceId) + "&action=clear&_=" + Date.now();
+  try {
+    let res = await fetch(url, { method: "POST", cache: "no-store" });
+    let data = await res.json();
+    if (!(data && (data.status === "esperando" || data.cleared))) {
+      res = await fetch(url, { cache: "no-store" });
+      data = await res.json();
+    }
+    if (data && (data.status === "esperando" || data.cleared)) {
+      listLoadLog("borrar", "asignación remota borrada");
+      return true;
+    }
+    listLoadLog("borrar", "el servidor no confirmó el borrado");
+  } catch (e) {
+    listLoadLog("borrar", "no se pudo borrar la asignación remota");
+  }
+  return false;
 }
 
 function setTvChannelsOpen(open) {
@@ -1422,39 +1499,54 @@ async function wipeListDb() {
 
 async function clearAllStoredLists(opts) {
   listLoadLog("borrar", "limpiando listas de este Device ID");
-  savedLists = [];
-  activeListId = null;
-  persistSavedLists();
+  clearListsInProgress = true;
+  const ignored = hintFromCurrentList();
+  rememberIgnoredAssignment(ignored);
   try {
-    localStorage.removeItem(SAVED_LISTS_KEY);
-    localStorage.removeItem(ACTIVE_LIST_KEY);
-    localStorage.removeItem(LAST_LIST_KEY);
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem("xtream_user");
+    sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
   } catch (e) {}
+  stopRemotePolling();
+  loginCancelled = true;
   try {
-    sessionStorage.removeItem(LOGOUT_AT_KEY);
+    if (loginAbort) loginAbort.abort();
   } catch (e) {}
-  await wipeListDb();
-  liveSession = false;
-  logoutRequested = false;
   remoteLoginBusy = false;
-  currentUser = null;
-  sessionToken = null;
-  channelsData = [];
-  categoriesData = {};
-  channelById = new Map();
-  lastParseDebug = null;
-  pendingListName = null;
-  document.documentElement.classList.remove("has-session");
-  stopPlayback();
-  fillSettingsListBox();
-  refreshListDebug();
-  setLoginStatus("Listas anteriores borradas. Carga Xtream, M3U o el QR de nuevo.");
-  showToast("Listas anteriores borradas");
-  if (opts && opts.goLogin) {
-    showScreen("login");
-    startRemotePolling();
+  showSpinner(false);
+  try {
+    await wipeRemoteAssignment();
+    savedLists = [];
+    activeListId = null;
+    persistSavedLists();
+    try {
+      localStorage.removeItem(SAVED_LISTS_KEY);
+      localStorage.removeItem(ACTIVE_LIST_KEY);
+      localStorage.removeItem(LAST_LIST_KEY);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem("xtream_user");
+    } catch (e) {}
+    await wipeListDb();
+    liveSession = false;
+    logoutRequested = false;
+    remoteLoginBusy = false;
+    currentUser = null;
+    sessionToken = null;
+    channelsData = [];
+    categoriesData = {};
+    channelById = new Map();
+    lastParseDebug = null;
+    pendingListName = null;
+    document.documentElement.classList.remove("has-session");
+    stopPlayback();
+    fillSettingsListBox();
+    refreshListDebug();
+    setLoginStatus("Listas anteriores borradas. Escribe Xtream/M3U o envía una lista nueva con el QR.");
+    showToast("Listas anteriores borradas");
+    if (opts && opts.goLogin) {
+      showScreen("login");
+      startRemotePolling({ delayMs: 8000, intervalMs: 4000 });
+    }
+  } finally {
+    clearListsInProgress = false;
   }
 }
 
@@ -1743,7 +1835,7 @@ function startAddListPolling() {
       const data = await res.json();
       if (myGen !== listAddPollGen) return;
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
-      if (assignmentIsStale(data)) return;
+      if (assignmentShouldIgnore(data)) return;
       stopAddListPolling();
       showListsOverlay(false);
       await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
@@ -1975,6 +2067,10 @@ function stopRemotePolling() {
     clearInterval(pollingInterval);
     pollingInterval = null;
   }
+  if (remotePollDelayTimer) {
+    clearTimeout(remotePollDelayTimer);
+    remotePollDelayTimer = null;
+  }
 }
 
 function markSessionLive() {
@@ -2074,11 +2170,19 @@ function enterChannelView(user) {
   } catch (e) {}
 }
 
-function startRemotePolling() {
+function startRemotePolling(opts) {
+  if (clearListsInProgress && !(opts && opts.delayMs)) return;
   if (liveSession && channelsData.length && !logoutRequested) return;
   const deviceId = showDeviceId();
   stopRemotePolling();
-  listLoadLog("qr", "escuchando Device ID " + deviceId);
+  const delayMs = (opts && opts.delayMs) || 0;
+  const intervalMs = (opts && opts.intervalMs) || 2500;
+  listLoadLog(
+    "qr",
+    "escuchando Device ID " +
+      deviceId +
+      (delayMs ? " · pausa " + Math.round(delayMs / 1000) + "s para escribir Xtream/M3U" : "")
+  );
   const myGen = remotePollGen;
 
   async function tick() {
@@ -2097,14 +2201,19 @@ function startRemotePolling() {
       if (liveSession && channelsData.length && !logoutRequested) return;
       const hasList = !!(data && (data.serverUrl || data.m3uUrl || (data.username && data.password)));
       if (!data || data.status === "esperando" || !hasList) return;
-      if (assignmentIsStale(data)) {
-        listLoadLog("qr", "lista remota antigua (stale). Pulsa Borrar listas o recárgala desde el móvil.");
-        setLoginStatus("Hay una lista antigua. Pulsa «Borrar listas» o vuelve a enviarla desde el móvil.");
+      if (assignmentShouldIgnore(data)) {
+        const fp = assignmentFingerprint(data);
+        if (fp !== lastIgnoreLogFp) {
+          lastIgnoreLogFp = fp;
+          listLoadLog("qr", "lista remota ignorada (borrada o fallida). Envía otra o escribe Xtream/M3U.");
+          setLoginStatus("Lista anterior descartada. Escribe Xtream/M3U o envía una lista nueva con el QR.");
+        }
         return;
       }
       try {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
+      lastIgnoreLogFp = "";
       listLoadLog(
         "qr",
         "lista recibida · " +
@@ -2125,8 +2234,15 @@ function startRemotePolling() {
       const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName, {
         fresh: true,
       });
-      if (ok || liveSession || channelsData.length) stopRemotePolling();
-      else if (!loginCancelled) {
+      if (ok || liveSession || channelsData.length) {
+        try {
+          sessionStorage.removeItem(IGNORE_ASSIGN_KEY);
+        } catch (e) {}
+        stopRemotePolling();
+      } else if (!loginCancelled) {
+        rememberIgnoredAssignment(data);
+        lastIgnoreLogFp = assignmentFingerprint(data);
+        listLoadLog("qr", "lista remota falló; no se reintenta hasta un envío nuevo");
         const errEl = document.getElementById("loginError");
         setLoginStatus((errEl && errEl.textContent) || "No se pudieron cargar los canales.");
       }
@@ -2140,8 +2256,18 @@ function startRemotePolling() {
     }
   }
 
-  tick();
-  pollingInterval = setInterval(tick, 2500);
+  function arm() {
+    if (myGen !== remotePollGen) return;
+    tick();
+    if (myGen !== remotePollGen) return;
+    pollingInterval = setInterval(tick, intervalMs);
+  }
+
+  if (delayMs > 0) {
+    remotePollDelayTimer = setTimeout(arm, delayMs);
+  } else {
+    arm();
+  }
 }
 
 function isProxyFailure(response, data, rawText) {
@@ -2474,7 +2600,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     }
     showScreen("login");
     // No reiniciar el poll aquí: provoca tick() al instante y bucles.
-    if (!pollingInterval && !liveSession) startRemotePolling();
+    if (!pollingInterval && !remotePollDelayTimer && !liveSession) startRemotePolling();
     return false;
   } finally {
     clearTimeout(watchdog);
@@ -2505,7 +2631,7 @@ function cancelLogin() {
     return;
   }
   setLoginStatus("Entrada automática cancelada. Escanea el QR para cargar la lista.");
-  if (!pollingInterval && !liveSession) startRemotePolling();
+  if (!pollingInterval && !remotePollDelayTimer && !liveSession) startRemotePolling();
 }
 
 /**
@@ -5952,7 +6078,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926d");
+  url.searchParams.set("v", "20260926e");
   window.location.replace(url.toString());
 }
 
