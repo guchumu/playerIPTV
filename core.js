@@ -78,6 +78,7 @@ let activeListId = null;
 let listAddPollGen = 0;
 let listAddPollTimer = null;
 let pendingListName = null;
+let listLoadEvents = [];
 
 const video = document.getElementById("videoPlayer");
 const spinner = document.getElementById("spinner");
@@ -292,8 +293,7 @@ function applyTvChrome() {
 function applySettingsButton() {
   const btn = document.getElementById("settingsBtn");
   if (!btn) return;
-  const mobile = document.body.classList.contains("use-settings-menu");
-  btn.hidden = !mobile;
+  btn.hidden = isTvLayout();
 }
 
 function showSettingsOverlay(show) {
@@ -314,6 +314,8 @@ function showSettingsOverlay(show) {
     const dest = document.getElementById("settingsExpiry");
     if (dest) dest.textContent = (exp && exp.textContent) || "";
     if (dest && exp) dest.style.color = exp.style.color || "";
+    fillSettingsListBox();
+    refreshListDebug();
   }
 }
 
@@ -375,6 +377,22 @@ function initSettingsPanel() {
     logout.addEventListener("click", () => {
       showSettingsOverlay(false);
       doLogout();
+    });
+  }
+  const clearBtn = document.getElementById("settingsClearListsBtn");
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      showSettingsOverlay(false);
+      clearAllStoredLists({ goLogin: true });
+    });
+  }
+  const debugBtn = document.getElementById("settingsDebugBtn");
+  if (debugBtn && !debugBtn.dataset.bound) {
+    debugBtn.dataset.bound = "1";
+    debugBtn.addEventListener("click", () => {
+      showSettingsOverlay(false);
+      setDebugOpen(true);
     });
   }
 }
@@ -1250,6 +1268,169 @@ function persistSavedLists() {
   } catch (e) {}
 }
 
+function activeListLabel() {
+  if (activeListId === ALL_LISTS_ID) return "Todas las listas";
+  const entry = savedLists.find((l) => l.id === activeListId);
+  if (entry && entry.name) return entry.name;
+  if (currentUser && currentUser.m3uUrl) {
+    try {
+      return new URL(currentUser.m3uUrl).hostname.replace(/^www\./, "");
+    } catch (e) {
+      return "Lista M3U";
+    }
+  }
+  if (currentUser && currentUser.username && currentUser.username !== "Invitado M3U") return currentUser.username;
+  return savedLists.length ? "Lista guardada (sin activar)" : "Ninguna";
+}
+
+function listLoadLog(step, detail) {
+  const line = new Date().toLocaleTimeString() + " · " + step + (detail ? " · " + detail : "");
+  listLoadEvents.unshift(line);
+  if (listLoadEvents.length > 50) listLoadEvents.length = 50;
+  refreshListDebug();
+}
+
+function formatListDebug() {
+  const last = peekLastList();
+  const parse = lastParseDebug || {};
+  const lastHint = last
+    ? last.isM3U
+      ? "m3u " + (last.m3uUrl || "")
+      : "xtream " + (last.username || "") + " @ " + (last.server || "")
+    : "ninguna";
+  return [
+    "dispositivo: " + (typeof getDeviceId === "function" ? getDeviceId() : "-"),
+    "sesión viva: " + (liveSession ? "sí" : "no") + " · carga: " + (remoteLoginBusy ? "en curso" : "idle"),
+    "canales en pantalla: " + channelsData.length,
+    "lista activa: " + activeListLabel() + (activeListId ? " [" + activeListId + "]" : ""),
+    "listas guardadas: " +
+      savedLists.length +
+      (savedLists.length ? " → " + savedLists.map((l) => l.name || l.id).join(" | ") : ""),
+    "sesión local: " +
+      (currentUser ? (currentUser.isM3U ? "m3u " + (currentUser.m3uUrl || "") : currentUser.username || "-") : "ninguna"),
+    "última recordada: " + lastHint,
+    "último parse: " +
+      (parse.parsed || 0) +
+      " canales · " +
+      (parse.bytes || 0) +
+      " bytes · " +
+      (parse.extinf || 0) +
+      " EXTINF · " +
+      (parse.skipped || 0) +
+      " sin URL",
+    "poll QR: " + (pollingInterval ? "activo" : "parado"),
+    "-- eventos --",
+    listLoadEvents.length ? listLoadEvents.join("\n") : "(aún no hay eventos de carga)",
+  ].join("\n");
+}
+
+function refreshListDebug() {
+  const text = formatListDebug();
+  document.querySelectorAll("[data-list-debug]").forEach((el) => {
+    el.textContent = text;
+  });
+}
+
+function fillSettingsListBox() {
+  const active = document.getElementById("settingsActiveList");
+  if (active) active.textContent = activeListLabel() + (channelsData.length ? " · " + channelsData.length + " canales" : "");
+  const header = document.getElementById("headerListName");
+  if (header) {
+    header.textContent = channelsData.length ? activeListLabel() : "";
+    header.title = header.textContent;
+  }
+  const ul = document.getElementById("settingsSavedLists");
+  if (!ul) return;
+  ul.innerHTML = "";
+  if (!savedLists.length) {
+    const li = document.createElement("li");
+    li.textContent = "No hay listas guardadas en este aparato";
+    ul.appendChild(li);
+    return;
+  }
+  savedLists.forEach((entry) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = (entry.name || "Lista") + (entry.id === activeListId ? " (activa)" : "");
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "Quitar";
+    del.addEventListener("click", () => {
+      removeSavedList(entry.id);
+      fillSettingsListBox();
+      refreshListDebug();
+      listLoadLog("quitar lista", entry.name || entry.id);
+      if (activeListId === entry.id || !savedLists.some((l) => l.id === activeListId)) {
+        if (savedLists[0]) switchToList(savedLists[0].id);
+        else clearAllStoredLists({ goLogin: true });
+      }
+    });
+    li.appendChild(name);
+    li.appendChild(del);
+    ul.appendChild(li);
+  });
+}
+
+async function wipeListDb() {
+  try {
+    const db = await openListDb();
+    await withTimeout(
+      new Promise((resolve, reject) => {
+        const tx = db.transaction("lists", "readwrite");
+        tx.objectStore("lists").clear();
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      }),
+      1500,
+      null
+    );
+    try {
+      db.close();
+    } catch (e) {}
+  } catch (e) {}
+  try {
+    if (window.indexedDB) indexedDB.deleteDatabase("streambox-lists");
+  } catch (e) {}
+}
+
+async function clearAllStoredLists(opts) {
+  listLoadLog("borrar", "limpiando listas de este Device ID");
+  savedLists = [];
+  activeListId = null;
+  persistSavedLists();
+  try {
+    localStorage.removeItem(SAVED_LISTS_KEY);
+    localStorage.removeItem(ACTIVE_LIST_KEY);
+    localStorage.removeItem(LAST_LIST_KEY);
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem("xtream_user");
+  } catch (e) {}
+  try {
+    sessionStorage.removeItem(LOGOUT_AT_KEY);
+  } catch (e) {}
+  await wipeListDb();
+  liveSession = false;
+  logoutRequested = false;
+  remoteLoginBusy = false;
+  currentUser = null;
+  sessionToken = null;
+  channelsData = [];
+  categoriesData = {};
+  channelById = new Map();
+  lastParseDebug = null;
+  pendingListName = null;
+  document.documentElement.classList.remove("has-session");
+  stopPlayback();
+  fillSettingsListBox();
+  refreshListDebug();
+  setLoginStatus("Listas anteriores borradas. Carga Xtream, M3U o el QR de nuevo.");
+  showToast("Listas anteriores borradas");
+  if (opts && opts.goLogin) {
+    showScreen("login");
+    startRemotePolling();
+  }
+}
+
 function setActiveListId(id) {
   activeListId = id || null;
   try {
@@ -1445,6 +1626,8 @@ function renderListSelector() {
   }
   const listsBtn = document.getElementById("listsBtn");
   if (listsBtn) listsBtn.hidden = true;
+  fillSettingsListBox();
+  refreshListDebug();
   updateChannelColumnTitle();
 }
 
@@ -1452,7 +1635,8 @@ function updateChannelColumnTitle() {
   const title = document.getElementById("channelColumnTitle");
   if (!title) return;
   if (searchQuery) return;
-  title.textContent = "Canales";
+  const name = activeListLabel();
+  title.textContent = name && name !== "Ninguna" ? name : "Canales";
 }
 
 function renderListsManagePanel() {
@@ -1791,11 +1975,23 @@ function restoreChannelState(snap) {
 function applyListOrKeep(text) {
   const snap = snapshotChannelState();
   parseM3U(text, currentListMeta(false));
+  const parsed = (lastParseDebug && lastParseDebug.parsed) || channelsData.length;
+  listLoadLog(
+    "parse",
+    parsed +
+      " canales · " +
+      ((lastParseDebug && lastParseDebug.bytes) || 0) +
+      " bytes · " +
+      ((lastParseDebug && lastParseDebug.extinf) || 0) +
+      " EXTINF"
+  );
   if (channelsData.length) return true;
   if (restoreChannelState(snap)) {
+    listLoadLog("parse", "0 canales nuevos; se mantiene la lista anterior (" + snap.channels.length + ")");
     showToast("No se pudo actualizar la lista; se mantiene la anterior");
     return true;
   }
+  listLoadLog("parse", "0 canales y no había lista anterior");
   return false;
 }
 
@@ -1809,7 +2005,10 @@ function enterChannelView(user) {
       throw e;
     }
   }
-  if (channelsData.length) markSessionLive();
+  if (channelsData.length) {
+    markSessionLive();
+    listLoadLog("ok", activeListLabel() + " · " + channelsData.length + " canales");
+  }
   try {
     dismissSplash(true);
     showScreen("main");
@@ -1852,6 +2051,7 @@ function startRemotePolling() {
   if (liveSession && channelsData.length && !logoutRequested) return;
   const deviceId = showDeviceId();
   stopRemotePolling();
+  listLoadLog("qr", "escuchando Device ID " + deviceId);
   const myGen = remotePollGen;
 
   async function tick() {
@@ -1871,12 +2071,19 @@ function startRemotePolling() {
       const hasList = !!(data && (data.serverUrl || data.m3uUrl || (data.username && data.password)));
       if (!data || data.status === "esperando" || !hasList) return;
       if (assignmentIsStale(data)) {
-        setLoginStatus("Hay una lista antigua. Vuelve a enviarla desde el móvil (o pulsa Recargar).");
+        listLoadLog("qr", "lista remota antigua (stale). Pulsa Borrar listas o recárgala desde el móvil.");
+        setLoginStatus("Hay una lista antigua. Pulsa «Borrar listas» o vuelve a enviarla desde el móvil.");
         return;
       }
       try {
         sessionStorage.removeItem(LOGOUT_AT_KEY);
       } catch (e) {}
+      listLoadLog(
+        "qr",
+        "lista recibida · " +
+          (data.m3uUrl ? "m3u" : "xtream") +
+          (data.listName ? " · " + data.listName : "")
+      );
       setLoginStatus("Lista recibida. Cargando canales…");
       try {
         const reloadBusy = document.getElementById("forceReloadBtn");
@@ -1888,14 +2095,21 @@ function startRemotePolling() {
           } catch (e) {}
         }
       } catch (e) {}
-      const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName);
+      const ok = await performLoginAction(data.serverUrl, data.username, data.password, data.m3uUrl, data.listName, {
+        fresh: true,
+      });
       if (ok || liveSession || channelsData.length) stopRemotePolling();
       else if (!loginCancelled) {
         const errEl = document.getElementById("loginError");
         setLoginStatus((errEl && errEl.textContent) || "No se pudieron cargar los canales.");
       }
     } catch (e) {
-      setLoginStatus((e && e.message) || "Error al leer la lista remota.");
+      const msg = String((e && e.message) || e);
+      if (/JSON|Unexpected token|<\?php|<!DOCTYPE/i.test(msg)) {
+        listLoadLog("qr", "poll: el servidor no devolvió JSON (se reintenta)");
+        return;
+      }
+      setLoginStatus(msg || "Error al leer la lista remota.");
     }
   }
 
@@ -1957,6 +2171,13 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     }
   } catch (e) {}
   pendingListName = listName ? String(listName).trim() : null;
+  const skipCache = !!(opts && opts.fresh);
+  listLoadLog(
+    "login",
+    (username && password ? "xtream " + username : m3uUrl ? "m3u" : "sin datos") +
+      (listName ? " · " + listName : "") +
+      (skipCache ? " · sin caché" : "")
+  );
   setLoginStatus("Descargando lista... Por favor espera.");
   showSpinner(true, "Conectando...");
 
@@ -1987,13 +2208,16 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       } catch (err) {}
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
       saveSession(currentUser);
-      const cachedM3u = await withTimeout(readListCache(currentUser), 1500, null);
+      const cachedM3u = skipCache ? null : await withTimeout(readListCache(currentUser), 1500, null);
       if (cachedM3u && !detectProviderListError(cachedM3u)) {
+        listLoadLog("caché", "m3u local " + cachedM3u.length + " bytes");
         parseM3U(cachedM3u, currentListMeta(false));
         if (channelsData.length) {
           enterChannelView(currentUser);
           showSpinner(true, "Actualizando lista...");
         }
+      } else if (skipCache) {
+        listLoadLog("caché", "omitida (carga nueva)");
       }
 
       const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -2018,7 +2242,9 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
       const m3uContent = await response.text();
       if (loginCancelled) return liveSession && channelsData.length > 0;
+      listLoadLog("descarga", "m3u HTTP " + response.status + " · " + (m3uContent ? m3uContent.length : 0) + " bytes");
       if (m3uContent.includes("Error al cargar") || m3uContent.trim() === "") {
+        listLoadLog("error", "proxy vacío o Error al cargar");
         if (channelsData.length) {
           showSpinner(false);
           markSessionLive();
@@ -2067,7 +2293,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     if (hasXtream) {
       currentServer = serverUrl;
       const pendingUser = { username, password, server: serverUrl, isM3U: false };
-      const cachedXt = await withTimeout(readListCache(pendingUser), 1500, null);
+      const cachedXt = skipCache ? null : await withTimeout(readListCache(pendingUser), 1500, null);
       if (cachedXt && !detectProviderListError(cachedXt)) {
         parseM3U(cachedXt, currentListMeta(false));
         if (channelsData.length) {
@@ -2178,6 +2404,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     pendingListName = null;
     showSpinner(false);
     const msg = (error && error.message) || "Error al iniciar sesión.";
+    listLoadLog("error", msg);
     setLoginStatus(msg);
     if (liveSession || channelsData.length) {
       showToast(msg);
@@ -2297,7 +2524,8 @@ function initManualLogin() {
       setLoginStatus("Escribe usuario y contraseña, o un enlace M3U.");
       return;
     }
-    performLoginAction(server, user, pass, m3u);
+    listLoadLog("formulario", user && pass ? "xtream" : "m3u");
+    performLoginAction(server, user, pass, m3u, null, { fresh: true });
   });
 }
 
@@ -2387,6 +2615,7 @@ window.addEventListener("DOMContentLoaded", () => {
   registrarServiceWorker();
   prepararInstalacion();
   showDeviceId();
+  refreshListDebug();
   initTvLoginFocus();
   // Siempre escuchar el QR; el auto-login no debe dejar la TV sin poll.
   startRemotePolling();
@@ -2905,6 +3134,7 @@ async function loadM3UFromXtream() {
   }
   const m3uContent = await response.text();
   const trimmed = (m3uContent || "").trim();
+  listLoadLog("xtream", "get.php HTTP " + response.status + " · " + trimmed.length + " bytes");
   if (!trimmed || trimmed.charAt(0) === "{" || /<!DOCTYPE|<html/i.test(trimmed)) {
     throw new Error("No se pudo descargar la lista M3U");
   }
@@ -3265,6 +3495,7 @@ function getDebugReport() {
     .join("\n");
   return [
     "StreamBox debug",
+    formatListDebug(),
     "ua: " + (navigator.userAgent || ""),
     "size: " + window.innerWidth + "x" + window.innerHeight,
     "user: " + (d.user || "-") + " (" + (d.mode || "-") + ")",
@@ -5491,7 +5722,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260916a");
+  url.searchParams.set("v", "20260926a");
   window.location.replace(url.toString());
 }
 
@@ -5521,6 +5752,24 @@ if (refreshBtn) refreshBtn.addEventListener("click", doRefresh);
 
 const forceReloadBtn = document.getElementById("forceReloadBtn");
 if (forceReloadBtn) forceReloadBtn.addEventListener("click", forceReloadApp);
+
+const clearListsBtn = document.getElementById("clearListsBtn");
+if (clearListsBtn) {
+  clearListsBtn.addEventListener("click", () => {
+    clearAllStoredLists({ goLogin: true });
+  });
+}
+const loginDebugCopyBtn = document.getElementById("loginDebugCopyBtn");
+if (loginDebugCopyBtn) {
+  loginDebugCopyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(formatListDebug());
+      showToast("Debug copiado");
+    } catch (e) {
+      showToast("No se pudo copiar");
+    }
+  });
+}
 
 getTvHeaderActions().forEach((btn, i) => {
   btn.addEventListener("focus", () => {

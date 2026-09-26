@@ -115,19 +115,32 @@ html.is-native-tv .splash-hint-tv { display: inline; }
   border-radius: 18px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
   width: 90%;
-  max-width: 480px;
+  max-width: 980px;
   margin: auto;
   position: relative;
   z-index: 2;
 }
+.login-head {
+  text-align: center;
+  width: 100%;
+}
 .login-logo {
   display: block;
-  width: 72px;
-  height: 72px;
+  width: 88px;
+  height: 88px;
   object-fit: contain;
-  margin: 0 auto 1rem;
+  margin: 0 auto 0.7rem;
 }
 .login-container h1 { font-size: 1.8rem; margin-bottom: 0.35rem; text-align: center; }
+.build-tag { text-align: center; }
+.login-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+  gap: 1.4rem;
+  align-items: start;
+  width: 100%;
+  margin-top: 0.8rem;
+}
 .login-tv-hint { display: none; }
 .engine-control {
   display: inline-flex;
@@ -179,21 +192,34 @@ html.is-native-tv .engine-control select {
 .install-btn:hover {
   background: #15803d;
 }
-.reload-btn {
+.login-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.reload-btn,
+.clear-lists-btn {
   width: 100%;
   margin-top: 12px;
   padding: 12px;
-  background: #0ea5e9;
   color: #fff;
   border: 0;
   border-radius: 8px;
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 700;
   cursor: pointer;
   min-height: 48px;
 }
+.login-actions .reload-btn,
+.login-actions .clear-lists-btn {
+  margin-top: 0;
+  flex: 1;
+}
+.reload-btn { background: #0ea5e9; }
 .reload-btn:hover { background: #0284c7; }
+.clear-lists-btn { background: #b45309; }
+.clear-lists-btn:hover { background: #c2410c; }
 .reload-btn:focus,
 .reload-btn:focus-visible,
 .reload-btn.login-focus {
@@ -249,12 +275,106 @@ html.is-native-tv .engine-control select {
   font-family: monospace;
 }
 
+.login-debug {
+  margin-top: 1rem;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  text-align: left;
+  overflow: hidden;
+}
+.login-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #111827;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+}
+.login-debug-head button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.login-debug pre,
+.settings-list-debug {
+  margin: 0;
+  padding: 10px;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #86efac;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.settings-list-box {
+  margin: 0 0 14px;
+  padding: 10px;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 10px;
+}
+.settings-label {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+#settingsActiveList,
+.header-list-name {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.header-list-name {
+  margin: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: #a5b4fc;
+}
+.settings-saved-lists {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.settings-saved-lists li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #1e293b;
+}
+.settings-saved-lists button {
+  background: transparent;
+  color: #fca5a5;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.settings-panel .clear-lists-btn { margin-top: 4px; }
+
 .login-divider { text-align: center; margin: 15px 0; opacity: 0.4; }
 .login-manual {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0.4rem 0 1rem;
+  margin: 0;
   text-align: left;
 }
 .login-manual-lead {
@@ -1406,7 +1526,11 @@ body.is-tv .ad-slot img { max-height: 108px; }
 }
 .lists-overlay.is-open { display: flex; }
 .lists-overlay[hidden] { display: none; }
-.settings-panel { width: min(420px, 100%); }
+.settings-panel {
+  width: min(460px, 100%);
+  max-height: min(88dvh, 720px);
+  overflow: auto;
+}
 .settings-expiry {
   margin: 0 0 12px;
   font-weight: 700;
@@ -1644,14 +1768,14 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 }
 
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
-:is(body.is-tv, html.is-native-tv, html.login-landscape) { font-size: 15px; }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) #loginScreen {
+:is(body.is-tv, html.is-native-tv) { font-size: 15px; }
+:is(body.is-tv, html.is-native-tv) #loginScreen {
   overflow: hidden;
   padding: 0.6rem 1.2rem;
   align-items: center;
   justify-content: center;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-container {
+:is(body.is-tv, html.is-native-tv) .login-container {
   display: grid !important;
   grid-template-columns: minmax(200px, 0.9fr) minmax(300px, 1.2fr);
   flex-direction: unset;
@@ -1664,14 +1788,20 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   padding: 1rem 1.2rem;
   overflow: hidden;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-head {
+:is(body.is-tv, html.is-native-tv) .login-body {
+  display: contents;
+}
+:is(body.is-tv, html.is-native-tv) .login-debug {
+  display: none;
+}
+:is(body.is-tv, html.is-native-tv) .login-head {
   grid-column: 1;
   grid-row: 1;
   min-width: 0;
   align-self: center;
   text-align: left;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-manual {
+:is(body.is-tv, html.is-native-tv) .login-manual {
   grid-column: 1;
   grid-row: 2;
   margin: 0.2rem 0 0;
@@ -1679,7 +1809,7 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   overflow: auto;
   align-self: start;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-col-side {
+:is(body.is-tv, html.is-native-tv) .login-col-side {
   grid-column: 2;
   grid-row: 1 / span 2;
   min-width: 0;
@@ -1689,94 +1819,95 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   flex-direction: column;
   justify-content: center;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-logo {
+:is(body.is-tv, html.is-native-tv) .login-logo {
   display: block !important;
   width: min(22vh, 140px);
   height: min(22vh, 140px);
   margin: 0 0 0.45rem;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-container h1 {
+:is(body.is-tv, html.is-native-tv) .login-container h1 {
   font-size: clamp(1.3rem, 3vh, 1.9rem);
   margin-bottom: 0.1rem;
   text-align: left;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .build-tag {
+:is(body.is-tv, html.is-native-tv) .build-tag {
   text-align: left;
   margin-bottom: 0.35rem;
   font-size: 0.7rem;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-tv-hint,
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .qr-hint,
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .upload-url,
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .reload-hint,
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .install-btn,
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
+:is(body.is-tv, html.is-native-tv) .login-tv-hint,
+:is(body.is-tv, html.is-native-tv) .qr-hint,
+:is(body.is-tv, html.is-native-tv) .upload-url,
+:is(body.is-tv, html.is-native-tv) .reload-hint,
+:is(body.is-tv, html.is-native-tv) .install-btn,
+:is(body.is-tv, html.is-native-tv) .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
   display: none !important;
 }
 body.is-tv .login-manual,
 html.is-native-tv .login-manual { display: none !important; }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-manual {
+:is(body.is-tv, html.is-native-tv) .login-manual {
   grid-column: 1;
   margin: 0.2rem 0 0;
   max-height: calc(100dvh - 220px);
   overflow: auto;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .login-engine[hidden] {
+:is(body.is-tv, html.is-native-tv) .login-engine[hidden] {
   display: none !important;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .remote-upload-box {
+:is(body.is-tv, html.is-native-tv) .remote-upload-box {
   padding: 0.7rem 0.85rem;
   flex: 0 1 auto;
   min-height: 0;
   overflow: hidden;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .qr-lead {
+:is(body.is-tv, html.is-native-tv) .qr-lead {
   font-size: clamp(1rem, 2.4vh, 1.25rem) !important;
   margin-bottom: 0.2rem !important;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .qr-wrap { margin: 6px 0; }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .upload-qr {
+:is(body.is-tv, html.is-native-tv) .qr-wrap { margin: 6px 0; }
+:is(body.is-tv, html.is-native-tv) .upload-qr {
   width: min(36vh, 220px);
   height: min(36vh, 220px);
   max-width: 100%;
   padding: 6px;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .device-id {
+:is(body.is-tv, html.is-native-tv) .device-id {
   font-size: clamp(1.2rem, 3.2vh, 1.7rem);
   letter-spacing: 3px;
   padding: 6px 10px;
   margin: 4px 0;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .reload-btn {
+:is(body.is-tv, html.is-native-tv) .reload-btn {
   min-height: 44px;
   font-size: 1rem;
   margin-top: 8px;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .error {
+:is(body.is-tv, html.is-native-tv) .error {
   font-size: 0.9rem;
   margin-top: 0.35rem;
   max-height: 4.5em;
   overflow: hidden;
 }
-:is(body.is-tv, html.is-native-tv, html.login-landscape) .global-spinner {
+:is(body.is-tv, html.is-native-tv) .global-spinner {
   position: fixed;
   inset: 0;
   z-index: 5500;
   background: rgba(2, 6, 23, 0.88);
 }
 @media (max-height: 560px) {
-  :is(body.is-tv, html.is-native-tv, html.login-landscape) .login-logo {
+  :is(body.is-tv, html.is-native-tv) .login-logo {
     width: min(18vh, 96px);
     height: min(18vh, 96px);
   }
-  :is(body.is-tv, html.is-native-tv, html.login-landscape) .upload-qr {
+  :is(body.is-tv, html.is-native-tv) .upload-qr {
     width: min(32vh, 160px);
     height: min(32vh, 160px);
   }
 }
 /* Nunca apilar a una columna en landscape: el QR se corta abajo. */
 @media (orientation: landscape) and (min-width: 800px) {
-  html:not(.login-portrait) #loginScreen .login-container {
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-container,
+  body.is-tv #loginScreen .login-container {
     display: grid !important;
     grid-template-columns: minmax(180px, 0.85fr) minmax(280px, 1.2fr);
     flex-direction: unset;
@@ -1786,35 +1917,27 @@ html.is-native-tv .login-manual { display: none !important; }
     overflow: hidden;
     padding: 0.85rem 1rem;
   }
-  html:not(.login-portrait) #loginScreen .login-head { grid-column: 1; text-align: left; }
-  html:not(.login-portrait) #loginScreen .login-col-side { grid-column: 2; }
-  html:not(.login-portrait) #loginScreen .login-logo {
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-head,
+  body.is-tv #loginScreen .login-head { grid-column: 1; text-align: left; }
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-col-side,
+  body.is-tv #loginScreen .login-col-side { grid-column: 2; }
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-logo,
+  body.is-tv #loginScreen .login-logo {
     display: block !important;
     width: min(20vh, 130px);
     height: min(20vh, 130px);
     margin: 0 0 0.4rem;
   }
-  html:not(.login-portrait) #loginScreen .login-container h1 { text-align: left; }
-  html:not(.login-portrait) #loginScreen .build-tag { text-align: left; }
-  html:not(.login-portrait) #loginScreen .login-tv-hint,
-  html:not(.login-portrait) #loginScreen .qr-hint,
-  html:not(.login-portrait) #loginScreen .upload-url,
-  html:not(.login-portrait) #loginScreen .reload-hint,
-  html:not(.login-portrait) #loginScreen .install-btn,
-  html:not(.login-portrait) #loginScreen .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
-    display: none !important;
-  }
-  html:not(.login-portrait) #loginScreen .login-manual {
-    grid-column: 1;
-  }
+  html.is-native-tv:not(.login-portrait) #loginScreen .login-container h1,
+  body.is-tv #loginScreen .login-container h1 { text-align: left; }
+  html.is-native-tv:not(.login-portrait) #loginScreen .build-tag,
+  body.is-tv #loginScreen .build-tag { text-align: left; }
   html.is-native-tv:not(.login-portrait) #loginScreen .login-manual,
   body.is-tv #loginScreen .login-manual {
     display: none !important;
   }
-  html:not(.login-portrait) #loginScreen .login-engine[hidden] {
-    display: none !important;
-  }
-  html:not(.login-portrait) #loginScreen .upload-qr {
+  html.is-native-tv:not(.login-portrait) #loginScreen .upload-qr,
+  body.is-tv #loginScreen .upload-qr {
     width: min(34vh, 200px);
     height: min(34vh, 200px);
   }
@@ -2051,6 +2174,8 @@ body.is-tv .tv-fav-empty {
     padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   }
   .login-container { width: 100%; padding: 1.6rem 1.2rem; }
+  body:not(.is-tv) .login-body { grid-template-columns: 1fr; }
+  body:not(.is-tv) .login-logo { width: 72px; height: 72px; }
 
   #mainScreen {
     height: 100%;

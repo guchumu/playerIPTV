@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260916a" />
+      <link rel="stylesheet" href="style.css?v=20260926a" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -52,53 +52,67 @@
     <div id="loginScreen" class="screen active">
         <div class="login-container">
             <div class="login-head">
-                <img src="logo.png" alt="" class="login-logo" />
+                <img src="logo.svg" alt="" class="login-logo" />
                 <h1>StreamBox IPTV</h1>
                 <p class="build-tag" data-app-version>v1.0.17</p>
                 <p class="login-tv-hint">En la tele: el código QR queda a la derecha. Con el móvil, ábrelo y carga la lista.</p>
             </div>
 
-            <form id="loginForm" class="login-manual" autocomplete="on">
-                <p class="login-manual-lead">Entra con tu lista</p>
-                <label>
-                    Servidor Xtream
-                    <input type="text" id="loginServer" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" inputmode="url" />
-                </label>
-                <label>
-                    Usuario
-                    <input type="text" id="loginUser" name="username" placeholder="Usuario" autocomplete="username" enterkeyhint="next" />
-                </label>
-                <label>
-                    Contraseña
-                    <input type="password" id="loginPass" name="password" placeholder="Contraseña" autocomplete="current-password" enterkeyhint="next" />
-                </label>
-                <p class="login-divider">— o lista M3U —</p>
-                <label>
-                    Enlace M3U
-                    <input type="url" id="loginM3u" name="m3uUrl" placeholder="http://…/lista.m3u" autocomplete="off" inputmode="url" enterkeyhint="go" />
-                </label>
-                <button type="submit" id="loginSubmitBtn">Entrar</button>
-            </form>
+            <div class="login-body">
+                <form id="loginForm" class="login-manual" autocomplete="on">
+                    <p class="login-manual-lead">Datos Xtream o lista M3U</p>
+                    <label>
+                        Servidor Xtream
+                        <input type="text" id="loginServer" name="serverUrl" placeholder="http://servidor.com:8080" autocomplete="url" inputmode="url" />
+                    </label>
+                    <label>
+                        Usuario
+                        <input type="text" id="loginUser" name="username" placeholder="Usuario" autocomplete="username" enterkeyhint="next" />
+                    </label>
+                    <label>
+                        Contraseña
+                        <input type="password" id="loginPass" name="password" placeholder="Contraseña" autocomplete="current-password" enterkeyhint="next" />
+                    </label>
+                    <p class="login-divider">— o lista M3U —</p>
+                    <label>
+                        Enlace M3U
+                        <input type="url" id="loginM3u" name="m3uUrl" placeholder="http://…/lista.m3u" autocomplete="off" inputmode="url" enterkeyhint="go" />
+                    </label>
+                    <button type="submit" id="loginSubmitBtn">Entrar</button>
+                </form>
 
-            <div class="login-col-side">
-                <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
+                <div class="login-col-side">
+                    <button type="button" id="installBtn" class="install-btn" hidden>Instalar como aplicación</button>
 
-                <div class="remote-upload-box">
-                    <p class="qr-lead">Escanea y carga la lista</p>
-                    <p>Con el móvil, abre la cámara y apunta al código.</p>
-                    <div class="qr-wrap">
-                        <canvas id="uploadQr" class="upload-qr" width="220" height="220" aria-label="Código QR para cargar la lista"></canvas>
+                    <div class="remote-upload-box">
+                        <p class="qr-lead">Escanea y carga la lista</p>
+                        <p>Con el móvil, abre la cámara y apunta al código.</p>
+                        <div class="qr-wrap">
+                            <canvas id="uploadQr" class="upload-qr" width="220" height="220" aria-label="Código QR para cargar la lista"></canvas>
+                        </div>
+                        <p class="qr-hint">O entra a mano en:</p>
+                        <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
+                        <p class="qr-hint">Tu código de dispositivo (Device ID):</p>
+                        <div id="deviceIdDisplay" class="device-id">Cargando...</div>
+                        <div class="login-actions">
+                            <button type="button" id="forceReloadBtn" class="reload-btn" tabindex="0" title="Forzar recarga de la página y de la sesión">
+                                Recargar
+                            </button>
+                            <button type="button" id="clearListsBtn" class="clear-lists-btn" title="Borrar listas guardadas en este aparato">
+                                Borrar listas
+                            </button>
+                        </div>
+                        <p class="reload-hint">Recargar entra con la última sesión. Borrar listas limpia la caché de este código (Device ID) para poder cargar una nueva.</p>
                     </div>
-                    <p class="qr-hint">O entra a mano en:</p>
-                    <div class="upload-url" id="uploadUrlDisplay">upload.php</div>
-                    <p class="qr-hint">Tu código de dispositivo (Device ID):</p>
-                    <div id="deviceIdDisplay" class="device-id">Cargando...</div>
-                    <button type="button" id="forceReloadBtn" class="reload-btn" tabindex="0" title="Forzar recarga de la página y de la sesión">
-                        Recargar
-                    </button>
-                    <p class="reload-hint">Si ya cargaste la lista en este aparato, Recargar vuelve a entrar sin subirla otra vez.</p>
                 </div>
-                <div id="loginError" class="error"></div>
+            </div>
+            <div id="loginError" class="error"></div>
+            <div id="loginDebugBox" class="login-debug" aria-live="polite">
+                <div class="login-debug-head">
+                    <strong>Debug de carga</strong>
+                    <button type="button" id="loginDebugCopyBtn">Copiar</button>
+                </div>
+                <pre id="loginDebugOutput" data-list-debug>Esperando…</pre>
             </div>
         </div>
     </div>
@@ -117,6 +131,7 @@
             </div>
             <div class="header-right">
                 <span id="accountExpiryLabel" class="header-settings-hide"></span>
+                <span id="headerListName" class="header-list-name"></span>
                 <span id="headerUser" class="header-settings-hide"></span>
                 <label class="buffer-control header-settings-hide" title="Segundos que se acumulan antes de mostrar imagen. Más colchón = menos cortes, pero más espera al cambiar de canal y más retraso respecto al directo. «Rápido» muestra imagen en cuanto llega.">
                     Buffer
@@ -255,6 +270,13 @@
                 <button type="button" id="settingsCloseBtn">Cerrar</button>
             </div>
             <p id="settingsExpiry" class="settings-expiry"></p>
+            <div class="settings-list-box">
+                <p class="settings-label">Lista cargada</p>
+                <p id="settingsActiveList">Ninguna</p>
+                <ul id="settingsSavedLists" class="settings-saved-lists"></ul>
+                <button type="button" id="settingsClearListsBtn" class="clear-lists-btn">Borrar listas anteriores</button>
+                <pre id="settingsListDebug" class="settings-list-debug" data-list-debug></pre>
+            </div>
             <label class="settings-row">
                 Apariencia
                 <select id="settingsUiSelect">
@@ -280,6 +302,7 @@
             </div>
             <p class="settings-hint" id="settingsBoostHint">El volumen extra actúa sobre el reproductor. En iPhone Safari el sistema no deja subir más que los botones del aparato.</p>
             <button type="button" id="settingsRefreshBtn" class="lists-add-btn">Recargar lista</button>
+            <button type="button" id="settingsDebugBtn" class="lists-add-btn">Abrir cuadro debug</button>
             <button type="button" id="settingsLogoutBtn" class="settings-logout">Cerrar sesión</button>
         </div>
     </div>
@@ -366,6 +389,6 @@
     </script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260919a"></script>
+    <script src="core.js?v=20260926a"></script>
 </body>
 </html>
