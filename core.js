@@ -3430,7 +3430,7 @@ let channelStartedAt = 0;
 function maskCredentials(value) {
   return (
     String(value || "")
-      .replace(/([?&](?:username|password|user|pass)=)[^&]*/gi, "$1***")
+      .replace(/([?&](?:username|password|user|pass|token)=)[^&]*/gi, "$1***")
       .replace(/\/(live|movie|series|play|stream|timeshift)\/[^/]+\/[^/]+\//gi, "/$1/***/***/")
       // Red de seguridad para paneles con rutas propias: el patrón
       // .../usuario/clave/12345.ts es común y la contraseña iba en claro en los
@@ -3441,8 +3441,8 @@ function maskCredentials(value) {
 
 function maskUrl(url) {
   let s = String(url || "");
-  // stream.php?url=... lleva la URL real codificada dentro.
-  s = s.replace(/([?&]url=)([^&]+)/i, (all, prefix, value) => {
+  // stream.php?url=... y el relé HLS (?u= / ?r=) llevan la URL real codificada.
+  s = s.replace(/([?&](?:url|u|r)=)([^&]+)/gi, (all, prefix, value) => {
     let inner = value;
     try {
       inner = decodeURIComponent(value);
@@ -5069,7 +5069,15 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         if (data.response && data.response.code) parts.push("HTTP " + data.response.code);
         if (data.reason) parts.push(data.reason);
         if (data.url) parts.push(maskUrl(data.url));
-        logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
+        const code = data.response && data.response.code;
+        if (data.details === "fragLoadError" && Number(code) === 403) {
+          logPlayback(
+            "aviso hls",
+            "fragmento 403: el origen rechazó el .ts (token o Referer). " + parts.filter(Boolean).join(" · ")
+          );
+        } else {
+          logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
+        }
         if (!data.fatal) return;
         if (hlsRecoveries < 3) {
           hlsRecoveries++;
@@ -6078,7 +6086,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926e");
+  url.searchParams.set("v", "20260926f");
   window.location.replace(url.toString());
 }
 
