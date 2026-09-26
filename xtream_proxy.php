@@ -177,7 +177,11 @@ if (isset($_GET['direct_url'])) {
         exit;
     }
     xtream_rate_or_fail();
-    list($response, $httpCode, $err) = xtream_fetch_playlist($url);
+    $timeout = 20;
+    if (stripos($url, '.m3u8') !== false && stripos($url, 'type=m3u') === false) {
+        $timeout = 12;
+    }
+    list($response, $httpCode, $err) = xtream_fetch_playlist($url, $timeout);
     if ($response && xtream_m3u_is_cacheable($response)) {
         player_cache_set($cacheKey, $response);
         if (stripos($url, 'http://') === 0) {

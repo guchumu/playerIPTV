@@ -97,9 +97,21 @@ let debugTitleTaps = 0;
 let debugTitleTimer = null;
 let currentFocus = { col: 1, row: 0 };
 
+let spinnerClock = null;
+let spinnerStartedAt = 0;
+let spinnerBaseMsg = "";
+
+function stopSpinnerClock() {
+  if (spinnerClock) {
+    clearInterval(spinnerClock);
+    spinnerClock = null;
+  }
+}
+
 function showSpinner(show, message) {
   // Ya dentro con canales: no tapar la lista (Validando/Actualizando en segundo plano).
   if (show && liveSession && channelsData.length > 0) {
+    stopSpinnerClock();
     if (globalSpinner) {
       globalSpinner.classList.remove("is-visible");
       globalSpinner.hidden = true;
@@ -109,8 +121,21 @@ function showSpinner(show, message) {
   if (globalSpinner) {
     globalSpinner.classList.toggle("is-visible", !!show);
     globalSpinner.hidden = !show;
-    if (globalSpinnerText && message) globalSpinnerText.textContent = message;
+    if (message) spinnerBaseMsg = message;
+    if (globalSpinnerText && (message || !show)) {
+      globalSpinnerText.textContent = message || spinnerBaseMsg || "Cargando...";
+    }
     if (show) {
+      refreshListDebug();
+      spinnerStartedAt = Date.now();
+      stopSpinnerClock();
+      spinnerClock = setInterval(() => {
+        const s = Math.round((Date.now() - spinnerStartedAt) / 1000);
+        if (globalSpinnerText) {
+          globalSpinnerText.textContent = (spinnerBaseMsg || "Conectando...") + " · " + s + "s";
+        }
+        refreshListDebug();
+      }, 1000);
       const btn = document.getElementById("spinnerCancelBtn");
       if (btn && isTvLayout()) {
         try {
@@ -121,6 +146,8 @@ function showSpinner(show, message) {
           } catch (err) {}
         }
       }
+    } else {
+      stopSpinnerClock();
     }
   }
 }
@@ -2182,12 +2209,14 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
   showSpinner(true, "Conectando...");
 
   const watchdog = setTimeout(() => {
+    loginCancelled = true;
     try {
       if (loginAbort) loginAbort.abort();
     } catch (e) {}
+    listLoadLog("timeout", "la carga no terminó a tiempo");
     showSpinner(false);
-    setLoginStatus("La carga tardó demasiado. Reintenta o usa Cancelar.");
-  }, 55000);
+    setLoginStatus("La carga tardó demasiado. Si pegaste la URL de un canal (…/live/id.m3u8), recarga: ahora se abre como un solo canal.");
+  }, 22000);
 
   serverUrl = (serverUrl || "").trim();
   username = (username || "").trim();
@@ -2207,6 +2236,18 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
         currentServer = new URL(m3uUrl).origin;
       } catch (err) {}
       currentUser = { username: "Invitado M3U", isM3U: true, m3uUrl: m3uUrl, server: currentServer };
+      if (urlLooksLikeSingleStream(m3uUrl)) {
+        showSpinner(true, "Abriendo canal…");
+        await saveSession(currentUser);
+        adoptSingleStreamChannel(m3uUrl, listName);
+        const streamEntry = await upsertSavedList(currentUser, listName || "Canal directo");
+        tagChannelsWithList(streamEntry);
+        pendingListName = null;
+        if (streamEntry && !(opts && opts.noActivate)) setActiveListId(streamEntry.id);
+        enterChannelView(currentUser);
+        showSpinner(false);
+        return true;
+      }
       saveSession(currentUser);
       const cachedM3u = skipCache ? null : await withTimeout(readListCache(currentUser), 1500, null);
       if (cachedM3u && !detectProviderListError(cachedM3u)) {
@@ -2222,7 +2263,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
 
       const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
       loginAbort = ac;
-      const m3uTimer = ac ? setTimeout(() => ac.abort(), 45000) : null;
+      showSpinner(true, "Descargando lista…");
+      const m3uTimer = ac ? setTimeout(() => ac.abort(), 18000) : null;
       let response;
       try {
         response = await fetch("xtream_proxy.php?direct_url=" + encodeURIComponent(m3uUrl), {
@@ -2267,9 +2309,13 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
       const listaConError = detectProviderListError(m3uContent);
       if (!applyListOrKeep(m3uContent)) {
-        throw new Error(
-          listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
-        );
+        if (looksLikeHlsMediaPlaylist(m3uContent) || urlLooksLikeSingleStream(m3uUrl)) {
+          adoptSingleStreamChannel(m3uUrl, listName);
+        } else {
+          throw new Error(
+            listaConError ? "El proveedor responde: " + listaConError : "La lista no contiene canales"
+          );
+        }
       }
       const entry = await upsertSavedList(currentUser, listName || defaultListName(currentUser, listName));
       tagChannelsWithList(entry);
@@ -2365,7 +2411,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       saveSession(currentUser);
       if (!(liveSession && channelsData.length)) {
         setLoginStatus("Descargando canales...");
-        showSpinner(true, "Descargando canales...");
+        showSpinner(true, "Descargando canales…");
       }
       try {
         await loadM3UFromXtream();
@@ -3123,12 +3169,17 @@ function detectProviderListError(content) {
 }
 
 async function loadM3UFromXtream() {
-  const response = await fetchXtream("get.php", {
-    username: currentUser.username,
-    password: currentUser.password,
-    type: "m3u_plus",
-    output: "ts",
-  });
+  const response = await fetchXtream(
+    "get.php",
+    {
+      username: currentUser.username,
+      password: currentUser.password,
+      type: "m3u_plus",
+      output: "ts",
+    },
+    currentServer,
+    { timeoutMs: 22000 }
+  );
   if (response.status === 401 || response.status === 403) {
     throw new Error("El proveedor rechaza la cuenta: usuario, contraseña o suscripción no válidos");
   }
@@ -4602,6 +4653,58 @@ function urlLooksLikeTs(url) {
   return /\.ts(\?|$)/i.test(u) || u.toLowerCase().includes(".ts");
 }
 
+function urlLooksLikeSingleStream(url) {
+  const u = String(url || "").trim();
+  if (!u) return false;
+  if (/[?&]type=m3u(_plus)?\b/i.test(u)) return false;
+  if (/\/get\.php\b/i.test(u)) return false;
+  if (/\.m3u(\?|$)/i.test(u) && !/\.m3u8/i.test(u)) return false;
+  return urlLooksLikeHls(u) || urlLooksLikeTs(u);
+}
+
+function looksLikeHlsMediaPlaylist(text) {
+  const t = String(text || "");
+  if (!/#EXTM3U/i.test(t)) return false;
+  if (!/#EXT-X-TARGETDURATION|#EXT-X-MEDIA-SEQUENCE|#EXT-X-STREAM-INF|#EXT-X-INDEPENDENT-SEGMENTS/i.test(t)) {
+    return false;
+  }
+  if (/group-title="/i.test(t)) return false;
+  const entries = extractM3UEntries(t);
+  return !entries.some((e) => isStreamUrl(e.url));
+}
+
+function adoptSingleStreamChannel(url, name) {
+  const label = (name && String(name).trim()) || "Canal directo";
+  const ch = {
+    name: label,
+    category: "Directo",
+    tvgId: "",
+    logo: "",
+    chno: 1,
+    id: "ch_direct_" + String(url).replace(/[^a-zA-Z0-9]/g, "_").slice(-48),
+    url: url,
+    listId: "",
+    listName: label,
+    qualityHint: extractQualityHint(label),
+  };
+  channelsData = [ch];
+  categoriesData = { Directo: [ch] };
+  channelById = new Map([[ch.id, ch]]);
+  lastParseDebug = {
+    bytes: 0,
+    lines: 1,
+    extinf: 1,
+    parsed: 1,
+    categories: 1,
+    skipped: 0,
+    skippedSamples: [],
+    ms: 0,
+    user: currentUser ? currentUser.username : "",
+    mode: "stream",
+  };
+  listLoadLog("lista", "es un canal HLS suelto, no un listado · 1 canal");
+}
+
 function isHttpOnHttpsPage(url) {
   return location.protocol === "https:" && /^http:\/\//i.test(String(url || ""));
 }
@@ -5827,7 +5930,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926b");
+  url.searchParams.set("v", "20260926c");
   window.location.replace(url.toString());
 }
 
