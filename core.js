@@ -99,6 +99,7 @@ let mpegtsPlayer = null;
 let nativePlaybackActive = false;
 let nativeFullscreen = false;
 const BUFFER_KEY = "streambox_buffer";
+const GROUP_Q_KEY = "streambox_group_quality";
 const AUDIO_BOOST_KEY = "streambox_audio_boost";
 const LAST_LIST_KEY = "streambox_last_list";
 const SAVED_LISTS_KEY = "streambox_saved_lists";
@@ -641,7 +642,7 @@ function focusTvHeader(index) {
 
 function enterTvChannelsColumn() {
   currentFocus.col = 1;
-  const playing = virtualList.findIndex((ch) => ch && String(ch.id) === String(currentlyPlayingId));
+  const playing = findVirtualIndexByChannelId(currentlyPlayingId);
   currentFocus.row = playing >= 0 ? playing : 0;
   ensureTvChannelVisible();
 }
@@ -676,6 +677,223 @@ function extractQualityHint(name) {
   if (/\b(720p?|HD)\b/i.test(n)) return "720p";
   if (/\bSD\b/i.test(n)) return "SD";
   return "";
+}
+
+function splitCountryPrefix(name) {
+  const raw = String(name || "").trim();
+  let m = raw.match(/^(EU\|[A-Z]{2})\s+(.*)$/i);
+  if (m) return { prefix: m[1].toUpperCase() + " ", rest: m[2] };
+  m = raw.match(/^([A-Z]{2})\s*[:|\-]\s*(.*)$/i);
+  if (m) return { prefix: m[1].toUpperCase() + ": ", rest: m[2] };
+  return { prefix: "", rest: raw };
+}
+
+function stripQualityTokens(name) {
+  const parts = splitCountryPrefix(name);
+  const rest = parts.rest
+    .replace(
+      /\b(?:FULL\s*HD|FULLHD|FHD|1080P|1080|720P|720|480P|2160P|4K|UHD|HEVC|H\.?265|H265|50\s*FPS|60\s*FPS|50FPS|60FPS|HDR|HD|SD)\b/gi,
+      " "
+    )
+    .replace(/[\[\](){}]/g, " ")
+    .replace(/[-–—_|/.,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (parts.prefix + rest).replace(/\s+/g, " ").trim();
+}
+
+function qualityChipLabel(name) {
+  const n = String(name || "");
+  if (/\b(4K|2160P?|UHD)\b/i.test(n)) return "4K";
+  if (/\b(FHD|FULLHD|FULL\s*HD|1080P?)\b/i.test(n)) return "FHD";
+  if (/\b(720P?|HD)\b/i.test(n)) return "HD";
+  if (/\b(SD|480P)\b/i.test(n)) return "SD";
+  return "";
+}
+
+function extraChipLabel(name) {
+  const n = String(name || "");
+  if (/\b(HEVC|H\.?265|H265)\b/i.test(n)) return "HEVC";
+  if (/\bHDR\b/i.test(n)) return "HDR";
+  if (/\b60(?:\s*FPS|FPS)\b/i.test(n)) return "60";
+  if (/\b50(?:\s*FPS|FPS)\b/i.test(n)) return "50";
+  return "";
+}
+
+function qualityRank(name) {
+  const q = qualityChipLabel(name);
+  if (q === "4K") return 40;
+  if (q === "FHD") return 30;
+  if (q === "HD") return 20;
+  if (q === "SD") return 10;
+  if (extraChipLabel(name) === "HEVC") return 8;
+  if (extraChipLabel(name)) return 5;
+  return 0;
+}
+
+function compareVariantQuality(a, b) {
+  const d = qualityRank(b.name) - qualityRank(a.name);
+  if (d) return d;
+  return (a.chno || 0) - (b.chno || 0);
+}
+
+function variantChipLabels(variants) {
+  const parts = variants.map((v) => ({
+    q: qualityChipLabel(v.name),
+    extra: extraChipLabel(v.name),
+  }));
+  const bases = parts.map((p) => p.q || p.extra || "STD");
+  const counts = {};
+  bases.forEach((b) => {
+    counts[b] = (counts[b] || 0) + 1;
+  });
+  return parts.map((p, i) => {
+    const base = bases[i];
+    if (counts[base] > 1 && p.extra && p.extra !== base) return p.extra;
+    return base;
+  });
+}
+
+function channelGroupKey(ch) {
+  return String((ch && ch.category) || "") + "||" + stripQualityTokens((ch && ch.name) || "").toLowerCase();
+}
+
+function channelGroupTitle(name) {
+  return stripQualityTokens(name);
+}
+
+function readGroupQualityMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GROUP_Q_KEY) || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function rememberGroupQuality(groupKey, channelId) {
+  if (!groupKey || channelId == null || channelId === "") return;
+  const map = readGroupQualityMap();
+  map[groupKey] = String(channelId);
+  try {
+    localStorage.setItem(GROUP_Q_KEY, JSON.stringify(map));
+  } catch (e) {}
+}
+
+function highestQualityVariant(variants) {
+  const list = variants && variants.length ? variants : [];
+  if (!list.length) return null;
+  return list.slice().sort(compareVariantQuality)[0];
+}
+
+function preferredGroupChannel(groupKey, variants) {
+  const list = variants && variants.length ? variants : [];
+  if (!list.length) return null;
+  if (groupKey) {
+    const saved = readGroupQualityMap()[groupKey];
+    if (saved) {
+      const found = list.find((v) => String(v.id) === String(saved));
+      if (found) return found;
+    }
+  }
+  return highestQualityVariant(list);
+}
+
+function groupLogoChannel(variants) {
+  const withLogo = (variants || []).filter((v) => v && v.logo);
+  if (withLogo.length) return withLogo.slice().sort(compareVariantQuality)[0];
+  return highestQualityVariant(variants);
+}
+
+function makeGridGroup(key, variants) {
+  const ordered = variants.slice().sort(compareVariantQuality);
+  const playable = preferredGroupChannel(key, ordered);
+  const logoCh = groupLogoChannel(ordered);
+  return {
+    id: playable.id,
+    name: playable.name,
+    url: playable.url,
+    category: playable.category,
+    tvgId: playable.tvgId,
+    logo: (logoCh && logoCh.logo) || playable.logo || "",
+    chno: variants[0].chno || playable.chno,
+    listId: playable.listId,
+    listName: playable.listName,
+    qualityHint: extractQualityHint(playable.name),
+    groupKey: key,
+    groupTitle: channelGroupTitle(variants[0].name),
+    variants: ordered,
+  };
+}
+
+function groupChannelsForGrid(channels) {
+  const map = new Map();
+  const order = [];
+  (channels || []).forEach((ch) => {
+    const key = channelGroupKey(ch);
+    if (!map.has(key)) {
+      map.set(key, []);
+      order.push(key);
+    }
+    map.get(key).push(ch);
+  });
+  return order.map((key) => makeGridGroup(key, map.get(key)));
+}
+
+function itemContainsChannel(item, channelId) {
+  if (!item || channelId == null || channelId === "") return false;
+  const id = String(channelId);
+  if (item.variants && item.variants.length) {
+    return item.variants.some((v) => String(v.id) === id);
+  }
+  return String(item.id) === id;
+}
+
+function virtualRowId(item) {
+  return (item && (item.groupKey || item.id)) || "";
+}
+
+function findVirtualIndexByChannelId(channelId) {
+  return virtualList.findIndex((item) => itemContainsChannel(item, channelId));
+}
+
+function findChannelRowEl(channelOrId) {
+  if (!channelsContainer) return null;
+  const id = channelOrId && typeof channelOrId === "object" ? channelOrId.id : channelOrId;
+  if (id == null || id === "") return null;
+  const sid = String(id);
+  const items = channelsContainer.querySelectorAll(".channel-item");
+  for (let i = 0; i < items.length; i++) {
+    const el = items[i];
+    if (el.dataset.id === sid) return el;
+    const ids = (el.dataset.variantIds || "").split(" ");
+    if (ids.indexOf(sid) >= 0) return el;
+  }
+  return null;
+}
+
+function rowPlaysChannel(el, channelId) {
+  if (!el) return false;
+  const id = String(channelId);
+  if (el.dataset.id === id) return true;
+  return (el.dataset.variantIds || "").split(" ").indexOf(id) >= 0;
+}
+
+function resolvePlayable(item) {
+  if (!item) return null;
+  if (item.variants && item.variants.length) {
+    return preferredGroupChannel(item.groupKey, item.variants);
+  }
+  return item;
+}
+
+function expandHitsToGroups(hits) {
+  if (!hits.length) return hits;
+  const keys = {};
+  hits.forEach((ch) => {
+    keys[channelGroupKey(ch)] = true;
+  });
+  return channelsData.filter((ch) => keys[channelGroupKey(ch)]);
 }
 
 function getBufferSeconds() {
@@ -1223,6 +1441,7 @@ const ENGINE_KEY = "streambox_native_engine";
 const signCache = new Map();
 let playGen = 0;
 let virtualList = [];
+let sourceChannelList = [];
 let virtualRange = { start: -1, end: -1, cols: 0 };
 
 function bytesToB64(bytes) {
@@ -4191,72 +4410,124 @@ function buildChannelThumb(channel) {
   return img;
 }
 
-function buildChannelRow(channel) {
+function activateListedChannel(channel, groupItem) {
+  if (!channel) return;
+  if (groupItem && groupItem.groupKey) rememberGroupQuality(groupItem.groupKey, channel.id);
+  const playingThis = String(currentlyPlayingId) === String(channel.id);
+  const playingGroup = groupItem && itemContainsChannel(groupItem, currentlyPlayingId);
+  if (isTvLayout()) {
+    if (playingThis || playingGroup) enterNativeFullscreen();
+    else selectChannel(channel);
+    return;
+  }
+  if (playingThis) {
+    if (nativePlayerPlugin()) playChannel(channel);
+    else toggleFullscreen();
+  } else selectChannel(channel);
+}
+
+function buildChannelRow(item) {
+  const variants = item.variants && item.variants.length ? item.variants : [item];
+  const grouped = isChannelGrid() && variants.length > 1;
+  const playable = grouped ? preferredGroupChannel(item.groupKey, variants) : item;
+  const rowId = grouped ? item.groupKey : item.id;
+
   const channelDiv = document.createElement("div");
-  channelDiv.className = "channel-item";
-  channelDiv.dataset.id = channel.id;
+  channelDiv.className = "channel-item" + (grouped ? " has-qchips" : "");
+  channelDiv.dataset.id = rowId;
+  if (grouped) channelDiv.dataset.variantIds = variants.map((v) => v.id).join(" ");
 
   const chno = document.createElement("span");
   chno.className = "channel-chno";
-  chno.textContent = channel.chno || "";
+  chno.textContent = item.chno || playable.chno || "";
   channelDiv.appendChild(chno);
 
-  channelDiv.appendChild(buildChannelThumb(channel));
+  channelDiv.appendChild(
+    buildChannelThumb({
+      name: item.groupTitle || item.name,
+      logo: item.logo,
+    })
+  );
 
   const info = document.createElement("div");
   info.className = "channel-info";
   const nameEl = document.createElement("div");
   nameEl.className = "channel-name";
-  nameEl.textContent = displayName(channel.name);
-  nameEl.title = channel.name;
+  nameEl.textContent = isChannelGrid() ? item.groupTitle || channelGroupTitle(item.name) : displayName(item.name);
+  nameEl.title = grouped ? variants.map((v) => v.name).join(" · ") : item.name;
   info.appendChild(nameEl);
 
-  const epgEl = document.createElement("div");
-  epgEl.className = "channel-epg";
-  if (searchQuery && channel.category) {
-    epgEl.textContent = displayCategoryName(channel.category);
-  } else if (hasEPG()) {
-    epgEl.textContent = channelEpgLabel(channel);
+  if (!grouped) {
+    const epgEl = document.createElement("div");
+    epgEl.className = "channel-epg";
+    if (searchQuery && item.category) {
+      epgEl.textContent = displayCategoryName(item.category);
+    } else if (hasEPG()) {
+      epgEl.textContent = channelEpgLabel(playable);
+    }
+    epgEl.hidden = !epgEl.textContent;
+    if (epgEl.textContent) info.appendChild(epgEl);
   }
-  epgEl.hidden = !epgEl.textContent;
-  if (epgEl.textContent) info.appendChild(epgEl);
   channelDiv.appendChild(info);
 
+  const favTarget = playable;
+  const favOn = grouped ? variants.some((v) => isFavorite(v.id)) : isFavorite(favTarget.id);
   const favBtn = document.createElement("button");
   favBtn.type = "button";
-  favBtn.className = "fav-btn" + (isFavorite(channel.id) ? " is-on" : "");
-  favBtn.dataset.id = channel.id;
+  favBtn.className = "fav-btn" + (favOn ? " is-on" : "");
+  favBtn.dataset.id = favTarget.id;
   favBtn.title = "Favorito";
   favBtn.setAttribute("aria-label", "Marcar favorito");
   if (isTvLayout()) favBtn.tabIndex = -1;
   favBtn.innerHTML = STAR_SVG;
   favBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    toggleFavorite(channel);
+    toggleFavorite(favTarget);
   });
   channelDiv.appendChild(favBtn);
 
-  const qHint = extractQualityHint(channel.name);
-  if (qHint) {
-    const qEl = document.createElement("span");
-    qEl.className = "channel-q";
-    qEl.textContent = qHint;
-    channelDiv.appendChild(qEl);
+  if (grouped) {
+    const chips = document.createElement("div");
+    chips.className = "channel-qchips";
+    const labels = variantChipLabels(variants);
+    const playingId = currentlyPlayingId != null ? String(currentlyPlayingId) : "";
+    const playingInGroup = playingId && variants.some((v) => String(v.id) === playingId);
+    const preferredId = String(playable.id);
+    variants.forEach((variant, i) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "qchip";
+      chip.dataset.id = variant.id;
+      chip.textContent = labels[i];
+      chip.title = variant.name;
+      chip.setAttribute("aria-label", labels[i] + " · " + variant.name);
+      if (isTvLayout()) chip.tabIndex = -1;
+      if (playingInGroup ? String(variant.id) === playingId : String(variant.id) === preferredId) {
+        chip.classList.add("is-on");
+      }
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        rememberGroupQuality(item.groupKey, variant.id);
+        activateListedChannel(variant, item);
+      });
+      chips.appendChild(chip);
+    });
+    channelDiv.appendChild(chips);
+  } else if (isChannelGrid()) {
+    const qHint = qualityChipLabel(item.name) || extractQualityHint(item.name);
+    if (qHint) {
+      const qEl = document.createElement("span");
+      qEl.className = "channel-q";
+      qEl.textContent = qHint;
+      channelDiv.appendChild(qEl);
+    }
   }
 
   channelDiv.addEventListener("click", () => {
-    if (isTvLayout()) {
-      if (currentlyPlayingId === channel.id) enterNativeFullscreen();
-      else selectChannel(channel);
-      return;
-    }
-    if (currentlyPlayingId === channel.id) {
-      if (nativePlayerPlugin()) playChannel(channel);
-      else toggleFullscreen();
-    } else selectChannel(channel);
+    activateListedChannel(playable, grouped ? item : null);
   });
-  if (currentlyPlayingId === channel.id) channelDiv.classList.add("playing");
-  else if (peekLastChannelId() === channel.id) channelDiv.classList.add("last");
+  if (itemContainsChannel(item, currentlyPlayingId)) channelDiv.classList.add("playing");
+  else if (variants.some((v) => String(v.id) === peekLastChannelId())) channelDiv.classList.add("last");
 
   return channelDiv;
 }
@@ -4286,7 +4557,14 @@ function applyChannelView(mode, opts) {
     btn.setAttribute("aria-label", btn.title);
     btn.setAttribute("aria-pressed", grid ? "true" : "false");
   }
-  if (!(opts && opts.skipPaint)) paintVirtualWindow(true);
+  if (!(opts && opts.skipPaint)) {
+    if (searchQuery) runChannelSearch(searchQuery);
+    else {
+      virtualList = buildVirtualList(sourceChannelList);
+      virtualRange = { start: -1, end: -1, cols: 0 };
+      paintVirtualWindow(true);
+    }
+  }
 }
 
 function initChannelView() {
@@ -4310,9 +4588,10 @@ function channelGridCols() {
 
 function channelCardHeight() {
   if (isChannelGrid()) {
-    if (document.body.classList.contains("is-tv")) return 172;
-    if ((window.innerWidth || 0) < 560) return 158;
-    return 156;
+    if (document.body.classList.contains("is-tv")) return 184;
+    if ((window.innerWidth || 0) < 560) return 168;
+    if (document.body.classList.contains("ui-large")) return 180;
+    return 168;
   }
   if (document.body.classList.contains("is-tv")) return 64;
   if (document.body.classList.contains("ui-large")) return 72;
@@ -4338,9 +4617,24 @@ function bindVirtualScroll() {
   }
 }
 
+function buildVirtualList(channels) {
+  const src = Array.isArray(channels) ? channels : [];
+  const sorted =
+    currentCategory === FAV_NAME || currentCategory === HIST_NAME ? src.slice() : applySort(src);
+  const list = isChannelGrid() ? groupChannelsForGrid(sorted) : sorted;
+  if (isChannelGrid() && sortMode() === "az") {
+    return list.slice().sort((a, b) =>
+      String(a.groupTitle || displayName(a.name)).localeCompare(String(b.groupTitle || displayName(b.name)), "es", {
+        sensitivity: "base",
+      })
+    );
+  }
+  return list;
+}
+
 function renderChannels(channels) {
-  virtualList =
-    currentCategory === FAV_NAME || currentCategory === HIST_NAME ? channels.slice() : applySort(channels);
+  sourceChannelList = Array.isArray(channels) ? channels.slice() : [];
+  virtualList = buildVirtualList(sourceChannelList);
   virtualRange = { start: -1, end: -1, cols: 0 };
   if (!channelsContainer) return;
   bindVirtualScroll();
@@ -4399,7 +4693,7 @@ function runChannelSearch(query) {
     return;
   }
   const needle = normalizeSearch(searchQuery);
-  const hits = channelsData.filter(
+  let hits = channelsData.filter(
     (ch) =>
       normalizeSearch(ch.name).indexOf(needle) >= 0 ||
       normalizeSearch(displayName(ch.name)).indexOf(needle) >= 0 ||
@@ -4407,10 +4701,12 @@ function runChannelSearch(query) {
       normalizeSearch(displayCategoryName(ch.category)).indexOf(needle) >= 0 ||
       String(ch.chno) === searchQuery
   );
+  if (isChannelGrid()) hits = expandHitsToGroups(hits);
   document.querySelectorAll(".category-btn").forEach((b) => b.classList.remove("active"));
   renderChannels(hits);
   if (channelColumnTitle) {
-    channelColumnTitle.textContent = hits.length === 1 ? "1 resultado" : hits.length + " resultados";
+    const n = virtualList.length;
+    channelColumnTitle.textContent = n === 1 ? "1 resultado" : n + " resultados";
   }
 }
 
@@ -4470,9 +4766,13 @@ function commitZap() {
   searchQuery = "";
   if (channel.category && categoriesData[channel.category]) selectCategory(channel.category);
   selectChannel(channel);
-  const el = channelsContainer
-    ? channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(channel.id)) + '"]')
-    : null;
+  const idx = findVirtualIndexByChannelId(channel.id);
+  if (idx >= 0) {
+    currentFocus.col = 1;
+    currentFocus.row = idx;
+    ensureTvChannelVisible();
+  }
+  const el = findChannelRowEl(channel.id);
   if (el) el.scrollIntoView({ block: "nearest" });
 }
 
@@ -5846,7 +6146,7 @@ function stopChannel(reason) {
   activeConnection = null;
   document.querySelectorAll(".channel-item").forEach((item) => {
     item.classList.remove("playing");
-    if (peekLastChannelId() === item.dataset.id) item.classList.add("last");
+    item.classList.toggle("last", rowPlaysChannel(item, peekLastChannelId()));
   });
   if (epgNowEl) epgNowEl.textContent = "--:--";
   if (epgNextEl) epgNextEl.textContent = "--:--";
@@ -5954,10 +6254,16 @@ function selectChannel(channel) {
   if (!channel) return;
   currentlyPlayingId = channel.id;
   rememberHistory(channel);
+  const group = virtualList.find((item) => itemContainsChannel(item, channel.id));
+  if (group && group.groupKey) rememberGroupQuality(group.groupKey, channel.id);
   renderCategoryButtons(true);
-  document.querySelectorAll(".channel-item").forEach((item) => {
-    item.classList.toggle("playing", item.dataset.id === channel.id);
-    item.classList.remove("last");
+  document.querySelectorAll(".channel-item").forEach((el) => {
+    const on = rowPlaysChannel(el, channel.id);
+    el.classList.toggle("playing", on);
+    el.classList.remove("last");
+    el.querySelectorAll(".qchip").forEach((chip) => {
+      chip.classList.toggle("is-on", chip.dataset.id === String(channel.id));
+    });
   });
   playChannel(channel);
   refreshPlayerEPG();
@@ -5979,20 +6285,18 @@ function restoreLastChannel() {
     const category = saved.cat && categoriesData[saved.cat] ? saved.cat : channel.category;
     if (category && categoriesData[category]) selectCategory(category);
 
-    const el = channelsContainer
-      ? channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(channel.id)) + '"]')
-      : null;
-    if (el) {
-      el.classList.add("last");
-      el.scrollIntoView({ block: "nearest" });
-    }
-    const items = Array.from(document.querySelectorAll(".channel-item"));
-    const idx = items.indexOf(el);
+    const el = findChannelRowEl(channel.id);
+    const idx = findVirtualIndexByChannelId(channel.id);
     if (idx >= 0) {
       currentFocus.col = 1;
       currentFocus.row = idx;
       if (isTvLayout()) ensureTvChannelVisible();
       updateCursorVisuals();
+    }
+    const marked = findChannelRowEl(channel.id) || el;
+    if (marked) {
+      marked.classList.add("last");
+      marked.scrollIntoView({ block: "nearest" });
     }
     return true;
   } catch (e) {
@@ -6684,7 +6988,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926i");
+  url.searchParams.set("v", "20260926j");
   window.location.replace(url.toString());
 }
 
@@ -6820,9 +7124,8 @@ function initTvLoginFocus() {
 // que se está viendo, para poder seguir zapeando con el mando.
 function focusChannelList() {
   currentFocus.col = 1;
-  const playing = virtualList.findIndex((ch) => ch && String(ch.id) === String(currentlyPlayingId));
-  const lastId = peekLastChannelId();
-  const last = virtualList.findIndex((ch) => ch && String(ch.id) === String(lastId));
+  const playing = findVirtualIndexByChannelId(currentlyPlayingId);
+  const last = findVirtualIndexByChannelId(peekLastChannelId());
   if (playing >= 0) currentFocus.row = playing;
   else if (last >= 0) currentFocus.row = last;
   else currentFocus.row = Math.min(currentFocus.row || 0, Math.max(0, virtualList.length - 1));
@@ -6840,7 +7143,9 @@ function markTvCursor() {
   if (currentFocus.col !== 1) return;
   const ch = virtualList[currentFocus.row];
   if (!ch || !channelsContainer) return;
-  const el = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+  const el = channelsContainer.querySelector(
+    '.channel-item[data-id="' + CSS.escape(String(virtualRowId(ch))) + '"]'
+  );
   if (el) el.classList.add("cursor");
 }
 
@@ -6851,17 +7156,21 @@ function tvFocusedChannel() {
 function toggleTvFavorite() {
   const ch = tvFocusedChannel();
   if (!ch) return false;
-  toggleFavorite(ch);
-  showToast(isFavorite(ch.id) ? "Añadido a Favoritos" : "Quitado de Favoritos");
+  const target = resolvePlayable(ch);
+  if (!target) return false;
+  toggleFavorite(target);
+  showToast(isFavorite(target.id) ? "Añadido a Favoritos" : "Quitado de Favoritos");
   markTvCursor();
   return true;
 }
 
 function activateTvChannel() {
-  const ch = tvFocusedChannel();
-  if (!ch) return;
-  if (currentlyPlayingId === ch.id) enterNativeFullscreen();
-  else selectChannel(ch);
+  const item = tvFocusedChannel();
+  if (!item) return;
+  const channel = resolvePlayable(item);
+  if (!channel) return;
+  if (itemContainsChannel(item, currentlyPlayingId)) enterNativeFullscreen();
+  else selectChannel(channel);
 }
 
 let tvOkHoldTimer = null;
@@ -7186,7 +7495,9 @@ function updateCursorVisuals() {
   } else if (currentFocus.col === 1) {
     const ch = virtualList[currentFocus.row];
     if (ch && channelsContainer) {
-      target = channelsContainer.querySelector('.channel-item[data-id="' + CSS.escape(String(ch.id)) + '"]');
+      target = channelsContainer.querySelector(
+        '.channel-item[data-id="' + CSS.escape(String(virtualRowId(ch))) + '"]'
+      );
     }
     if (!target) target = document.querySelectorAll(".channel-item")[currentFocus.row];
   }

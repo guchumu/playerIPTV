@@ -1020,11 +1020,11 @@ body.channels-as-grid .channel-item {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  height: 156px;
-  min-height: 156px;
-  max-height: 156px;
-  padding: 12px 8px 8px;
-  gap: 6px;
+  height: 168px;
+  min-height: 168px;
+  max-height: 168px;
+  padding: 10px 8px 8px;
+  gap: 5px;
   text-align: center;
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
 }
@@ -1040,9 +1040,9 @@ body.channels-as-grid .channel-logo,
 body.channels-as-grid .channel-logo-fallback {
   display: flex;
   flex-shrink: 0;
-  width: 72px;
-  height: 72px;
-  margin: 6px auto 0;
+  width: 64px;
+  height: 64px;
+  margin: 4px auto 0;
   border-radius: 14px;
   font-size: 1.05rem;
 }
@@ -1076,10 +1076,50 @@ body.channels-as-grid .channel-q {
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #c7d2fe;
-  background: rgba(67, 56, 202, 0.85);
+  color: #e2e8f0;
+  background: rgba(67, 56, 202, 0.9);
   border-radius: 4px;
   padding: 1px 5px;
+}
+.channel-qchips { display: none; }
+body.channels-as-grid .channel-qchips {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  margin-top: auto;
+  min-height: 20px;
+  max-height: 20px;
+  overflow: hidden;
+  padding: 0 2px;
+}
+body.channels-as-grid .channel-item.has-qchips .channel-q { display: none; }
+body.channels-as-grid .channel-item.has-qchips .channel-epg { display: none; }
+.qchip {
+  appearance: none;
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(165, 180, 252, 0.55);
+  border-radius: 4px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.qchip.is-on {
+  color: #0f172a;
+  background: #a5b4fc;
+  border-color: #c7d2fe;
+}
+.qchip:focus-visible {
+  outline: 2px solid #fbbf24;
+  outline-offset: 1px;
 }
 
 /********** COLUMNA PLAYER **********/
@@ -2158,16 +2198,16 @@ body.is-tv .channel-item {
 body.is-tv .channels-grid { gap: 4px; }
 body.is-tv.channels-as-grid .channels-grid { gap: 10px; }
 body.is-tv.channels-as-grid .channel-item {
-  min-height: 172px;
-  height: 172px;
-  max-height: 172px;
+  min-height: 184px;
+  height: 184px;
+  max-height: 184px;
   border-radius: 12px;
   padding: 12px 8px 8px;
 }
 body.is-tv.channels-as-grid .channel-logo,
 body.is-tv.channels-as-grid .channel-logo-fallback {
-  width: 84px;
-  height: 84px;
+  width: 72px;
+  height: 72px;
   font-size: 1.2rem;
 }
 body.is-tv.channels-as-grid .channel-name { font-size: 0.88rem; }
@@ -2358,16 +2398,16 @@ body.is-tv .tv-fav-empty {
   .channel-item { min-height: 64px; height: 64px; max-height: 64px; }
   body.channels-as-grid .channel-item,
   body.ui-large.channels-as-grid .channel-item {
-    min-height: 158px;
-    height: 158px;
-    max-height: 158px;
+    min-height: 168px;
+    height: 168px;
+    max-height: 168px;
   }
   body.channels-as-grid .channel-logo,
   body.channels-as-grid .channel-logo-fallback,
   body.ui-large.channels-as-grid .channel-logo,
   body.ui-large.channels-as-grid .channel-logo-fallback {
-    width: 72px;
-    height: 72px;
+    width: 64px;
+    height: 64px;
   }
   .header-right span { display: none; }
 }
@@ -2432,9 +2472,9 @@ body.ui-large { font-size: 18px; }
 body.ui-large .category-btn,
 body.ui-large .channel-item { font-size: 1.05rem; height: 72px; min-height: 72px; max-height: 72px; }
 body.ui-large.channels-as-grid .channel-item {
-  height: 168px;
-  min-height: 168px;
-  max-height: 168px;
+  height: 180px;
+  min-height: 180px;
+  max-height: 180px;
 }
 body.ui-large .channel-name { font-size: 0.98rem; text-align: left; }
 body.ui-large .channel-logo,
@@ -2451,9 +2491,14 @@ body.ui-contrast .compact-header {
   border-color: #fff;
   color: #fff;
 }
-body.ui-contrast .category-btn.active {
-  background: #fff;
+body.ui-contrast .qchip {
+  color: #fff;
+  background: #000;
+  border-color: #fff;
+}
+body.ui-contrast .qchip.is-on {
   color: #000;
+  background: #fff;
 }
 
 /********** DEBUG: oculto salvo html.is-debug (?debug=1 / localStorage streambox_debug=1) **********/
