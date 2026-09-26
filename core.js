@@ -4857,11 +4857,256 @@ function isHttpOnHttpsPage(url) {
   return location.protocol === "https:" && /^http:\/\//i.test(String(url || ""));
 }
 
+function rawQueryParam(qsOrUrl, name) {
+  let q = String(qsOrUrl || "");
+  try {
+    if (/^https?:\/\//i.test(q) || q.charAt(0) === "/" || q.indexOf("?") >= 0) {
+      const u = q.indexOf("://") >= 0 || q.charAt(0) === "/" ? new URL(q, location.href) : null;
+      q = u ? u.search.slice(1) : q.replace(/^[^?]*\?/, "");
+    }
+  } catch (e) {
+    const i = q.indexOf("?");
+    if (i >= 0) q = q.slice(i + 1);
+  }
+  const parts = String(q || "").replace(/^\?/, "").split("&");
+  for (let i = 0; i < parts.length; i++) {
+    const pair = parts[i];
+    if (!pair) continue;
+    const eq = pair.indexOf("=");
+    let k = eq < 0 ? pair : pair.slice(0, eq);
+    try {
+      k = decodeURIComponent(k);
+    } catch (e) {}
+    if (k !== name) continue;
+    const v = eq < 0 ? "" : pair.slice(eq + 1);
+    try {
+      return decodeURIComponent(v);
+    } catch (e) {
+      return v;
+    }
+  }
+  return "";
+}
+
+function originPlaylistFromProxyUrl(proxyUrl) {
+  return rawQueryParam(proxyUrl, "u");
+}
+
+function mergeAuthQuery(absHref, originPlaylistUrl) {
+  try {
+    const abs = new URL(absHref);
+    const origin = new URL(originPlaylistUrl);
+    const originQ = origin.search ? origin.search.slice(1) : "";
+    if (!originQ) return abs.href;
+    if (!abs.search) {
+      abs.search = origin.search;
+      return abs.href;
+    }
+    const have = {};
+    abs.search
+      .slice(1)
+      .split("&")
+      .forEach((p) => {
+        const eq = p.indexOf("=");
+        const k = (eq < 0 ? p : p.slice(0, eq)).toLowerCase();
+        if (k) have[k] = true;
+      });
+    const extra = [];
+    originQ.split("&").forEach((p) => {
+      if (!p) return;
+      const eq = p.indexOf("=");
+      const k = (eq < 0 ? p : p.slice(0, eq)).toLowerCase();
+      if (k && !have[k] && /^(user|token|username|password|utc|lutc)$/.test(k)) extra.push(p);
+    });
+    if (extra.length) abs.search = abs.search + "&" + extra.join("&");
+    return abs.href;
+  } catch (e) {
+    return absHref;
+  }
+}
+
+function encodeHlsProxyHref(absUrl, refererUrl) {
+  let href = "hls_proxy.php?u=" + encodeURIComponent(absUrl);
+  if (refererUrl) href += "&r=" + encodeURIComponent(refererUrl);
+  return href;
+}
+
+function fixUnencodedProxyHref(uri) {
+  const t = String(uri || "");
+  if (!/hls_proxy\.php\?/i.test(t)) return t;
+  const um = t.match(/[?&]u=([^&]*)/);
+  if (!um) return t;
+  if (/^https?%3A/i.test(um[1])) return t;
+  let decoded = um[1];
+  try {
+    decoded = decodeURIComponent(um[1]);
+  } catch (e) {}
+  if (!/^https?:\/\//i.test(decoded)) return t;
+  const rm = t.match(/[?&]r=([^&]*)/);
+  let r = "";
+  if (rm) {
+    try {
+      r = decodeURIComponent(rm[1]);
+    } catch (e) {
+      r = rm[1];
+    }
+  }
+  return encodeHlsProxyHref(decoded, r);
+}
+
+function resolveOriginMediaUrl(uri, originPlaylistUrl) {
+  const t = String(uri || "").trim();
+  if (!t || !originPlaylistUrl) return t;
+  try {
+    let rel = t;
+    try {
+      const parsed = new URL(t, location.href);
+      if (parsed.origin === location.origin) {
+        rel = (parsed.pathname.split("/").pop() || t).split("?")[0];
+        if (parsed.search) rel += parsed.search;
+      } else if (/^https?:$/i.test(parsed.protocol)) {
+        return mergeAuthQuery(parsed.href, originPlaylistUrl);
+      }
+    } catch (e) {}
+    const abs = new URL(rel, originPlaylistUrl);
+    return mergeAuthQuery(abs.href, originPlaylistUrl);
+  } catch (e) {
+    return t;
+  }
+}
+
+function wrapOriginMediaUri(uri, originPlaylistUrl) {
+  const t = String(uri || "").trim();
+  if (!t) return t;
+  if (/hls_proxy\.php\?/i.test(t)) return fixUnencodedProxyHref(t);
+  const abs = resolveOriginMediaUrl(t, originPlaylistUrl);
+  if (!abs || !/^https?:\/\//i.test(abs)) return t;
+  return encodeHlsProxyHref(abs, originPlaylistUrl);
+}
+
+function rewriteHlsManifest(text, playlistProxyUrl) {
+  const originPlaylist = originPlaylistFromProxyUrl(playlistProxyUrl);
+  if (!originPlaylist) return text;
+  const lines = String(text || "").split(/\r?\n/);
+  return lines
+    .map((line) => {
+      const t = line.trim();
+      if (t && t.indexOf('URI="') >= 0) {
+        return line.replace(/URI="([^"]+)"/g, (all, uri) => 'URI="' + wrapOriginMediaUri(uri, originPlaylist) + '"');
+      }
+      if (!t || t.charAt(0) === "#") return line;
+      return wrapOriginMediaUri(t, originPlaylist);
+    })
+    .join("\n");
+}
+
+function hlsPayloadPrefix(data, n) {
+  n = n || 80;
+  if (typeof data === "string") return data.slice(0, n);
+  if (!data) return "";
+  try {
+    const u8 = data.byteLength != null ? new Uint8Array(data, 0, Math.min(n, data.byteLength)) : new Uint8Array(data);
+    const take = u8.subarray(0, Math.min(n, u8.length));
+    let s = "";
+    for (let i = 0; i < take.length; i++) s += String.fromCharCode(take[i]);
+    return s;
+  } catch (e) {
+    return "";
+  }
+}
+
+function logIfHlsBodyNotTs(data, ctx) {
+  const sample = hlsPayloadPrefix(data, 80);
+  const trim = String(sample || "").replace(/^\uFEFF/, "").trim();
+  if (!trim) return;
+  const isList = /^#EXTM3U/i.test(trim);
+  const isHtml = trim.charAt(0) === "<" || /^<!doctype/i.test(trim);
+  if (!isList && !isHtml) return;
+  const safe = maskCredentials(trim.replace(/\s+/g, " ")).slice(0, 80);
+  logPlayback(
+    "diagnostico",
+    "relé devolvió lista/HTML, no TS" + (ctx && ctx.url ? " · " + maskUrl(ctx.url) : "") + ": " + safe
+  );
+}
+
+function inspectHlsLoaderResponse(response, ctx) {
+  if (!response || response.data == null) return;
+  const data = response.data;
+  const isText = typeof data === "string";
+  const looksList = isText ? /#EXTM3U/i.test(data) : /^#EXTM3U/i.test(hlsPayloadPrefix(data, 16).trim());
+  const ctxType = ctx && ctx.type;
+  const isPlaylistCtx = ctxType === "manifest" || ctxType === "level" || ctxType === "audioTrack" || ctxType === "subtitleTrack";
+  if (looksList && (isPlaylistCtx || isText)) {
+    let text = isText ? data : hlsPayloadPrefix(data, Math.min(data.byteLength || data.length || 0, 512000));
+    if (!isText && data && data.byteLength) {
+      try {
+        text = new TextDecoder("utf-8").decode(data);
+      } catch (e) {}
+    }
+    const rewritten = rewriteHlsManifest(text, (ctx && ctx.url) || "");
+    if (rewritten !== text) response.data = rewritten;
+    return;
+  }
+  if (ctx && (ctx.frag || ctxType === "fragment")) {
+    logIfHlsBodyNotTs(data, ctx);
+  }
+}
+
+function makeHlsProxyLoader() {
+  const Base = window.Hls && Hls.DefaultConfig && Hls.DefaultConfig.loader;
+  if (!Base) return undefined;
+  function HlsProxyLoader(config) {
+    const inner = new Base(config);
+    const origLoad = inner.load.bind(inner);
+    inner.load = function (context, loadConfig, callbacks) {
+      const onSuccess = callbacks.onSuccess;
+      const wrapped = Object.assign({}, callbacks, {
+        onSuccess: function (response, stats, ctx, networkDetails) {
+          try {
+            inspectHlsLoaderResponse(response, ctx || context);
+          } catch (e) {}
+          return onSuccess(response, stats, ctx, networkDetails);
+        },
+      });
+      return origLoad(context, loadConfig, wrapped);
+    };
+    return inner;
+  }
+  return HlsProxyLoader;
+}
+
+function fixHlsLevelFragmentUrls(data) {
+  const details = data && data.details;
+  if (!details) return;
+  const playlistUrl = details.url || "";
+  const origin = originPlaylistFromProxyUrl(playlistUrl);
+  if (!origin) return;
+  const list = [].concat(details.fragments || [], details.parts || []);
+  if (details.initSegment) list.push(details.initSegment);
+  list.forEach((frag) => {
+    if (!frag || !frag.url) return;
+    const next = wrapOriginMediaUri(frag.relurl || frag.url, origin);
+    if (!next) return;
+    frag.relurl = next;
+    try {
+      frag.url = new URL(next, playlistUrl || location.href).href;
+    } catch (e) {
+      frag.url = next;
+    }
+  });
+}
+
 function hlsPlayUrl(url) {
   const raw = String(url || "");
   if (!raw) return raw;
   if (nativePlayerPlugin()) return raw;
-  return "api/hls_proxy.php?u=" + encodeURIComponent(raw);
+  if (/hls_proxy\.php\?/i.test(raw)) return raw;
+  const rel = "api/hls_proxy.php?u=" + encodeURIComponent(raw);
+  try {
+    return new URL(rel, window.location.href).href;
+  } catch (e) {
+    return rel;
+  }
 }
 
 async function startNativePlayback(channel, opts) {
@@ -5032,7 +5277,7 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
     }
     video.setAttribute("data-active-url", playUrl);
     if (!prefersNativeHls() && window.Hls && Hls.isSupported()) {
-      hls = new Hls({
+      const hlsOpts = {
         enableWorker: true,
         lowLatencyMode: false,
         capLevelToPlayerSize: false,
@@ -5046,7 +5291,10 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         backBufferLength: 0,
         manifestLoadingTimeOut: 20000,
         fragLoadingTimeOut: 20000,
-      });
+      };
+      const ProxyLoader = makeHlsProxyLoader();
+      if (ProxyLoader) hlsOpts.loader = ProxyLoader;
+      hls = new Hls(hlsOpts);
       hls.loadSource(playUrl);
       hls.attachMedia(video);
       logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(playUrl));
@@ -5061,8 +5309,19 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         }
         tryAutoPlay();
       });
+      if (Hls.Events.LEVEL_LOADED) hls.on(Hls.Events.LEVEL_LOADED, (ev, data) => fixHlsLevelFragmentUrls(data));
+      if (Hls.Events.AUDIO_TRACK_LOADED) {
+        hls.on(Hls.Events.AUDIO_TRACK_LOADED, (ev, data) => fixHlsLevelFragmentUrls(data));
+      }
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTrackSelectors);
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTrackSelectors);
+      if (Hls.Events.FRAG_LOADED) {
+        hls.on(Hls.Events.FRAG_LOADED, (ev, data) => {
+          try {
+            logIfHlsBodyNotTs(data && data.payload, { url: data && data.frag && data.frag.url });
+          } catch (err) {}
+        });
+      }
       hls.on(Hls.Events.ERROR, (e, data) => {
         if (!data) return;
         const parts = [data.type, data.details];
@@ -5074,6 +5333,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
           logPlayback(
             "aviso hls",
             "fragmento 403: el origen rechazó el .ts (token o Referer). " + parts.filter(Boolean).join(" · ")
+          );
+        } else if (data.details === "fragParsingError") {
+          const peek = data.frag && data.frag.url ? " · " + maskUrl(data.frag.url) : "";
+          logPlayback(
+            data.fatal ? "error hls (grave)" : "aviso hls",
+            parts.filter(Boolean).join(" · ") + peek
           );
         } else {
           logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
@@ -6086,7 +6351,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926f");
+  url.searchParams.set("v", "20260926g");
   window.location.replace(url.toString());
 }
 
