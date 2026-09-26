@@ -13,6 +13,70 @@ if (!CSS.escape) {
 const EPG_URL = "epg_api.php";
 const APP_VERSION = "1.0.17";
 const DNS_XDP_KEY = "streambox_dns_xdp";
+const DEBUG_KEY = "streambox_debug";
+
+function debugQueryValue() {
+  try {
+    return String(new URLSearchParams(window.location.search || "").get("debug") || "").toLowerCase();
+  } catch (e) {
+    return "";
+  }
+}
+
+function isStreamBoxDebug() {
+  const q = debugQueryValue();
+  if (q === "0" || q === "false" || q === "off") return false;
+  if (q === "1" || q === "true" || q === "yes") return true;
+  try {
+    if (window.STREAMBOX_DEBUG === true || window.STREAMBOX_DEBUG === 1 || window.STREAMBOX_DEBUG === "1") return true;
+  } catch (e) {}
+  try {
+    return localStorage.getItem(DEBUG_KEY) === "1";
+  } catch (e) {}
+  return false;
+}
+
+function applyDebugUi() {
+  const on = isStreamBoxDebug();
+  try {
+    document.documentElement.classList.toggle("is-debug", on);
+  } catch (e) {}
+  document.querySelectorAll(".js-debug-only").forEach((el) => {
+    el.hidden = !on;
+    el.setAttribute("aria-hidden", on ? "false" : "true");
+  });
+  if (!on) {
+    const overlay = document.getElementById("debugOverlay");
+    if (overlay) {
+      overlay.classList.remove("is-open");
+      overlay.hidden = true;
+    }
+  }
+}
+
+function enableStreamBoxDebug() {
+  try {
+    localStorage.setItem(DEBUG_KEY, "1");
+  } catch (e) {}
+  try {
+    window.STREAMBOX_DEBUG = true;
+  } catch (e) {}
+  applyDebugUi();
+  refreshListDebug();
+  refreshPlayerDebug();
+}
+
+(function syncDebugFlagFromUrl() {
+  const q = debugQueryValue();
+  try {
+    if (q === "0" || q === "false" || q === "off") {
+      localStorage.removeItem(DEBUG_KEY);
+      window.STREAMBOX_DEBUG = false;
+    } else if (q === "1" || q === "true" || q === "yes") {
+      localStorage.setItem(DEBUG_KEY, "1");
+    }
+  } catch (e) {}
+})();
 
 function appVersion() {
   try {
@@ -1429,6 +1493,7 @@ function formatListDebug() {
 }
 
 function refreshListDebug() {
+  if (!isStreamBoxDebug()) return;
   const text = formatListDebug();
   document.querySelectorAll("[data-list-debug]").forEach((el) => {
     el.textContent = text;
@@ -3532,6 +3597,7 @@ function formatPlayerDebug() {
 }
 
 function refreshPlayerDebug() {
+  if (!isStreamBoxDebug()) return;
   const el = document.getElementById("playerDebugOutput");
   if (!el) return;
   el.textContent = formatPlayerDebug();
@@ -3860,8 +3926,14 @@ function initDebugDrag() {
 }
 
 initDebugDrag();
+applyDebugUi();
+if (isStreamBoxDebug()) {
+  refreshListDebug();
+  refreshPlayerDebug();
+}
 
 function refreshDebugPanel() {
+  if (!isStreamBoxDebug()) return;
   const output = document.getElementById("debugOutput");
   const overlay = document.getElementById("debugOverlay");
   if (!output || !overlay || !overlay.classList.contains("is-open")) return;
@@ -3876,6 +3948,7 @@ function setDebugOpen(open) {
   debugRefreshTimer = null;
 
   if (open) {
+    if (!isStreamBoxDebug()) enableStreamBoxDebug();
     output.textContent = getDebugReport();
     overlay.classList.add("is-open");
     overlay.hidden = false;
@@ -6351,7 +6424,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926g");
+  url.searchParams.set("v", "20260926h");
   window.location.replace(url.toString());
 }
 

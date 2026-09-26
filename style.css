@@ -1570,6 +1570,9 @@ body.is-tv .ad-slot img { max-height: 108px; }
   width: min(420px, calc(100vw - 32px));
 }
 .debug-overlay.is-open {
+  display: none;
+}
+html.is-debug .debug-overlay.is-open {
   display: block;
 }
 
@@ -2451,4 +2454,27 @@ body.ui-contrast .compact-header {
 body.ui-contrast .category-btn.active {
   background: #fff;
   color: #000;
+}
+
+/********** DEBUG: oculto salvo html.is-debug (?debug=1 / localStorage streambox_debug=1) **********/
+.login-debug,
+.spinner-debug,
+.player-debug,
+.settings-list-debug,
+#settingsDebugBtn {
+  display: none !important;
+}
+html.is-debug .login-debug,
+html.is-debug .spinner-debug,
+html.is-debug .player-debug,
+html.is-debug .settings-list-debug,
+html.is-debug #settingsDebugBtn {
+  display: block !important;
+}
+html.is-debug body.player-theater .player-debug,
+html.is-debug body.is-tv .player-debug,
+html.is-debug:is(.is-native-tv) .player-debug,
+html.is-debug body.is-tv .login-debug,
+html.is-debug:is(.is-native-tv) .login-debug {
+  display: none !important;
 }

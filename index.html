@@ -20,6 +20,17 @@
           if (s && ((s.username && s.password) || s.pwEnc || s.m3uUrl)) {
             document.documentElement.classList.add("has-session");
           }
+          var q = String(new URLSearchParams(location.search || "").get("debug") || "").toLowerCase();
+          if (q === "0" || q === "false" || q === "off") {
+            localStorage.removeItem("streambox_debug");
+          } else {
+            var debugOn = q === "1" || q === "true" || q === "yes" || window.STREAMBOX_DEBUG === true;
+            if (!debugOn) debugOn = localStorage.getItem("streambox_debug") === "1";
+            if (debugOn) {
+              document.documentElement.classList.add("is-debug");
+              if (q === "1" || q === "true" || q === "yes") localStorage.setItem("streambox_debug", "1");
+            }
+          }
         } catch (e) {}
       })();
     </script>
@@ -32,7 +43,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260926g" />
+      <link rel="stylesheet" href="style.css?v=20260926h" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -107,7 +118,7 @@
                 </div>
             </div>
             <div id="loginError" class="error"></div>
-            <div id="loginDebugBox" class="login-debug" aria-live="polite">
+            <div id="loginDebugBox" class="login-debug js-debug-only" hidden aria-hidden="true">
                 <div class="login-debug-head">
                     <strong>Debug de carga</strong>
                     <button type="button" id="loginDebugCopyBtn">Copiar</button>
@@ -121,7 +132,7 @@
         <div class="spinner"></div>
         <p id="globalSpinnerText">Cargando...</p>
         <button type="button" id="spinnerCancelBtn" class="spinner-cancel">Cancelar</button>
-        <pre id="globalSpinnerDebug" class="spinner-debug" data-list-debug>Preparando…</pre>
+        <pre id="globalSpinnerDebug" class="spinner-debug js-debug-only" hidden aria-hidden="true" data-list-debug>Preparando…</pre>
     </div>
 
     <div id="mainScreen" class="screen">
@@ -219,7 +230,7 @@
                     </div>
                 </div>
 
-                <div id="playerDebugBox" class="player-debug">
+                <div id="playerDebugBox" class="player-debug js-debug-only" hidden aria-hidden="true">
                     <div class="player-debug-head">
                         <strong>Debug del canal</strong>
                         <div class="player-debug-actions">
@@ -287,7 +298,7 @@
                 <p id="settingsActiveList">Ninguna</p>
                 <ul id="settingsSavedLists" class="settings-saved-lists"></ul>
                 <button type="button" id="settingsClearListsBtn" class="clear-lists-btn">Borrar listas anteriores</button>
-                <pre id="settingsListDebug" class="settings-list-debug" data-list-debug></pre>
+                <pre id="settingsListDebug" class="settings-list-debug js-debug-only" hidden aria-hidden="true" data-list-debug></pre>
             </div>
             <label class="settings-row">
                 Apariencia
@@ -314,7 +325,7 @@
             </div>
             <p class="settings-hint" id="settingsBoostHint">El volumen extra actúa sobre el reproductor. En iPhone Safari el sistema no deja subir más que los botones del aparato.</p>
             <button type="button" id="settingsRefreshBtn" class="lists-add-btn">Recargar lista</button>
-            <button type="button" id="settingsDebugBtn" class="lists-add-btn">Abrir cuadro debug</button>
+            <button type="button" id="settingsDebugBtn" class="lists-add-btn js-debug-only" hidden>Abrir cuadro debug</button>
             <button type="button" id="settingsLogoutBtn" class="settings-logout">Cerrar sesión</button>
         </div>
     </div>
@@ -401,6 +412,6 @@
     </script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260926g"></script>
+    <script src="core.js?v=20260926h"></script>
 </body>
 </html>
