@@ -111,11 +111,16 @@ function player_url_ok($url)
         return false;
     }
     $host = strtolower($parts['host']);
-    $ip = filter_var($host, FILTER_VALIDATE_IP) ? $host : gethostbyname($host);
-    $privado = filter_var($ip, FILTER_VALIDATE_IP)
-        && !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
-    if ($host === 'localhost' || $privado) {
+    if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
         return false;
+    }
+    // No gethostbyname: en Plesk un DNS lento deja el relé colgado y el
+    // spinner de «Conectando» no acaba.
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        $privado = !filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        if ($privado) {
+            return false;
+        }
     }
     return true;
 }

@@ -2198,7 +2198,19 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     }
   } catch (e) {}
   pendingListName = listName ? String(listName).trim() : null;
-  const skipCache = !!(opts && opts.fresh);
+  serverUrl = (serverUrl || "").trim();
+  username = (username || "").trim();
+  password = (password || "").trim();
+  m3uUrl = (m3uUrl || "").trim();
+  const fromGetPhp = !username && xtreamFromM3uUrl(m3uUrl);
+  if (fromGetPhp) {
+    serverUrl = fromGetPhp.server;
+    username = fromGetPhp.username;
+    password = fromGetPhp.password;
+    listLoadLog("lista", "get.php con usuario · se entra como Xtream " + username + " @ " + serverUrl);
+    m3uUrl = "";
+  }
+  const skipCache = !!(opts && opts.fresh) && urlLooksLikeSingleStream(m3uUrl);
   listLoadLog(
     "login",
     (username && password ? "xtream " + username : m3uUrl ? "m3u" : "sin datos") +
@@ -2216,12 +2228,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
     listLoadLog("timeout", "la carga no terminó a tiempo");
     showSpinner(false);
     setLoginStatus("La carga tardó demasiado. Si pegaste la URL de un canal (…/live/id.m3u8), recarga: ahora se abre como un solo canal.");
-  }, 22000);
-
-  serverUrl = (serverUrl || "").trim();
-  username = (username || "").trim();
-  password = (password || "").trim();
-  m3uUrl = (m3uUrl || "").trim();
+  }, username && password ? 35000 : 22000);
 
   // Xtream si hay usuario+clave. M3U solo si no hay Xtream (evita basura de autocompletado).
   const hasXtream = !!(username && password);
@@ -2264,6 +2271,7 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
       loginAbort = ac;
       showSpinner(true, "Descargando lista…");
+      listLoadLog("relé", "pidiendo M3U al proxy…");
       const m3uTimer = ac ? setTimeout(() => ac.abort(), 18000) : null;
       let response;
       try {
@@ -2351,7 +2359,8 @@ async function performLoginAction(serverUrl, username, password, m3uUrl, listNam
       }
 
       // Si ya hay canales en pantalla, la validación no bloquea con spinner.
-      if (!(liveSession && channelsData.length)) showSpinner(true, "Validando acceso...");
+      if (!(liveSession && channelsData.length)) showSpinner(true, "Validando acceso…");
+      listLoadLog("xtream", "validando " + username + " @ " + serverUrl);
       let response;
       try {
         response = await fetchXtream("player_api.php", { username, password }, serverUrl, { timeoutMs: 20000 });
@@ -3178,7 +3187,7 @@ async function loadM3UFromXtream() {
       output: "ts",
     },
     currentServer,
-    { timeoutMs: 22000 }
+    { timeoutMs: 30000 }
   );
   if (response.status === 401 || response.status === 403) {
     throw new Error("El proveedor rechaza la cuenta: usuario, contraseña o suscripción no válidos");
@@ -4653,6 +4662,19 @@ function urlLooksLikeTs(url) {
   return /\.ts(\?|$)/i.test(u) || u.toLowerCase().includes(".ts");
 }
 
+function xtreamFromM3uUrl(url) {
+  try {
+    const u = new URL(String(url || "").trim());
+    const user = u.searchParams.get("username") || u.searchParams.get("user");
+    const pass = u.searchParams.get("password") || u.searchParams.get("pass");
+    if (!user || !pass) return null;
+    if (!/\/get\.php\b/i.test(u.pathname) && !/[?&]type=m3u/i.test(u.search)) return null;
+    return { server: u.origin, username: user, password: pass };
+  } catch (e) {
+    return null;
+  }
+}
+
 function urlLooksLikeSingleStream(url) {
   const u = String(url || "").trim();
   if (!u) return false;
@@ -5930,7 +5952,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926c");
+  url.searchParams.set("v", "20260926d");
   window.location.replace(url.toString());
 }
 

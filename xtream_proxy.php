@@ -70,7 +70,7 @@ function xtream_fetch($url, $timeout = 120)
         curl_setopt($ch, CURLOPT_URL, $current);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_ENCODING, '');
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -135,6 +135,9 @@ function xtream_fetch_playlist($url, $timeout = 120)
         ) {
             return $last;
         }
+        if ($err !== '' && stripos($err, 'timed out') !== false) {
+            return $last;
+        }
     }
     return $last;
 }
@@ -177,11 +180,24 @@ if (isset($_GET['direct_url'])) {
         exit;
     }
     xtream_rate_or_fail();
-    $timeout = 20;
-    if (stripos($url, '.m3u8') !== false && stripos($url, 'type=m3u') === false) {
+    $timeout = 25;
+    if (stripos($url, '.m3u8') !== false && stripos($url, 'type=m3u') === false && stripos($url, 'get.php') === false) {
         $timeout = 12;
     }
-    list($response, $httpCode, $err) = xtream_fetch_playlist($url, $timeout);
+    $candidates = array($url);
+    if (preg_match('#^(https?://[^/:]+):80(/.*)$#i', $url, $m)) {
+        $candidates[] = $m[1] . $m[2];
+    }
+    $response = false;
+    $httpCode = 0;
+    $err = '';
+    foreach ($candidates as $tryUrl) {
+        list($response, $httpCode, $err) = xtream_fetch_playlist($tryUrl, $timeout);
+        if ($response && !xtream_looks_html($response) && (stripos($response, '#EXTINF') !== false || stripos($response, '#EXTM3U') !== false)) {
+            $url = $tryUrl;
+            break;
+        }
+    }
     if ($response && xtream_m3u_is_cacheable($response)) {
         player_cache_set($cacheKey, $response);
         if (stripos($url, 'http://') === 0) {
