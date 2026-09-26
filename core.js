@@ -108,8 +108,17 @@ const LOGOUT_AT_KEY = "streambox_logout_at";
 const IGNORE_ASSIGN_KEY = "streambox_ignore_assign";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
-const PREBUFFER_MAX_SECONDS = 20;
-const PREBUFFER_MAX_WAIT_MS = 4000;
+const PREBUFFER_TARGET_MIN = 8;
+const PREBUFFER_TARGET_MAX = 12;
+const PREBUFFER_MAX_WAIT_MS = 12000;
+const STALL_REFILL_WAIT_MS = 8000;
+const STALL_EMPTY_SECONDS = 1;
+const HLS_MAX_BUFFER_LENGTH = 45;
+const HLS_MAX_MAX_BUFFER_LENGTH = 60;
+const HLS_LIVE_SYNC_COUNT = 3;
+const HLS_LIVE_MAX_LATENCY_COUNT = 10;
+const HLS_BACK_BUFFER_LENGTH = 30;
+const MPEGTS_STASH_BYTES = 2 * 1024 * 1024;
 let currentUser = null;
 let channelsData = [];
 let categoriesData = {};
@@ -686,6 +695,10 @@ function getEngineBufferSeconds() {
   return Math.max(getBufferSeconds(), 10);
 }
 
+function getLiveMaxBufferLength() {
+  return Math.max(HLS_MAX_BUFFER_LENGTH, getBufferSeconds());
+}
+
 const AUDIO_BOOST_STEPS = [1, 1.25, 1.5, 2, 3];
 let audioBoostCtx = null;
 let audioBoostGain = null;
@@ -1112,6 +1125,8 @@ function stopPlayback(opts) {
   // reconector lo confundiría con una caída del stream.
   teardownInProgress = true;
   prebufferActive = false;
+  stallRefillActive = false;
+  holdIgnorePlay = false;
   clearPrebuffer();
   clearTimeout(teardownTimer);
   teardownTimer = setTimeout(() => {
@@ -4492,11 +4507,87 @@ function clearPlaybackRetry() {
 /********** PREBÚFER: acumular antes de mostrar imagen **********/
 let prebufferTimer = null;
 let prebufferActive = false;
+let stallRefillActive = false;
+let holdIgnorePlay = false;
+let lastStallRefillAt = 0;
 let prebufferResult = "";
 let positionLogged = false;
+let hlsTargetDuration = 6;
 
 function getPrebufferTarget() {
-  return Math.min(getBufferSeconds(), PREBUFFER_MAX_SECONDS);
+  const user = getBufferSeconds();
+  if (user <= 0) return 0;
+  return Math.min(PREBUFFER_TARGET_MAX, Math.max(PREBUFFER_TARGET_MIN, user));
+}
+
+function getPrerollNeedSeconds() {
+  const target = getPrebufferTarget();
+  if (target <= 0) return 0;
+  const seg = hlsTargetDuration > 0.5 ? hlsTargetDuration : 6;
+  return Math.max(1, Math.min(target, 2 * seg));
+}
+
+function getStallRefillNeedSeconds() {
+  const target = getPrebufferTarget() || DEFAULT_BUFFER_SECONDS;
+  return Math.max(4, target * 0.5);
+}
+
+function getBufferedSpan() {
+  if (!video || !video.buffered || !video.buffered.length) return 0;
+  try {
+    return Math.max(0, video.buffered.end(video.buffered.length - 1) - video.buffered.start(0));
+  } catch (e) {
+    return 0;
+  }
+}
+
+function getHlsForwardBuffer() {
+  try {
+    if (!hls) return 0;
+    const info = hls.mainForwardBufferInfo;
+    if (info && typeof info.len === "number" && isFinite(info.len)) return Math.max(0, info.len);
+  } catch (e) {}
+  return 0;
+}
+
+function getHoldRunway() {
+  const ahead = Math.max(getBufferAhead(), getHlsForwardBuffer());
+  if (video && video.paused) return Math.max(ahead, getBufferedSpan());
+  return ahead;
+}
+
+/**
+ * En directo no hay "futuro": el colchón es ir N segundos por detrás del vivo.
+ * Si el cursor se queda en el filo, el tramo descargado no cuenta como runway.
+ */
+function parkForRunway(seconds) {
+  if (!video || !video.buffered || !video.buffered.length) return;
+  try {
+    const start = video.buffered.start(0);
+    const end = video.buffered.end(video.buffered.length - 1);
+    const span = end - start;
+    if (span < 0.6) return;
+    const want = Math.min(Math.max(seconds, 1), span - 0.15);
+    const t = Math.max(start + 0.05, end - want);
+    if (Math.abs(video.currentTime - t) > 0.35) video.currentTime = t;
+  } catch (e) {}
+}
+
+function raiseLiveBufferCap() {
+  if (!hls || !hls.config) return;
+  try {
+    const want = Math.max(getLiveMaxBufferLength(), 60);
+    if (!(hls.config.maxBufferLength > want)) hls.config.maxBufferLength = want;
+    hls.config.maxMaxBufferLength = Math.max(HLS_MAX_MAX_BUFFER_LENGTH, hls.config.maxBufferLength);
+  } catch (e) {}
+}
+
+function restoreLiveBufferCap() {
+  if (!hls || !hls.config) return;
+  try {
+    hls.config.maxBufferLength = getLiveMaxBufferLength();
+    hls.config.maxMaxBufferLength = HLS_MAX_MAX_BUFFER_LENGTH;
+  } catch (e) {}
 }
 
 /**
@@ -4558,6 +4649,26 @@ function jumpOverBufferGap() {
   } catch (e) {}
 }
 
+function resumeHeldPlayback() {
+  if (!video) return;
+  holdIgnorePlay = true;
+  jumpOverBufferGap();
+  const p = video.play();
+  if (p) {
+    p.then(() => {
+      applyAudioBoost(getAudioBoost(), { silent: true });
+    })
+      .catch((err) => {
+        if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
+      })
+      .finally(() => {
+        holdIgnorePlay = false;
+      });
+  } else {
+    holdIgnorePlay = false;
+  }
+}
+
 function cancelPrebuffer(reason) {
   if (!prebufferActive) return;
   prebufferActive = false;
@@ -4566,46 +4677,89 @@ function cancelPrebuffer(reason) {
   if (reason) logPlayback("prebuffer", reason);
 }
 
+function cancelStallRefill(reason) {
+  if (!stallRefillActive) return;
+  stallRefillActive = false;
+  clearPrebuffer();
+  showVideoSpinner(false);
+  if (reason) logPlayback("colchón", reason);
+}
+
+function skipPlaybackHold(reason) {
+  const holding = prebufferActive || stallRefillActive;
+  cancelPrebuffer(reason);
+  cancelStallRefill(reason);
+  if (!holding) return;
+  restoreLiveBufferCap();
+  resumeHeldPlayback();
+}
+
+function noteHlsTargetDuration(details) {
+  try {
+    const d = details && Number(details.targetduration);
+    if (d && isFinite(d) && d > 0.5 && d < 30) hlsTargetDuration = d;
+  } catch (e) {}
+}
+
+function holdStillPaused() {
+  if (!video || video.paused) return;
+  try {
+    video.pause();
+  } catch (e) {}
+}
+
 /**
- * Arranca, pausa un momento y sigue. Tope corto: no se espera a llenar 10–15s.
+ * No se llama a play() hasta tener runway real (o agotar el tope). Un sleep
+ * fijo con buffer 0 no sirve: se mira video.buffered / hls.mainForwardBufferInfo.
  */
 function beginPrebufferFill(channel) {
   clearPrebuffer();
-  const target = getPrebufferTarget();
-  if (!video || target <= 0) {
+  const need = getPrerollNeedSeconds();
+  if (!video || need <= 0) {
     showVideoSpinner(false);
+    resumeHeldPlayback();
     return;
   }
 
-  const heredado = getBufferAhead();
-  if (heredado >= target) {
-    prebufferResult = heredado.toFixed(1) + "s de " + target + "s (ya venía lleno, sin esperar)";
+  ensureInsideBuffer();
+  raiseLiveBufferCap();
+  try {
+    if (hls && typeof hls.startLoad === "function") hls.startLoad();
+  } catch (e) {}
+
+  const heredado = getHoldRunway();
+  if (heredado >= need) {
+    parkForRunway(need);
+    prebufferResult = getHoldRunway().toFixed(1) + "s de " + need + "s (ya venía lleno, sin esperar)";
     logPlayback("prebuffer", prebufferResult);
     showVideoSpinner(false);
+    resumeHeldPlayback();
     return;
   }
 
   prebufferActive = true;
+  stallRefillActive = false;
   prebufferResult = "llenando...";
-  try {
-    video.pause();
-  } catch (e) {}
+  holdStillPaused();
+  parkForRunway(need);
 
   const startedAt = Date.now();
   const initial = heredado;
   let best = initial;
-  const deadline = startedAt + Math.min(target * 1000, PREBUFFER_MAX_WAIT_MS);
-  const growthCheck = startedAt + 1500;
+  let kicked = false;
+  const deadline = startedAt + PREBUFFER_MAX_WAIT_MS;
 
   const finish = (reason) => {
+    if (!prebufferActive) return;
+    const needNow = getPrerollNeedSeconds() || need;
     prebufferActive = false;
     clearPrebuffer();
-    prebufferResult = getBufferAhead().toFixed(1) + "s de " + target + "s (" + reason + ")";
+    parkForRunway(needNow);
+    prebufferResult = getHoldRunway().toFixed(1) + "s de " + needNow + "s (" + reason + ")";
     logPlayback("prebuffer", prebufferResult);
-    jumpOverBufferGap();
+    restoreLiveBufferCap();
     showVideoSpinner(false);
-    const p = video.play();
-    if (p) p.catch(() => {});
+    resumeHeldPlayback();
   };
 
   const tick = () => {
@@ -4615,20 +4769,96 @@ function beginPrebufferFill(channel) {
       return;
     }
 
-    const ahead = getBufferAhead();
-    if (ahead > best) best = ahead;
-    if (ahead >= target) return finish("completo");
-    if (Date.now() > growthCheck && best - initial < 0.5) return finish("la fuente no acumula, se sigue sin esperar");
-    if (Date.now() > deadline) return finish("tope de espera, se sigue con lo acumulado");
+    const needNow = getPrerollNeedSeconds() || need;
+    holdStillPaused();
+    ensureInsideBuffer();
+    parkForRunway(needNow);
+    raiseLiveBufferCap();
 
-    if (!video.paused) {
-      try {
-        video.pause();
-      } catch (e) {}
+    const ahead = getHoldRunway();
+    if (ahead > best) best = ahead;
+    if (ahead >= needNow) return finish("completo");
+    if (Date.now() > deadline) {
+      return finish(ahead < 0.5 ? "tope sin colchón, se intenta igual" : "tope de espera, se sigue con lo acumulado");
     }
+
+    if (!hls && !mpegtsPlayer && !kicked && Date.now() - startedAt > 1500 && best < 0.3) {
+      kicked = true;
+      holdIgnorePlay = true;
+      const wasMuted = video.muted;
+      video.muted = true;
+      const p = video.play();
+      const restore = () => {
+        try {
+          if (prebufferActive) video.pause();
+        } catch (e) {}
+        video.muted = wasMuted;
+        holdIgnorePlay = false;
+      };
+      if (p && p.then) p.then(restore).catch(restore);
+      else restore();
+    }
+
     const restante = Math.max(0, deadline - Date.now()) / 1000;
-    showVideoSpinner(true, "Colchón " + ahead.toFixed(1) + "s de " + target + "s · " + restante.toFixed(0) + "s", true);
-    prebufferTimer = setTimeout(tick, 250);
+    showVideoSpinner(true, "Colchón " + ahead.toFixed(1) + "s de " + needNow + "s · " + restante.toFixed(0) + "s", true);
+    prebufferTimer = setTimeout(tick, 200);
+  };
+
+  tick();
+}
+
+function beginStallRefill() {
+  if (!video || teardownInProgress || nativePlaybackActive) return;
+  if (prebufferActive || stallRefillActive) return;
+  if (video.paused) return;
+  const aheadNow = Math.max(getBufferAhead(), getHlsForwardBuffer());
+  if (aheadNow >= STALL_EMPTY_SECONDS) return;
+  if (Date.now() - lastStallRefillAt < 3000) return;
+
+  const need = getStallRefillNeedSeconds();
+  lastStallRefillAt = Date.now();
+  stallRefillActive = true;
+  raiseLiveBufferCap();
+  try {
+    if (hls && typeof hls.startLoad === "function") hls.startLoad();
+  } catch (e) {}
+  holdStillPaused();
+  parkForRunway(need);
+  logPlayback("colchón", "corte: se pausa a rellenar hasta " + need.toFixed(1) + "s");
+
+  const startedAt = Date.now();
+  const initial = getHoldRunway();
+  let best = initial;
+  const deadline = startedAt + STALL_REFILL_WAIT_MS;
+
+  const finish = (reason) => {
+    if (!stallRefillActive) return;
+    stallRefillActive = false;
+    clearPrebuffer();
+    parkForRunway(need);
+    restoreLiveBufferCap();
+    showVideoSpinner(false);
+    logPlayback("colchón", getHoldRunway().toFixed(1) + "s de " + need + "s (" + reason + ")");
+    resumeHeldPlayback();
+  };
+
+  const tick = () => {
+    if (!stallRefillActive) return;
+    if (!currentlyPlayingId || teardownInProgress) {
+      stallRefillActive = false;
+      return;
+    }
+
+    holdStillPaused();
+    parkForRunway(need);
+    const ahead = getHoldRunway();
+    if (ahead > best) best = ahead;
+    if (ahead >= need) return finish("rellenado");
+    if (Date.now() > deadline) return finish("tope, se reanuda con lo que hay");
+
+    const restante = Math.max(0, deadline - Date.now()) / 1000;
+    showVideoSpinner(true, "Recuperando colchón " + ahead.toFixed(1) + "s de " + need.toFixed(0) + "s · " + restante.toFixed(0) + "s", true);
+    prebufferTimer = setTimeout(tick, 200);
   };
 
   tick();
@@ -4690,6 +4920,9 @@ function playChannel(channel) {
   startLogged = false;
   prebufferResult = "";
   positionLogged = false;
+  hlsTargetDuration = 6;
+  stallRefillActive = false;
+  lastStallRefillAt = 0;
   lastDroppedFrames = 0;
   logPlayback("canal", channel.name + " · " + (channel.category || "sin categoría"));
   clearPlaybackRetry();
@@ -5271,24 +5504,23 @@ function startPlayback(channel) {
   const tryAutoPlay = () => {
     if (gen !== playGen) return;
     ensureInsideBuffer();
-    const onStarted = () => {
-      if (prebufferEnabled) beginPrebufferFill(channel);
-      else showVideoSpinner(false);
-    };
-
+    if (prebufferEnabled && getPrebufferTarget() > 0) {
+      beginPrebufferFill(channel);
+      return;
+    }
     const playPromise = video.play();
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
           applyAudioBoost(getAudioBoost(), { silent: true });
-          onStarted();
+          showVideoSpinner(false);
         })
         .catch((err) => {
         showVideoSpinner(false);
         if (err && err.name === "NotAllowedError") showToast("Pulsa ▶ para empezar");
       });
     } else {
-      onStarted();
+      showVideoSpinner(false);
     }
   };
 
@@ -5306,8 +5538,12 @@ function startPlayback(channel) {
         {
           enableWorker: true,
           enableStashBuffer: true,
-          stashInitialSize: 384 * 1024,
+          stashInitialSize: MPEGTS_STASH_BYTES,
           liveBufferLatencyChasing: false,
+          liveBufferLatencyMaxLatency: 40,
+          liveBufferLatencyMinRemain: 8,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 30,
         }
       );
       prebufferEnabled = true;
@@ -5338,9 +5574,10 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
   if (isTs && !mseSupported) {
     const iosUrl = hlsPlayUrl(originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1"));
     video.setAttribute("data-active-url", iosUrl);
+    enablePrebuffer();
     video.src = iosUrl;
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
-    logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · sin prebúfer · " + maskUrl(iosUrl));
+    logPlayback("motor", "nativo (sin MSE, .ts convertido a .m3u8) · " + maskUrl(iosUrl));
     return;
   }
   if (isM3u8) {
@@ -5358,10 +5595,16 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         abrEwmaDefaultEstimate: 8000000,
         abrBandWidthFactor: 0.95,
         abrBandWidthUpFactor: 0.7,
-        maxBufferLength: bufferSec + 5,
-        maxMaxBufferLength: bufferSec * 2 + 10,
-        liveSyncDurationCount: 3,
-        backBufferLength: 0,
+        maxBufferLength: getLiveMaxBufferLength(),
+        maxMaxBufferLength: HLS_MAX_MAX_BUFFER_LENGTH,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.8,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        highBufferWatchdogPeriod: 3,
+        liveSyncDurationCount: HLS_LIVE_SYNC_COUNT,
+        liveMaxLatencyDurationCount: HLS_LIVE_MAX_LATENCY_COUNT,
+        backBufferLength: HLS_BACK_BUFFER_LENGTH,
         manifestLoadingTimeOut: 20000,
         fragLoadingTimeOut: 20000,
       };
@@ -5370,7 +5613,7 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
       hls = new Hls(hlsOpts);
       hls.loadSource(playUrl);
       hls.attachMedia(video);
-      logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(playUrl));
+      logPlayback("motor", "hls.js · vivo " + getLiveMaxBufferLength() + "s · preroll " + getPrerollNeedSeconds() + "s · " + maskUrl(playUrl));
       enablePrebuffer();
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         refreshTrackSelectors();
@@ -5382,7 +5625,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         }
         tryAutoPlay();
       });
-      if (Hls.Events.LEVEL_LOADED) hls.on(Hls.Events.LEVEL_LOADED, (ev, data) => fixHlsLevelFragmentUrls(data));
+      if (Hls.Events.LEVEL_LOADED) {
+        hls.on(Hls.Events.LEVEL_LOADED, (ev, data) => {
+          fixHlsLevelFragmentUrls(data);
+          noteHlsTargetDuration(data && data.details);
+        });
+      }
       if (Hls.Events.AUDIO_TRACK_LOADED) {
         hls.on(Hls.Events.AUDIO_TRACK_LOADED, (ev, data) => fixHlsLevelFragmentUrls(data));
       }
@@ -5416,7 +5664,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         } else {
           logPlayback(data.fatal ? "error hls (grave)" : "aviso hls", parts.filter(Boolean).join(" · "));
         }
-        if (!data.fatal) return;
+        if (!data.fatal) {
+          if (data.details === "bufferStalledError" || data.details === "bufferSeekOverHole") {
+            beginStallRefill();
+          }
+          return;
+        }
         if (hlsRecoveries < 3) {
           hlsRecoveries++;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -5434,11 +5687,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         handlePlaybackFailure();
       });
     } else {
+      enablePrebuffer();
       video.src = playUrl;
       tryAutoPlay();
       logPlayback(
         "motor",
-        (prefersNativeHls() ? "nativo (HLS iOS) · " : "nativo (hls.js no soportado) · ") + maskUrl(playUrl)
+        (prefersNativeHls() ? "nativo (HLS iOS) · preroll · " : "nativo (hls.js no soportado) · ") + maskUrl(playUrl)
       );
     }
     return;
@@ -5454,6 +5708,7 @@ if (video) {
   video.preload = "auto";
 
   video.addEventListener("playing", () => {
+    if (prebufferActive || stallRefillActive) return;
     if (playbackRetries > 0) logPlayback("recuperado", "tras " + playbackRetries + " reintento(s)");
     else if (!startLogged) logPlayback("reproduciendo", video.videoWidth + "×" + video.videoHeight);
     startLogged = true;
@@ -5466,20 +5721,24 @@ if (video) {
   // vídeo cada vez hace parecer que va peor de lo que va, así que el aviso solo
   // aparece si la parada dura de verdad.
   video.addEventListener("waiting", () => {
-    if (teardownInProgress) return;
+    if (teardownInProgress || prebufferActive || stallRefillActive) return;
+    if (video.paused) return;
     stallCount++;
     // Este es el momento en que un hueco entre tramos sí molesta: la
     // reproducción se ha quedado clavada al borde y no puede cruzarlo sola.
     jumpOverBufferGap();
     if (bufferingSpinnerTimer) return;
     bufferingSpinnerTimer = setTimeout(() => {
+      if (teardownInProgress || prebufferActive || stallRefillActive) return;
       showVideoSpinner(true);
       // Solo se registran los cortes reales; los de medio segundo son
       // constantes en directo y taparían el resto del registro.
       logPlayback("corte", "nº " + stallCount + " · buffer " + getBufferAhead().toFixed(1) + "s");
+      if (Math.max(getBufferAhead(), getHlsForwardBuffer()) < STALL_EMPTY_SECONDS) beginStallRefill();
     }, 900);
   });
   video.addEventListener("canplay", () => {
+    if (prebufferActive || stallRefillActive) return;
     clearTimeout(bufferingSpinnerTimer);
     bufferingSpinnerTimer = null;
   });
@@ -5508,15 +5767,16 @@ if (video) {
     if (!hls) return;
     try {
       hls.config.maxBufferLength = 300;
+      hls.config.maxMaxBufferLength = Math.max(HLS_MAX_MAX_BUFFER_LENGTH, 300);
     } catch (e) {}
   });
   video.addEventListener("play", () => {
-    // Si es el usuario quien le da al play durante el llenado, manda él.
-    cancelPrebuffer("cancelado por el usuario");
-    if (!hls) return;
-    try {
-      hls.config.maxBufferLength = getEngineBufferSeconds();
-    } catch (e) {}
+    if (holdIgnorePlay) return;
+    if (prebufferActive || stallRefillActive) {
+      skipPlaybackHold("cancelado por el usuario");
+      return;
+    }
+    restoreLiveBufferCap();
   });
 
   video.addEventListener("error", () => {
@@ -6424,7 +6684,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926h");
+  url.searchParams.set("v", "20260926i");
   window.location.replace(url.toString());
 }
 
@@ -6488,10 +6748,7 @@ if (spinnerSkip) {
   spinnerSkip.addEventListener("click", (ev) => {
     // El clic no debe llegar al vídeo, que lo interpretaría como pausa.
     ev.stopPropagation();
-    cancelPrebuffer("espera saltada a mano");
-    jumpOverBufferGap();
-    const p = video && video.play();
-    if (p) p.catch(() => {});
+    skipPlaybackHold("espera saltada a mano");
   });
 }
 
