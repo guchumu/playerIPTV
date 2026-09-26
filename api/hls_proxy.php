@@ -1,5 +1,5 @@
 <?php
-require_once dirname(__DIR__) . '/config.php';
+require_once dirname(__DIR__) . '/player_lib.php';
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, OPTIONS');
@@ -31,9 +31,9 @@ if ($scheme !== 'http' && $scheme !== 'https') {
     exit;
 }
 
-if (!player_host_allowed($u)) {
+if (!player_url_ok($u)) {
     http_response_code(403);
-    echo 'Host no permitido';
+    echo 'URL no permitida';
     exit;
 }
 

@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-title" content="StreamBox">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="icon" href="icons/icon-192.png">
-      <link rel="stylesheet" href="style.css?v=20260926a" />
+      <link rel="stylesheet" href="style.css?v=20260926b" />
     <link rel="manifest" href="manifest.json" />
 </head>
 <body>
@@ -218,6 +218,17 @@
                     </div>
                 </div>
 
+                <div id="playerDebugBox" class="player-debug">
+                    <div class="player-debug-head">
+                        <strong>Debug del canal</strong>
+                        <div class="player-debug-actions">
+                            <button type="button" id="playerDebugProbeBtn">Diagnosticar</button>
+                            <button type="button" id="playerDebugCopyBtn">Copiar</button>
+                        </div>
+                    </div>
+                    <pre id="playerDebugOutput">Elige un canal para ver aquí el motor, la URL y los errores.</pre>
+                </div>
+
                 <div class="playback-status" id="playbackStatus">
                     <span class="status-dot" id="statusDot"></span>
                     <span class="status-buffer">
@@ -389,6 +400,6 @@
     </script>
     <!-- Local a propósito: en una tele sin salida a CDN el QR debe salir igual. -->
     <script src="qrcode.js?v=20260817x"></script>
-    <script src="core.js?v=20260926a"></script>
+    <script src="core.js?v=20260926b"></script>
 </body>
 </html>

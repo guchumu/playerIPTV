@@ -1118,6 +1118,7 @@ body.is-mobile .pc-only-btn {
 }
 body.player-theater .categories-column,
 body.player-theater .channels-column,
+body.player-theater .player-debug,
 body.player-theater .epg-timeline-box,
 body.player-theater .epg-container,
 body.player-theater .playback-status,
@@ -1211,6 +1212,48 @@ body.player-theater .compact-header {
 .external-player-btn {
   display: none !important;
 }
+
+.player-debug {
+  margin: 8px 0 0;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.player-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #111827;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+}
+.player-debug-actions { display: flex; gap: 6px; }
+.player-debug-head button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.player-debug pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #86efac;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+body.is-tv .player-debug,
+html.is-native-tv .player-debug { display: none !important; }
 
 /********** ESTADO DE REPRODUCCIÓN SIEMPRE VISIBLE **********/
 .playback-status {
@@ -2255,6 +2298,7 @@ body.is-tv .tv-fav-empty {
   .epg-slot.is-now,
   .epg-slot.is-open { min-width: 120px; max-width: 240px; padding: 8px 10px; }
   .playback-status { margin: 8px 10px 0; flex-shrink: 0; }
+  .player-debug { margin: 8px 10px 0; }
   .track-control { font-size: 0.65rem; }
   .track-control select { max-width: 84px; }
   .categories-list {

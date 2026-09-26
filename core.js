@@ -3274,12 +3274,14 @@ function logPlayback(kind, detail) {
   });
   if (playbackLog.length > MAX_LOG_ENTRIES) playbackLog.shift();
   refreshDebugPanel();
+  refreshPlayerDebug();
 }
 
 function resetPlaybackLog() {
   playbackLog = [];
   channelStartedAt = Date.now();
   refreshDebugPanel();
+  refreshPlayerDebug();
 }
 
 function formatPlaybackLog() {
@@ -3290,6 +3292,63 @@ function formatPlaybackLog() {
     .reverse()
     .map((e) => "  +" + e.at.toFixed(1) + "s  " + e.kind + (e.detail ? ": " + e.detail : ""))
     .join("\n");
+}
+
+function formatPlayerDebug() {
+  const ch = currentChannelRef;
+  const parse = lastParseDebug || {};
+  const readyNames = ["HAVE_NOTHING", "HAVE_METADATA", "HAVE_CURRENT_DATA", "HAVE_FUTURE_DATA", "HAVE_ENOUGH_DATA"];
+  const netNames = ["NETWORK_EMPTY", "NETWORK_IDLE", "NETWORK_LOADING", "NETWORK_NO_SOURCE"];
+  const ready = video ? video.readyState : -1;
+  const net = video ? video.networkState : -1;
+  const mediaErr = describeMediaError();
+  const active = video ? video.getAttribute("data-active-url") : "";
+  const lines = [
+    "lista: " + activeListLabel() + " · " + channelsData.length + " canales",
+    "parse: " + (parse.parsed || 0) + " pintados · " + (parse.bytes || 0) + " bytes · " + (parse.extinf || 0) + " EXTINF",
+    ch
+      ? "canal: " + (ch.name || "-") + " · " + (ch.category || "-")
+      : "canal: (ninguno elegido)",
+    ch ? "origen: " + maskUrl(ch.url) : "",
+    active ? "reproduciendo: " + maskUrl(active) : "",
+    isHttpOnHttpsPage(ch && ch.url)
+      ? "aviso: origen HTTP en página HTTPS (el navegador lo bloquea si no hay relé)"
+      : "",
+    "motor: " +
+      (nativePlaybackActive
+        ? nativePlayerEngine() === "vlc"
+          ? "LibVLC"
+          : "ExoPlayer"
+        : hls
+          ? "hls.js"
+          : mpegtsPlayer
+            ? "mpegts.js"
+            : video && video.src
+              ? "nativo"
+              : "parado"),
+    video
+      ? "video: ready=" +
+        (readyNames[ready] || ready) +
+        " · red=" +
+        (netNames[net] || net) +
+        " · " +
+        (video.videoWidth || 0) +
+        "x" +
+        (video.videoHeight || 0) +
+        " · paused=" +
+        (video.paused ? "sí" : "no")
+      : "",
+    mediaErr ? "error <video>: " + mediaErr : "error <video>: (ninguno)",
+    "-- eventos (lo último arriba) --",
+    formatPlaybackLog(),
+  ];
+  return lines.filter((line, i) => line || i === 0).join("\n");
+}
+
+function refreshPlayerDebug() {
+  const el = document.getElementById("playerDebugOutput");
+  if (!el) return;
+  el.textContent = formatPlayerDebug();
 }
 
 function describeMediaError() {
@@ -3319,6 +3378,24 @@ function describeMediaError() {
  */
 let probeRunning = false;
 let lastProbeAt = 0;
+let playWaitTimer = null;
+
+function armPlayWaitWatchdog() {
+  clearTimeout(playWaitTimer);
+  playWaitTimer = setTimeout(() => {
+    if (startLogged || playbackLooksAlive()) return;
+    const spinnerOn = !!(spinner && spinner.style.display !== "none");
+    logPlayback(
+      "espera",
+      (spinnerOn ? "sigue pensando" : "sin imagen") +
+        " · readyState " +
+        (video ? video.readyState : "-") +
+        " · networkState " +
+        (video ? video.networkState : "-") +
+        (describeMediaError() ? " · " + describeMediaError() : "")
+    );
+  }, 8000);
+}
 
 async function probeStream() {
   const url = currentChannelRef ? currentChannelRef.url : "";
@@ -3349,8 +3426,12 @@ async function probeStream() {
 
   probeRunning = true;
   lastProbeAt = Date.now();
-  const button = document.getElementById("debugProbeBtn");
-  if (button) button.disabled = true;
+  const probeButtons = ["debugProbeBtn", "playerDebugProbeBtn"]
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  probeButtons.forEach((button) => {
+    button.disabled = true;
+  });
 
   const base = window.location.origin + window.location.pathname.replace("index.html", "");
   let target;
@@ -3360,7 +3441,9 @@ async function probeStream() {
   } catch (e) {
     logPlayback("diagnostico", "no se pudo firmar la consulta");
     probeRunning = false;
-    if (button) button.disabled = false;
+    probeButtons.forEach((button) => {
+      button.disabled = false;
+    });
     return;
   }
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -3401,8 +3484,10 @@ async function probeStream() {
     // Sigue bloqueado durante el enfriamiento para que se vea que no sirve
     // de nada insistir.
     setTimeout(() => {
-      const b = document.getElementById("debugProbeBtn");
-      if (b) b.disabled = false;
+      ["debugProbeBtn", "playerDebugProbeBtn"].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = false;
+      });
     }, 15000);
   }
 }
@@ -4352,6 +4437,8 @@ function playChannel(channel) {
   rememberLastChannel(channel);
   startPlayback(channel);
   updatePlaybackStatus();
+  refreshPlayerDebug();
+  armPlayWaitWatchdog();
 }
 
 function nativePlayerEngine() {
@@ -4515,6 +4602,17 @@ function urlLooksLikeTs(url) {
   return /\.ts(\?|$)/i.test(u) || u.toLowerCase().includes(".ts");
 }
 
+function isHttpOnHttpsPage(url) {
+  return location.protocol === "https:" && /^http:\/\//i.test(String(url || ""));
+}
+
+function hlsPlayUrl(url) {
+  const raw = String(url || "");
+  if (!raw) return raw;
+  if (nativePlayerPlugin()) return raw;
+  return "api/hls_proxy.php?u=" + encodeURIComponent(raw);
+}
+
 async function startNativePlayback(channel, opts) {
   const plugin = nativePlayerPlugin();
   if (!plugin) return false;
@@ -4669,7 +4767,7 @@ function startPlayback(channel) {
 
 function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, bufferSec, tryAutoPlay, enablePrebuffer) {
   if (isTs && !mseSupported) {
-    const iosUrl = originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1");
+    const iosUrl = hlsPlayUrl(originalUrl.replace(/\.ts(\?|$)/i, ".m3u8$1"));
     video.setAttribute("data-active-url", iosUrl);
     video.src = iosUrl;
     video.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
@@ -4677,7 +4775,11 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
     return;
   }
   if (isM3u8) {
-    video.setAttribute("data-active-url", originalUrl);
+    const playUrl = hlsPlayUrl(originalUrl);
+    if (isHttpOnHttpsPage(originalUrl)) {
+      logPlayback("aviso", "el canal es HTTP y la web es HTTPS: sin relé el navegador lo bloquea");
+    }
+    video.setAttribute("data-active-url", playUrl);
     if (!prefersNativeHls() && window.Hls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
@@ -4691,10 +4793,12 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         maxMaxBufferLength: bufferSec * 2 + 10,
         liveSyncDurationCount: 3,
         backBufferLength: 0,
+        manifestLoadingTimeOut: 20000,
+        fragLoadingTimeOut: 20000,
       });
-      hls.loadSource(originalUrl);
+      hls.loadSource(playUrl);
       hls.attachMedia(video);
-      logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(originalUrl));
+      logPlayback("motor", "hls.js · buffer " + bufferSec + "s · " + maskUrl(playUrl));
       enablePrebuffer();
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         refreshTrackSelectors();
@@ -4733,11 +4837,11 @@ function startPlaybackLegacy(channel, originalUrl, isTs, isM3u8, mseSupported, b
         handlePlaybackFailure();
       });
     } else {
-      video.src = originalUrl;
+      video.src = playUrl;
       tryAutoPlay();
       logPlayback(
         "motor",
-        (prefersNativeHls() ? "nativo (HLS iOS) · " : "nativo (hls.js no soportado) · ") + maskUrl(originalUrl)
+        (prefersNativeHls() ? "nativo (HLS iOS) · " : "nativo (hls.js no soportado) · ") + maskUrl(playUrl)
       );
     }
     return;
@@ -4965,6 +5069,7 @@ function updatePlaybackStatus() {
   if (statusStalls) {
     statusStalls.textContent = stallCount === 1 ? "1 corte" : stallCount + " cortes";
   }
+  refreshPlayerDebug();
 }
 
 setInterval(updatePlaybackStatus, 1000);
@@ -5722,7 +5827,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926a");
+  url.searchParams.set("v", "20260926b");
   window.location.replace(url.toString());
 }
 
@@ -6245,6 +6350,19 @@ function updateCursorVisuals() {
 
 const debugProbeBtn = document.getElementById("debugProbeBtn");
 if (debugProbeBtn) debugProbeBtn.addEventListener("click", probeStream);
+const playerDebugProbeBtn = document.getElementById("playerDebugProbeBtn");
+if (playerDebugProbeBtn) playerDebugProbeBtn.addEventListener("click", probeStream);
+const playerDebugCopyBtn = document.getElementById("playerDebugCopyBtn");
+if (playerDebugCopyBtn) {
+  playerDebugCopyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(formatPlayerDebug());
+      showToast("Debug copiado");
+    } catch (e) {
+      showToast("No se pudo copiar");
+    }
+  });
+}
 
 const debugCopyBtn = document.getElementById("debugCopyBtn");
 if (debugCopyBtn) {
