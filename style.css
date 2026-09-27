@@ -131,6 +131,49 @@ html.is-native-tv .splash-hint-tv { display: inline; }
   object-fit: contain;
   margin: 0 auto 0.7rem;
 }
+/* TV / landscape: el logo grande empuja Device ID, Recargar y Borrar fuera de pantalla. */
+html.login-landscape .login-logo {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 0.3rem;
+}
+html.login-landscape .login-container {
+  padding: 0.85rem 1.2rem;
+  max-height: 100dvh;
+}
+html.login-landscape .login-container h1 {
+  font-size: 1.35rem;
+  margin-bottom: 0.15rem;
+}
+html.login-landscape .build-tag { margin-bottom: 0; font-size: 0.7rem; }
+html.login-landscape .login-body { margin-top: 0.45rem; }
+html.login-landscape .upload-qr {
+  width: 148px;
+  height: 148px;
+}
+html.login-landscape .qr-hint:not(.device-id-label),
+html.login-landscape .upload-url,
+html.login-landscape .reload-hint,
+html.login-landscape .login-tv-hint,
+html.login-landscape .remote-upload-box > p:not(.qr-lead):not(.device-id-label) {
+  display: none;
+}
+html.login-landscape .device-id-label {
+  display: block;
+  margin: 0.35rem 0 0.15rem;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+html.login-landscape .device-id {
+  font-size: 1.35rem;
+  padding: 8px;
+}
+html.login-landscape .login-actions { margin-top: 8px; }
+html.login-landscape #loginScreen {
+  overflow-y: auto;
+  align-items: flex-start;
+  padding: 0.4rem 0.8rem;
+}
 .login-container h1 { font-size: 1.8rem; margin-bottom: 0.35rem; text-align: center; }
 .build-tag { text-align: center; }
 .login-body {
@@ -196,6 +239,7 @@ html.is-native-tv .engine-control select {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+  flex-shrink: 0;
 }
 .reload-btn,
 .clear-lists-btn {
@@ -273,6 +317,7 @@ html.is-native-tv .engine-control select {
   padding: 10px;
   border-radius: 8px;
   font-family: monospace;
+  flex-shrink: 0;
 }
 
 .login-debug {
@@ -1872,9 +1917,9 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
 /********** FIRE STICK / ANDROID TV (10-foot) **********/
 :is(body.is-tv, html.is-native-tv) { font-size: 15px; }
 :is(body.is-tv, html.is-native-tv) #loginScreen {
-  overflow: hidden;
-  padding: 0.6rem 1.2rem;
-  align-items: center;
+  overflow-y: auto;
+  padding: 0.5rem 1.2rem;
+  align-items: flex-start;
   justify-content: center;
 }
 :is(body.is-tv, html.is-native-tv) .login-container {
@@ -1900,7 +1945,11 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   grid-column: 1;
   grid-row: 1;
   min-width: 0;
-  align-self: center;
+  align-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
   text-align: left;
 }
 :is(body.is-tv, html.is-native-tv) .login-manual {
@@ -1915,21 +1964,22 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   grid-column: 2;
   grid-row: 1 / span 2;
   min-width: 0;
-  max-height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 24px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
 }
 :is(body.is-tv, html.is-native-tv) .login-logo {
   display: block !important;
-  width: min(22vh, 140px);
-  height: min(22vh, 140px);
-  margin: 0 0 0.45rem;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  flex-shrink: 0;
 }
 :is(body.is-tv, html.is-native-tv) .login-container h1 {
-  font-size: clamp(1.3rem, 3vh, 1.9rem);
-  margin-bottom: 0.1rem;
+  font-size: 1.25rem;
+  margin-bottom: 0;
   text-align: left;
 }
 :is(body.is-tv, html.is-native-tv) .build-tag {
@@ -1938,12 +1988,18 @@ body.is-tv #zapNumber { font-size: 4.2rem; }
   font-size: 0.7rem;
 }
 :is(body.is-tv, html.is-native-tv) .login-tv-hint,
-:is(body.is-tv, html.is-native-tv) .qr-hint,
+:is(body.is-tv, html.is-native-tv) .qr-hint:not(.device-id-label),
 :is(body.is-tv, html.is-native-tv) .upload-url,
 :is(body.is-tv, html.is-native-tv) .reload-hint,
 :is(body.is-tv, html.is-native-tv) .install-btn,
-:is(body.is-tv, html.is-native-tv) .remote-upload-box > p:not(.qr-lead):not(.reload-hint):not(.qr-hint) {
+:is(body.is-tv, html.is-native-tv) .remote-upload-box > p:not(.qr-lead):not(.device-id-label) {
   display: none !important;
+}
+:is(body.is-tv, html.is-native-tv) .device-id-label {
+  display: block !important;
+  margin: 0.3rem 0 0.1rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
 }
 body.is-tv .login-manual,
 html.is-native-tv .login-manual { display: none !important; }
@@ -1957,6 +2013,8 @@ html.is-native-tv .login-manual { display: none !important; }
   display: none !important;
 }
 :is(body.is-tv, html.is-native-tv) .remote-upload-box {
+  display: flex;
+  flex-direction: column;
   padding: 0.7rem 0.85rem;
   flex: 0 1 auto;
   min-height: 0;
@@ -1968,8 +2026,8 @@ html.is-native-tv .login-manual { display: none !important; }
 }
 :is(body.is-tv, html.is-native-tv) .qr-wrap { margin: 6px 0; }
 :is(body.is-tv, html.is-native-tv) .upload-qr {
-  width: min(36vh, 220px);
-  height: min(36vh, 220px);
+  width: min(26vh, 168px);
+  height: min(26vh, 168px);
   max-width: 100%;
   padding: 6px;
 }
@@ -1979,10 +2037,15 @@ html.is-native-tv .login-manual { display: none !important; }
   padding: 6px 10px;
   margin: 4px 0;
 }
-:is(body.is-tv, html.is-native-tv) .reload-btn {
+:is(body.is-tv, html.is-native-tv) .reload-btn,
+:is(body.is-tv, html.is-native-tv) .clear-lists-btn {
   min-height: 44px;
   font-size: 1rem;
   margin-top: 8px;
+}
+:is(body.is-tv, html.is-native-tv) .login-actions .reload-btn,
+:is(body.is-tv, html.is-native-tv) .login-actions .clear-lists-btn {
+  margin-top: 0;
 }
 :is(body.is-tv, html.is-native-tv) .error {
   font-size: 0.9rem;
@@ -1998,12 +2061,12 @@ html.is-native-tv .login-manual { display: none !important; }
 }
 @media (max-height: 560px) {
   :is(body.is-tv, html.is-native-tv) .login-logo {
-    width: min(18vh, 96px);
-    height: min(18vh, 96px);
+    width: 36px;
+    height: 36px;
   }
   :is(body.is-tv, html.is-native-tv) .upload-qr {
-    width: min(32vh, 160px);
-    height: min(32vh, 160px);
+    width: min(22vh, 132px);
+    height: min(22vh, 132px);
   }
 }
 /* Nunca apilar a una columna en landscape: el QR se corta abajo. */
@@ -2026,9 +2089,9 @@ html.is-native-tv .login-manual { display: none !important; }
   html.is-native-tv:not(.login-portrait) #loginScreen .login-logo,
   body.is-tv #loginScreen .login-logo {
     display: block !important;
-    width: min(20vh, 130px);
-    height: min(20vh, 130px);
-    margin: 0 0 0.4rem;
+    width: 44px;
+    height: 44px;
+    margin: 0;
   }
   html.is-native-tv:not(.login-portrait) #loginScreen .login-container h1,
   body.is-tv #loginScreen .login-container h1 { text-align: left; }
@@ -2040,8 +2103,8 @@ html.is-native-tv .login-manual { display: none !important; }
   }
   html.is-native-tv:not(.login-portrait) #loginScreen .upload-qr,
   body.is-tv #loginScreen .upload-qr {
-    width: min(34vh, 200px);
-    height: min(34vh, 200px);
+    width: min(26vh, 160px);
+    height: min(26vh, 160px);
   }
 }
 body.is-tv .compact-header,

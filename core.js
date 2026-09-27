@@ -6988,7 +6988,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926j");
+  url.searchParams.set("v", "20260926k");
   window.location.replace(url.toString());
 }
 
