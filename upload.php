@@ -19,6 +19,7 @@ if (!preg_match('/^[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}$/', $idPrevio)) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $deviceId = rs_format_device_id(isset($_POST['device_id']) ? $_POST['device_id'] : '');
+    $action = isset($_POST['action']) ? strtolower(trim((string) $_POST['action'])) : 'enviar';
     $serverUrl = isset($_POST['serverUrl']) ? trim((string) $_POST['serverUrl']) : '';
     $username = isset($_POST['username']) ? trim((string) $_POST['username']) : '';
     $password = isset($_POST['password']) ? trim((string) $_POST['password']) : '';
@@ -48,14 +49,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($deviceId !== '' && preg_match('/^[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}$/', $deviceId)) {
-        file_put_contents(__DIR__ . '/cuentas/' . $deviceId . '.json', json_encode($data));
-        // Compatibilidad: borrar copia sin guiones si existía.
+        $idPrevio = $deviceId;
         $plain = str_replace('-', '', $deviceId);
         $plainFile = __DIR__ . '/cuentas/' . $plain . '.json';
-        if (is_file($plainFile)) {
-            @unlink($plainFile);
+        if ($action === 'vaciar') {
+            $data = array(
+                'status' => 'vaciar',
+                'ts' => (int) round(microtime(true) * 1000),
+                'deviceId' => $deviceId,
+            );
+            file_put_contents(__DIR__ . '/cuentas/' . $deviceId . '.json', json_encode($data));
+            if (is_file($plainFile)) {
+                @unlink($plainFile);
+            }
+            $mensaje = 'Canales anteriores vaciados en ' . htmlspecialchars($deviceId, ENT_QUOTES, 'UTF-8') . '. El código no cambia: ahora envía la lista nueva.';
+        } else {
+            file_put_contents(__DIR__ . '/cuentas/' . $deviceId . '.json', json_encode($data));
+            if (is_file($plainFile)) {
+                @unlink($plainFile);
+            }
+            $mensaje = 'Lista enviada con éxito a la TV (' . htmlspecialchars($deviceId, ENT_QUOTES, 'UTF-8') . '). Aparecerá en unos segundos.';
         }
-        $mensaje = 'Lista enviada con éxito a la TV (' . htmlspecialchars($deviceId, ENT_QUOTES, 'UTF-8') . '). Aparecerá en unos segundos.';
     } else {
         $mensaje = 'Error: Debes introducir un Device ID válido (6 caracteres, ej. A1B2C3).';
     }
@@ -74,6 +88,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         label { font-size: 0.8rem; font-weight: bold; color: #94a3b8; display: block; margin-top: 15px; margin-bottom: 5px; }
         input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: white; box-sizing: border-box; }
         button { width: 100%; padding: 12px; margin-top: 20px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        .btn-vaciar { margin-top: 10px; background: #b45309; }
+        .btn-vaciar:hover { background: #c2410c; }
+        .vaciar-hint { margin: 6px 0 0; font-size: 0.75rem; color: #94a3b8; line-height: 1.35; }
         .msg { margin-bottom: 15px; padding: 10px; border-radius: 6px; background: rgba(34, 197, 94, 0.2); color: #4ade80; text-align: center; font-size: 0.9rem; }
         .divider { text-align: center; margin: 20px 0; color: #475569; font-size: 0.8rem; }
         .ok-id { margin: 6px 0 0; font-size: 0.75rem; color: #4ade80; }
@@ -91,6 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    maxlength="8"
                    value="<?php echo htmlspecialchars($idPrevio, ENT_QUOTES, 'UTF-8'); ?>"><?php if ($idPrevio !== ''): ?>
             <p class="ok-id">Dispositivo detectado por QR</p><?php endif; ?>
+            <button type="button" class="btn-vaciar" id="vaciarBtn">Vaciar canales de este ID</button>
+            <p class="vaciar-hint">Quita la lista anterior de este aparato. El código (Device ID) no se pierde: después puedes enviar la nueva.</p>
 
             <label>Nombre de la lista (opcional)</label>
             <input type="text" name="listName" placeholder="Ej: Casa, Trabajo, Proveedor X" maxlength="64">
@@ -107,7 +126,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <label>Enlace M3U Directo</label>
             <input type="text" name="m3uUrl" placeholder="http://..." autocomplete="off">
 
-            <button type="submit">Enviar al Dispositivo</button>
+            <button type="submit" name="action" value="enviar">Enviar al Dispositivo</button>
+        </form>
+        <form id="vaciarForm" method="POST" hidden>
+            <input type="hidden" name="action" value="vaciar">
+            <input type="hidden" name="device_id" id="vaciarDeviceId" value="<?php echo htmlspecialchars($idPrevio, ENT_QUOTES, 'UTF-8'); ?>">
         </form>
     </div>
     <script>
@@ -142,6 +165,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         input.addEventListener("input", applyFormat);
         input.addEventListener("blur", applyFormat);
         applyFormat();
+
+        var vaciarId = document.getElementById("vaciarDeviceId");
+        var vaciarForm = document.getElementById("vaciarForm");
+        function syncVaciarId() {
+          if (vaciarId) vaciarId.value = formatId(input.value);
+        }
+        input.addEventListener("input", syncVaciarId);
+        syncVaciarId();
+        var vaciarBtn = document.getElementById("vaciarBtn");
+        if (vaciarBtn && vaciarForm) {
+          vaciarBtn.addEventListener("click", function () {
+            syncVaciarId();
+            var id = vaciarId ? vaciarId.value : "";
+            if (!/^[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}$/.test(id)) {
+              alert("Introduce un Device ID válido (6 caracteres) para vaciar.");
+              return;
+            }
+            if (!confirm("¿Vaciar los canales de " + id + "? El código se mantiene y podrás enviar la lista nueva.")) {
+              return;
+            }
+            vaciarForm.submit();
+          });
+        }
       })();
     </script>
 </body>

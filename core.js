@@ -107,6 +107,7 @@ const ACTIVE_LIST_KEY = "streambox_active_list";
 const ALL_LISTS_ID = "__all__";
 const LOGOUT_AT_KEY = "streambox_logout_at";
 const IGNORE_ASSIGN_KEY = "streambox_ignore_assign";
+const VACIAR_TS_KEY = "streambox_vaciar_ts";
 const TV_HEADER_COL = -1;
 const DEFAULT_BUFFER_SECONDS = 10;
 const PREBUFFER_TARGET_MIN = 8;
@@ -605,6 +606,93 @@ async function wipeRemoteAssignment() {
     listLoadLog("borrar", "no se pudo borrar la asignación remota");
   }
   return false;
+}
+
+function lastHandledVaciarTs() {
+  try {
+    return parseInt(sessionStorage.getItem(VACIAR_TS_KEY) || "0", 10) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function markVaciarHandled(ts) {
+  try {
+    sessionStorage.setItem(VACIAR_TS_KEY, String(ts || Date.now()));
+  } catch (e) {}
+}
+
+async function clearLocalListsKeepDeviceId() {
+  loginCancelled = true;
+  try {
+    if (loginAbort) loginAbort.abort();
+  } catch (e) {}
+  remoteLoginBusy = false;
+  showSpinner(false);
+  savedLists = [];
+  activeListId = null;
+  persistSavedLists();
+  try {
+    localStorage.removeItem(SAVED_LISTS_KEY);
+    localStorage.removeItem(ACTIVE_LIST_KEY);
+    localStorage.removeItem(LAST_LIST_KEY);
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem("xtream_user");
+  } catch (e) {}
+  await wipeListDb();
+  liveSession = false;
+  logoutRequested = false;
+  remoteLoginBusy = false;
+  currentUser = null;
+  sessionToken = null;
+  channelsData = [];
+  categoriesData = {};
+  channelById = new Map();
+  lastParseDebug = null;
+  pendingListName = null;
+  document.documentElement.classList.remove("has-session");
+  stopPlayback();
+  fillSettingsListBox();
+  refreshListDebug();
+  showDeviceId();
+}
+
+async function handleRemoteVaciar(data) {
+  const ts = data && data.ts != null ? Number(data.ts) : Date.now();
+  if (ts && ts === lastHandledVaciarTs()) return false;
+  markVaciarHandled(ts);
+  try {
+    sessionStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
+  } catch (e) {}
+  stopRemotePolling();
+  await clearLocalListsKeepDeviceId();
+  setLoginStatus("Canales de este ID vaciados. El código se mantiene: envía la lista nueva desde el móvil.");
+  showToast("Canales vaciados. ID sin cambios.");
+  showScreen("login");
+  startRemotePolling({ delayMs: 800, intervalMs: 2500 });
+  return true;
+}
+
+let vaciarWatchTimer = null;
+function startVaciarWatch() {
+  if (vaciarWatchTimer) return;
+  vaciarWatchTimer = setInterval(() => {
+    checkRemoteVaciar();
+  }, 5000);
+  checkRemoteVaciar();
+}
+
+async function checkRemoteVaciar() {
+  if (clearListsInProgress) return;
+  const deviceId = typeof getDeviceId === "function" ? getDeviceId() : "";
+  if (!deviceId) return;
+  try {
+    const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId) + "&_=" + Date.now(), {
+      cache: "no-store",
+    });
+    const data = await res.json();
+    if (data && data.status === "vaciar") await handleRemoteVaciar(data);
+  } catch (e) {}
 }
 
 function setTvChannelsOpen(open) {
@@ -2133,6 +2221,10 @@ function startAddListPolling() {
       const res = await fetch("api_dispositivos.php?id=" + encodeURIComponent(deviceId));
       const data = await res.json();
       if (myGen !== listAddPollGen) return;
+      if (data && data.status === "vaciar") {
+        await handleRemoteVaciar(data);
+        return;
+      }
       if (!data || data.status === "esperando" || !(data.serverUrl || data.m3uUrl)) return;
       if (assignmentShouldIgnore(data)) return;
       stopAddListPolling();
@@ -2497,6 +2589,10 @@ function startRemotePolling(opts) {
       });
       const data = await res.json();
       if (myGen !== remotePollGen) return;
+      if (data && data.status === "vaciar") {
+        await handleRemoteVaciar(data);
+        return;
+      }
       if (liveSession && channelsData.length && !logoutRequested) return;
       const hasList = !!(data && (data.serverUrl || data.m3uUrl || (data.username && data.password)));
       if (!data || data.status === "esperando" || !hasList) return;
@@ -3099,6 +3195,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initTvLoginFocus();
   // Siempre escuchar el QR; el auto-login no debe dejar la TV sin poll.
   startRemotePolling();
+  startVaciarWatch();
 
   loadSession().then(async (saved) => {
     await migrateSavedListsFromSession();
@@ -3107,7 +3204,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!canAutoLogin) return;
 
     setTimeout(() => {
-      if (loginCancelled || liveSession || remoteLoginBusy) return;
+      if (loginCancelled || liveSession || remoteLoginBusy || lastHandledVaciarTs()) return;
       performLoginAction(saved.server, saved.username, saved.password, saved.m3uUrl).then((ok) => {
         if (ok || liveSession) stopRemotePolling();
       });
@@ -6988,7 +7085,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20260926k");
+  url.searchParams.set("v", "20261017a");
   window.location.replace(url.toString());
 }
 

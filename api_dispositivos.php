@@ -61,6 +61,25 @@ if (isset($_GET['action'])) {
 $dir = __DIR__ . '/cuentas/';
 $candidatos = rs_device_paths($dir, $id);
 
+if ($action === 'vaciar') {
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    $payload = json_encode(array(
+        'status' => 'vaciar',
+        'ts' => (int) round(microtime(true) * 1000),
+        'deviceId' => $id,
+    ));
+    @file_put_contents($dir . $id . '.json', $payload);
+    foreach (rs_device_paths($dir, $id) as $ruta) {
+        if ($ruta !== $dir . $id . '.json' && is_file($ruta)) {
+            @unlink($ruta);
+        }
+    }
+    echo $payload;
+    exit;
+}
+
 if ($action === 'clear' || $action === 'wipe' || $action === 'logout') {
     if (!is_dir($dir)) {
         @mkdir($dir, 0777, true);
