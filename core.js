@@ -4525,7 +4525,7 @@ function activateListedChannel(channel, groupItem) {
 
 function buildChannelRow(item) {
   const variants = item.variants && item.variants.length ? item.variants : [item];
-  const grouped = isChannelGrid() && variants.length > 1;
+  const grouped = shouldGroupChannelQualities() && variants.length > 1;
   const playable = grouped ? preferredGroupChannel(item.groupKey, variants) : item;
   const rowId = grouped ? item.groupKey : item.id;
 
@@ -4550,7 +4550,9 @@ function buildChannelRow(item) {
   info.className = "channel-info";
   const nameEl = document.createElement("div");
   nameEl.className = "channel-name";
-  nameEl.textContent = isChannelGrid() ? item.groupTitle || channelGroupTitle(item.name) : displayName(item.name);
+  nameEl.textContent = grouped
+    ? item.groupTitle || channelGroupTitle(item.name)
+    : displayName(item.name);
   nameEl.title = grouped ? variants.map((v) => v.name).join(" · ") : item.name;
   info.appendChild(nameEl);
 
@@ -4631,6 +4633,10 @@ function buildChannelRow(item) {
 
 function isChannelGrid() {
   return document.body.classList.contains("channels-as-grid");
+}
+
+function shouldGroupChannelQualities() {
+  return isChannelGrid() && !isTvLayout();
 }
 
 function preferredChannelView() {
@@ -4718,8 +4724,8 @@ function buildVirtualList(channels) {
   const src = Array.isArray(channels) ? channels : [];
   const sorted =
     currentCategory === FAV_NAME || currentCategory === HIST_NAME ? src.slice() : applySort(src);
-  const list = isChannelGrid() ? groupChannelsForGrid(sorted) : sorted;
-  if (isChannelGrid() && sortMode() === "az") {
+  const list = shouldGroupChannelQualities() ? groupChannelsForGrid(sorted) : sorted;
+  if (shouldGroupChannelQualities() && sortMode() === "az") {
     return list.slice().sort((a, b) =>
       String(a.groupTitle || displayName(a.name)).localeCompare(String(b.groupTitle || displayName(b.name)), "es", {
         sensitivity: "base",
@@ -4798,7 +4804,7 @@ function runChannelSearch(query) {
       normalizeSearch(displayCategoryName(ch.category)).indexOf(needle) >= 0 ||
       String(ch.chno) === searchQuery
   );
-  if (isChannelGrid()) hits = expandHitsToGroups(hits);
+  if (shouldGroupChannelQualities()) hits = expandHitsToGroups(hits);
   document.querySelectorAll(".category-btn").forEach((b) => b.classList.remove("active"));
   renderChannels(hits);
   if (channelColumnTitle) {
@@ -7085,7 +7091,7 @@ async function forceReloadApp() {
   } catch (e) {}
   const url = new URL(window.location.href);
   url.searchParams.set("r", String(Date.now()));
-  url.searchParams.set("v", "20261017a");
+  url.searchParams.set("v", "20261101a");
   window.location.replace(url.toString());
 }
 
